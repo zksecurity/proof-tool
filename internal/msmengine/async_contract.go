@@ -15,7 +15,7 @@ const asyncQueueShardMultiplier = 16
 // deadline while leaving ample headroom over measured single-shard work.
 //
 //nolint:unused // used by sharded_js.go under the js && wasm build tags, which golangci-lint does not analyze
-const asyncWorkerReplyTimeout = 2 * time.Minute
+const asyncWorkerReplyTimeout = 5 * time.Minute
 
 var errAsyncWaitCancelled = errors.New("asynchronous section MSM cancelled")
 
