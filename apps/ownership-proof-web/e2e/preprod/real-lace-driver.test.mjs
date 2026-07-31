@@ -38,6 +38,7 @@ describe("real Lace profile driver", () => {
     const userDataDir = path.join(repo, "lace-profile");
     const walletPath = path.join(repo, "wallets.local.json");
     mkdirSync(extensionDir, { recursive: true });
+    initializeLaceProfile(userDataDir);
     writeFileSync(path.join(extensionDir, "manifest.json"), JSON.stringify({ manifest_version: 3 }), "utf8");
     writeFileSync(walletPath, JSON.stringify(validWalletFile()), "utf8");
 
@@ -80,16 +81,18 @@ describe("real Lace profile driver", () => {
   it("keeps mnemonic material out of the public driver summary", async () => {
     const repo = tempDir();
     const extensionDir = path.join(repo, "lace-extension");
+    const userDataDir = path.join(repo, "lace-profile");
     const walletPath = path.join(repo, "wallets.local.json");
     const walletFile = validWalletFile();
     mkdirSync(extensionDir, { recursive: true });
+    initializeLaceProfile(userDataDir);
     writeFileSync(path.join(extensionDir, "manifest.json"), JSON.stringify({ manifest_version: 3 }), "utf8");
     writeFileSync(walletPath, JSON.stringify(walletFile), "utf8");
 
     const driver = await createRealLaceProfileDriverFromEnv({
       env: {
         [LACE_EXTENSION_DIR_ENV]: extensionDir,
-        PW_USER_DATA_DIR: path.join(repo, "lace-profile"),
+        PW_USER_DATA_DIR: userDataDir,
         PREPROD_TEST_WALLETS_FILE: walletPath,
       },
       cwd: repo,
@@ -101,6 +104,30 @@ describe("real Lace profile driver", () => {
     expect(summaryText).not.toContain(walletFile.reclaim_funder.mnemonic);
     expect(summaryText).toContain("reclaim_funder");
     expect(await driver.recoveryPhraseForBrowserUi("reclaim_funder")).toBe(walletFile.reclaim_funder.mnemonic);
+  });
+
+  it("refuses to let Chromium create a replacement profile from an empty directory", async () => {
+    const repo = tempDir();
+    const extensionDir = path.join(repo, "lace-extension");
+    const userDataDir = path.join(repo, "empty-profile");
+    const walletPath = path.join(repo, "wallets.local.json");
+    mkdirSync(extensionDir, { recursive: true });
+    mkdirSync(userDataDir, { recursive: true });
+    writeFileSync(path.join(extensionDir, "manifest.json"), JSON.stringify({ manifest_version: 3 }), "utf8");
+    writeFileSync(walletPath, JSON.stringify(validWalletFile()), "utf8");
+
+    await expect(
+      createRealLaceProfileDriverFromEnv({
+        env: {
+          [LACE_EXTENSION_DIR_ENV]: extensionDir,
+          PW_USER_DATA_DIR: userDataDir,
+          PREPROD_TEST_WALLETS_FILE: walletPath,
+        },
+        cwd: repo,
+        repoRoot: repo,
+        deriveRoleState,
+      }),
+    ).rejects.toMatchObject({ code: "pw_user_data_dir_uninitialized" });
   });
 
   it("refuses any signing request for the compromised role", async () => {
@@ -240,6 +267,62 @@ describe("real Lace profile driver", () => {
     expect(driver.roleState("safe_claim_destination").signAttempts).toBe(1);
   });
 
+  it("accepts Lace closing the signing page after successful authentication", async () => {
+    const safe = deriveRoleState({
+      role: "safe_claim_destination",
+      mnemonic: words("delta", 12),
+      label: "safe_claim_dest",
+    });
+    const driver = new RealLaceProfileDriver({
+      browserChannel: "chromium",
+      extensionDir: "/tmp/lace",
+      extensionRoute: "expo/index.html",
+      manifestPath: "/tmp/lace/manifest.json",
+      providerId: "lace",
+      providerName: "Lace",
+      roleLabels: { safe_claim_destination: "safe_claim_dest" },
+      roleStates: new Map([["safe_claim_destination", safe]]),
+      userDataDir: "/tmp/profile",
+      walletPassword: "test-password",
+    });
+    const { context, clicks } = fakeLaceSignContext({ closeOnAuthentication: true });
+    driver.context = context;
+    driver.extensionId = "laceextensionid";
+
+    await driver.approveWalletSigning("safe_claim_destination", "claim");
+
+    expect(clicks).toEqual(["sign", "password:test-password", "authenticate:auto-waited", "page:closed"]);
+    expect(driver.roleState("safe_claim_destination").signAttempts).toBe(1);
+  });
+
+  it("fails closed when the signing authentication prompt remains open", async () => {
+    const safe = deriveRoleState({
+      role: "safe_claim_destination",
+      mnemonic: words("delta", 12),
+      label: "safe_claim_dest",
+    });
+    const driver = new RealLaceProfileDriver({
+      browserChannel: "chromium",
+      extensionDir: "/tmp/lace",
+      extensionRoute: "expo/index.html",
+      manifestPath: "/tmp/lace/manifest.json",
+      providerId: "lace",
+      providerName: "Lace",
+      roleLabels: { safe_claim_destination: "safe_claim_dest" },
+      roleStates: new Map([["safe_claim_destination", safe]]),
+      userDataDir: "/tmp/profile",
+      walletPassword: "wrong-password",
+    });
+    const { context } = fakeLaceSignContext({ rejectAuthentication: true });
+    driver.context = context;
+    driver.extensionId = "laceextensionid";
+
+    await expect(driver.approveWalletSigning("safe_claim_destination", "claim")).rejects.toMatchObject({
+      code: "lace_signing_authentication_failed",
+    });
+    expect(driver.roleState("safe_claim_destination").signAttempts ?? 0).toBe(0);
+  });
+
   it("selects the Lace 2.1.1 DApp account by label before authorizing", async () => {
     const compromised = deriveRoleState({
       role: "compromised_user",
@@ -295,6 +378,34 @@ describe("real Lace profile driver", () => {
 
     expect(clicks).toEqual(["dropdown", "account:Source Account", "authorize"]);
   }, 10_000);
+
+  it("fails closed when two real Lace account rows do not match the configured role", async () => {
+    const compromised = deriveRoleState({
+      role: "compromised_user",
+      mnemonic: words("cable", 12),
+      label: "missing_role",
+    });
+    const driver = new RealLaceProfileDriver({
+      browserChannel: "chromium",
+      extensionDir: "/tmp/lace",
+      extensionRoute: "expo/index.html",
+      manifestPath: "/tmp/lace/manifest.json",
+      providerId: "lace",
+      providerName: "Lace",
+      roleLabels: { compromised_user: "missing_role" },
+      roleStates: new Map([["compromised_user", compromised]]),
+      userDataDir: "/tmp/profile",
+      walletPassword: "test-password",
+    });
+    const { context, clicks } = fakeLaceDappConnectContext("missing_role", ["Source Account", "Safe Account"]);
+    driver.context = context;
+    driver.extensionId = "laceextensionid";
+
+    await expect(driver.approveDappConnection("compromised_user")).rejects.toMatchObject({
+      code: "lace_connection_account_missing",
+    });
+    expect(clicks).toEqual(["dropdown"]);
+  });
 
   it("disconnects the exact local origin through Lace Authorized DApps", async () => {
     const safe = deriveRoleState({
@@ -399,6 +510,11 @@ function fakeExtensionContext() {
 function fakeLaceDappConnectContext(accountLabel, availableAccountLabels = [accountLabel]) {
   const clicks = [];
   let dropdownOpen = false;
+  const accountNodes = availableAccountLabels.flatMap((label, index) => [
+    { kind: "account", label, testId: `dropdown-menu-item-${index}` },
+    { kind: "account-child", label: label.slice(0, 2).toUpperCase(), testId: `dropdown-menu-item-${index}-avatar` },
+    { kind: "account-child", label, testId: `dropdown-menu-item-${index}-text` },
+  ]);
   const page = {
     url() {
       return "chrome-extension://laceextensionid/expo/index.html#/cardano-dapp-connect";
@@ -407,22 +523,27 @@ function fakeLaceDappConnectContext(accountLabel, availableAccountLabels = [acco
       return false;
     },
     locator(selector) {
-      const makeLocator = (kind, hasText = null) => ({
+      const makeLocator = (kind, accountNode = null) => ({
         first() {
-          return makeLocator(kind, hasText);
-        },
-        filter(options) {
-          return makeLocator("account", options.hasText);
+          return makeLocator(kind, accountNode);
         },
         async count() {
-          return kind === "account-list" ? availableAccountLabels.length : 1;
+          return kind === "account-list" ? accountNodes.length : 1;
         },
         nth(index) {
-          return makeLocator("account", availableAccountLabels[index]);
+          return makeLocator(accountNodes[index]?.kind ?? "missing", accountNodes[index]);
+        },
+        async getAttribute(name) {
+          if (name === "data-testid") return accountNode?.testId ?? null;
+          if (name === "aria-label" && kind === "account") return accountNode?.label ?? null;
+          return null;
+        },
+        async innerText() {
+          return accountNode?.label ?? "";
         },
         async isVisible() {
           if (kind === "dropdown" || kind === "authorize") return true;
-          if (kind === "account") return dropdownOpen && availableAccountLabels.includes(hasText);
+          if (kind === "account" || kind === "account-child") return dropdownOpen;
           return false;
         },
         async click() {
@@ -430,7 +551,7 @@ function fakeLaceDappConnectContext(accountLabel, availableAccountLabels = [acco
             dropdownOpen = true;
             clicks.push("dropdown");
           } else if (kind === "account") {
-            clicks.push(`account:${hasText}`);
+            clicks.push(`account:${accountNode.label}`);
           } else if (kind === "authorize") {
             clicks.push("authorize");
           }
@@ -452,10 +573,11 @@ function fakeLaceDappConnectContext(accountLabel, availableAccountLabels = [acco
   };
 }
 
-function fakeLaceSignContext() {
+function fakeLaceSignContext(options = {}) {
   const clicks = [];
   let signClicked = false;
   let authVisible = false;
+  let pageClosed = false;
 
   function makeLocator(kind) {
     const locator = {
@@ -479,11 +601,20 @@ function fakeLaceSignContext() {
           clicks.push("sign");
         }
         if (kind === "auth-confirm") {
-          authVisible = false;
+          if (pageOptions.rejectAuthentication !== true) {
+            authVisible = false;
+          }
           clicks.push(options?.force === true ? "authenticate:forced" : "authenticate:auto-waited");
+          if (pageOptions.closeOnAuthentication === true) {
+            pageClosed = true;
+            clicks.push("page:closed");
+          }
         }
       },
       async waitFor(options) {
+        if (pageClosed) {
+          throw new Error("signing page closed");
+        }
         if (kind === "auth-body" && options.state === "hidden" && !authVisible) {
           return;
         }
@@ -493,12 +624,13 @@ function fakeLaceSignContext() {
     return locator;
   }
 
+  const pageOptions = options;
   const page = {
     url() {
       return "chrome-extension://laceextensionid/expo/index.html#/cardano-sign-tx";
     },
     isClosed() {
-      return false;
+      return pageClosed;
     },
     locator(selector) {
       if (selector === 'body:has([data-testid="sign-tx-origin"]) [data-testid="dapp-connector-primary-button"]') {
@@ -644,4 +776,11 @@ function tempDir() {
   const dir = mkdtempSync(path.join(tmpdir(), "proof-tool-real-lace-driver-"));
   tempDirs.push(dir);
   return dir;
+}
+
+function initializeLaceProfile(userDataDir) {
+  const defaultDir = path.join(userDataDir, "Default");
+  mkdirSync(path.join(defaultDir, "Local Extension Settings"), { recursive: true });
+  writeFileSync(path.join(userDataDir, "Local State"), "{}", "utf8");
+  writeFileSync(path.join(defaultDir, "Preferences"), "{}", "utf8");
 }
