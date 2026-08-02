@@ -275,11 +275,11 @@ type ClaimFlowResumeSnapshot = {
   selectedImpactedWallet: string;
   selectedSafeWallet: string;
   impactedWallet: ImpactedWalletSummary | null;
-  safeWallet: SafeWalletSummary;
+  safeWallet: SafeWalletSummary | null;
   claimRows: ClaimRow[];
   claimIndexerTotal: number;
   pendingOutrefs: string[];
-  draft: ClaimDraftResponse;
+  draft: ClaimDraftResponse | null;
   proofArtifacts?: Record<string, unknown>[];
   build?: ClaimBuildResponse | null;
 };
@@ -1130,7 +1130,9 @@ export function ClaimFlow({ createWorker = defaultCreateWorker }: ClaimFlowProps
       return;
     }
     const resumeScreen = resumableClaimScreen(screen);
-    if (!resumeScreen || !draft || !safeWallet) {
+    const canResumeSafeWalletHandoff = resumeScreen === "safe-wallet" && impactedWallet && claimRows.length > 0;
+    const canResumeAfterDestination = resumeScreen !== "safe-wallet" && draft && safeWallet;
+    if (!resumeScreen || (!canResumeSafeWalletHandoff && !canResumeAfterDestination)) {
       return;
     }
     writeClaimFlowResumeSnapshot({
@@ -1221,7 +1223,7 @@ export function ClaimFlow({ createWorker = defaultCreateWorker }: ClaimFlowProps
           setHelperError("Proof Helper destination key is not ready.");
           return false;
         }
-        if (deployment?.available && profile.key_hash !== deployment.deployment.verifierVkHash) {
+        if (deployment?.available && profile.key_hash !== deployment.deployment.proofVkHash) {
           setHelperState("unavailable");
           setHelperError("Proof Helper destination key hash does not match this claim deployment.");
           return false;
@@ -1280,7 +1282,7 @@ export function ClaimFlow({ createWorker = defaultCreateWorker }: ClaimFlowProps
     setBrowserProvingStatus("checking");
     setBrowserProvingDetail("");
     try {
-      const check = await checkBrowserProving(browserProvingDescriptor, deployment.deployment.verifierVkHash);
+      const check = await checkBrowserProving(browserProvingDescriptor, deployment.deployment.proofVkHash);
       setBrowserProvingStatus(check.status);
       setBrowserProvingDetail(
         check.status === "ready"
@@ -1679,12 +1681,13 @@ export function ClaimFlow({ createWorker = defaultCreateWorker }: ClaimFlowProps
       safeWalletApiRef.current = api;
       setSafeWalletSigningAvailable(true);
       setSafeWalletSigningSessionState("ready");
-      setSafeWallet(walletSummary);
       // Stay on the safe-wallet screen after a successful connect (C17) so the
       // user sees the populated destination panel and confirms it explicitly.
-      // The draft is still created here; only the auto-advance is removed.
+      // Publish the connected destination only after the draft attempt settles
+      // so an early confirmation cannot race the in-flight draft and then be
+      // overwritten by this connection handler's completion.
       await createOrRefreshClaimDraft(walletSummary);
-      setScreen((current) => (current === "insufficient-ada" ? current : "safe-wallet"));
+      setSafeWallet(walletSummary);
     } catch (error) {
       setSafeWallet(null);
       safeWalletApiRef.current = null;
@@ -1780,7 +1783,7 @@ export function ClaimFlow({ createWorker = defaultCreateWorker }: ClaimFlowProps
     const runId = ++proofRunIdRef.current;
     try {
       if (proofMethod === "browser") {
-        await generateClaimProofsInBrowser(deployment.deployment.verifierVkHash, runId);
+        await generateClaimProofsInBrowser(deployment.deployment.proofVkHash, runId);
         return;
       }
 
@@ -1826,7 +1829,7 @@ export function ClaimFlow({ createWorker = defaultCreateWorker }: ClaimFlowProps
           signal: abortController.signal,
           onProgress: setProofProgress,
         });
-        const artifacts = validateDestinationProofResponse(helperResponse, draft, deployment.deployment.verifierVkHash);
+        const artifacts = validateDestinationProofResponse(helperResponse, draft, deployment.deployment.proofVkHash);
         applyProofRunSuccess(runId, artifacts);
       } catch (error) {
         if (error instanceof DesktopHelperCancelledError) {
@@ -6896,11 +6899,11 @@ function readClaimFlowResumeSnapshot(): ClaimFlowResumeSnapshot | null {
       !resumableClaimScreen(parsed.screen) ||
       typeof parsed.selectedImpactedWallet !== "string" ||
       typeof parsed.selectedSafeWallet !== "string" ||
-      !parsed.safeWallet ||
-      !parsed.draft ||
+      !parsed.impactedWallet ||
       !Array.isArray(parsed.claimRows) ||
       !Array.isArray(parsed.pendingOutrefs) ||
-      typeof parsed.claimIndexerTotal !== "number"
+      typeof parsed.claimIndexerTotal !== "number" ||
+      (parsed.screen !== "safe-wallet" && (!parsed.safeWallet || !parsed.draft))
     ) {
       return null;
     }
@@ -6912,6 +6915,8 @@ function readClaimFlowResumeSnapshot(): ClaimFlowResumeSnapshot | null {
 
 function resumableClaimScreen(screen: ClaimScreen): ClaimScreen | null {
   switch (screen) {
+    case "safe-wallet":
+      return screen;
     case "helper-unavailable":
     case "create-proofs-generating":
     case "create-proofs-complete":

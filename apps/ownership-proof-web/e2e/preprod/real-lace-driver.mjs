@@ -9,6 +9,7 @@ import {
   redactAddress,
   validatePreprodWalletFile,
 } from "./preflight.mjs";
+import { hasInitializedLaceProfileState } from "./persistent-lace-profile.mjs";
 
 export const LACE_EXTENSION_DIR_ENV = "RECLAIM_E2E_LACE_EXTENSION_DIR";
 export const LACE_WALLET_PASSWORD_ENV = "RECLAIM_E2E_LACE_WALLET_PASSWORD";
@@ -56,7 +57,7 @@ export async function createRealLaceProfileDriverFromEnv(options = {}) {
     );
   }
   const manifest = readLaceManifest(manifestPath, readTextFile);
-  const userDataDir = requiredString(env.PW_USER_DATA_DIR, "PW_USER_DATA_DIR");
+  const userDataDir = requiredInitializedLaceProfileDirectory(env.PW_USER_DATA_DIR, fileExists);
   const walletFile = loadWalletFile(env.PREPROD_TEST_WALLETS_FILE, { cwd, repoRoot, fileExists, readTextFile });
   const validation = validatePreprodWalletFile(walletFile);
   if (!validation.ok) {
@@ -618,6 +619,18 @@ function requiredExistingDirectory(value, field, fileExists) {
   return resolved;
 }
 
+function requiredInitializedLaceProfileDirectory(value, fileExists) {
+  const field = "PW_USER_DATA_DIR";
+  const resolved = requiredExistingDirectory(value, field, fileExists);
+  if (!hasInitializedLaceProfileState(resolved, fileExists)) {
+    throw new PreprodRealLaceDriverError(
+      "pw_user_data_dir_uninitialized",
+      "PW_USER_DATA_DIR is not the initialized persistent Lace test profile. Refusing to launch Chromium because that could create a replacement profile; restore the existing profile and profile.env instead.",
+    );
+  }
+  return resolved;
+}
+
 async function resolveExtensionId(context, manifestPath) {
   const serviceWorker =
     context.serviceWorkers()[0] ??
@@ -738,25 +751,21 @@ async function approveLaceDappConnection(context, extensionId, accountLabel, fal
         continue;
       }
       await accountDropdown.click();
-      const accountOptions = page.locator('[data-testid^="dropdown-menu-item-"]');
-      const configuredAccount = accountOptions.filter({ hasText: accountLabel }).first();
-      let account = configuredAccount;
-      if (!(await waitUntilVisible(configuredAccount, 5_000))) {
-        const visibleAccounts = [];
-        for (let index = 0; index < (await accountOptions.count()); index += 1) {
-          const candidate = accountOptions.nth(index);
-          if (await safeVisible(candidate)) {
-            visibleAccounts.push(candidate);
-          }
+      const visibleAccounts = await waitForVisibleLaceDappAccounts(page, 5_000);
+      const configuredAccounts = [];
+      for (const candidate of visibleAccounts) {
+        const label = (await candidate.getAttribute("aria-label"))?.trim();
+        if (label === accountLabel) {
+          configuredAccounts.push(candidate);
         }
-        if (visibleAccounts.length !== 1) {
-          throw new PreprodRealLaceDriverError(
-            "lace_connection_account_missing",
-            `Lace connection prompt does not expose the configured account ${accountLabel} or one unambiguous source account.`,
-          );
-        }
-        account = visibleAccounts[0];
       }
+      if (configuredAccounts.length > 1 || (configuredAccounts.length === 0 && visibleAccounts.length !== 1)) {
+        throw new PreprodRealLaceDriverError(
+          "lace_connection_account_missing",
+          `Lace connection prompt does not expose the configured account ${accountLabel} or one unambiguous source account.`,
+        );
+      }
+      const account = configuredAccounts[0] ?? visibleAccounts[0];
       await account.click();
       if (onBeforeApprove) {
         await onBeforeApprove(page, authorize);
@@ -770,6 +779,26 @@ async function approveLaceDappConnection(context, extensionId, accountLabel, fal
     "lace_connection_prompt_missing",
     "Timed out waiting for the Lace DApp authorization prompt.",
   );
+}
+
+async function waitForVisibleLaceDappAccounts(page, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const candidates = page.locator('[data-testid^="dropdown-menu-item-"]');
+    const accounts = [];
+    for (let index = 0; index < (await candidates.count()); index += 1) {
+      const candidate = candidates.nth(index);
+      const testId = await candidate.getAttribute("data-testid");
+      if (/^dropdown-menu-item-\d+$/u.test(testId ?? "") && (await safeVisible(candidate))) {
+        accounts.push(candidate);
+      }
+    }
+    if (accounts.length > 0) {
+      return accounts;
+    }
+    await sleep(EXTENSION_POLL_MS);
+  }
+  return [];
 }
 
 async function disconnectLaceDappOrigin(
@@ -848,7 +877,7 @@ function normalizeDappOrigin(value) {
   }
 }
 
-async function submitVisibleLaceAuthentication(page, password) {
+async function submitVisibleLaceAuthentication(page, password, options = {}) {
   if (!page || page.isClosed()) {
     return false;
   }
@@ -886,11 +915,11 @@ async function submitVisibleLaceAuthentication(page, password) {
     .first()
     .waitFor({ state: "hidden", timeout: EXTENSION_TIMEOUT_MS })
     .then(() => true)
-    .catch(() => false);
+    .catch(() => options.allowPageClose === true && page.isClosed());
   if (!dismissed) {
     throw new PreprodRealLaceDriverError(
       "lace_signing_authentication_failed",
-      "Lace rejected the configured wallet password while signing.",
+      "Lace did not dismiss the signing authentication prompt after confirmation.",
     );
   }
   return true;
@@ -903,7 +932,7 @@ async function settleLaceSigningAuthentication(page, password) {
     if (!page || page.isClosed()) {
       return;
     }
-    if (await submitVisibleLaceAuthentication(page, password)) {
+    if (await submitVisibleLaceAuthentication(page, password, { allowPageClose: true })) {
       return;
     }
     const signingButton = page.locator(LACE_CARDANO_SIGN_SELECTOR).first();
