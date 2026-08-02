@@ -1403,6 +1403,28 @@ describe("ClaimFlow", () => {
     expect(screen.getByRole("heading", { name: "Verify this recovery service" })).toBeInTheDocument();
   });
 
+  it("resumes the safe-wallet handoff after refreshing the CIP-30 page bridge", async () => {
+    installWallets({
+      impacted: walletApi({ getChangeAddress: walletAddressHex, getUsedAddresses: [usedWalletAddressHex] }),
+      safe: walletApi({ getChangeAddress: safeWalletAddressHex, getUsedAddresses: [safeWalletAddressHex] }),
+    });
+    vi.stubGlobal("fetch", claimFlowFetch());
+
+    render(<ClaimFlow createWorker={createWorkerSuccess()} />);
+    await connectImpactedAndContinueToSafeWallet();
+    await waitFor(() => expect(window.localStorage.getItem("proof-tool.claim-flow.resume.v1")).not.toBeNull());
+    const snapshot = JSON.parse(window.localStorage.getItem("proof-tool.claim-flow.resume.v1") ?? "null");
+    expect(snapshot).toMatchObject({ screen: "safe-wallet", safeWallet: null, draft: null });
+    expect(snapshot.claimRows).toHaveLength(1);
+
+    cleanup();
+    render(<ClaimFlow createWorker={createWorkerSuccess()} />);
+    expect(await screen.findByText("Resume your claim in progress?")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+
+    expect(await screen.findByRole("heading", { name: "Connect safe wallet" })).toBeInTheDocument();
+  });
+
   it("paginates claims beyond page 2 with numbered page buttons", async () => {
     const enable = vi.fn().mockResolvedValue({
       getNetworkId: vi.fn().mockResolvedValue(0),
@@ -1495,6 +1517,36 @@ describe("ClaimFlow", () => {
     fireEvent.click(confirm);
 
     expect(await screen.findByRole("heading", { name: "Create proofs" })).toBeInTheDocument();
+  });
+
+  it("does not expose safe-wallet confirmation while its claim draft is still pending", async () => {
+    installWallets({
+      impacted: walletApi({ getChangeAddress: walletAddressHex, getUsedAddresses: [usedWalletAddressHex] }),
+      safe: walletApi({ getChangeAddress: safeWalletAddressHex, getUsedAddresses: [safeWalletAddressHex] }),
+    });
+    const draft = claimDraft([`${"a".repeat(64)}#0`]);
+    const base = claimFlowFetch({ draft });
+    let resolveDraft: (response: Response) => void = () => {};
+    const pendingDraft = new Promise<Response>((resolve) => {
+      resolveDraft = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: RequestInfo | URL, init?: RequestInit) =>
+        String(url) === "/claim-api/draft" ? pendingDraft : base(url, init),
+      ),
+    );
+
+    render(<ClaimFlow createWorker={createWorkerSuccess()} />);
+
+    await connectImpactedAndContinueToSafeWallet();
+    fireEvent.click(await findSafeWalletOption());
+    fireEvent.click(screen.getByRole("button", { name: "Connect safe wallet" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Connect safe wallet" })).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Confirm destination and continue" })).not.toBeInTheDocument();
+
+    await act(async () => resolveDraft(jsonResponse(draft)));
+    expect(await screen.findByRole("button", { name: "Confirm destination and continue" })).toBeInTheDocument();
   });
 
   it("clears the connected safe wallet when choosing a different wallet", async () => {
@@ -2283,9 +2335,10 @@ function claimDeployment() {
       reclaimGlobalScriptHash: "c".repeat(56),
       paramsCurrencySymbol: "d".repeat(56),
       paramsTokenName: "",
-      verifierVkHash: "e".repeat(64),
+      verifierVkHash: "f".repeat(64),
+      proofVkHash: "e".repeat(64),
       reclaimGlobalProofSlotEncoding: "full-proof-plus-public-input-digest-v2",
-      reclaimGlobalBatchTranscriptVkHash: "e".repeat(64),
+      reclaimGlobalBatchTranscriptVkHash: "f".repeat(64),
       contractVersion: "v1",
       sourceCommit: "f".repeat(40),
       paramsUtxo: {

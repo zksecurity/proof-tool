@@ -100,11 +100,11 @@ The accepted Gate G1 signed-r8 run used `streampk-sharded-groth16` with all
 W1-W7 flags, 16 applied Workers, 16 shards, and range-fetch concurrency two.
 It completed proof construction in 70.400 seconds, peaked at 1.4593 GiB main
 WASM heap, verified locally and through the compiled contract, and passed the
-complete tamper and five-case fault suites. The production-host confirmation
-completed in 115.770 seconds / 1.4627 GiB under substantially heavier
-concurrent load; it confirms coherence rather than replacing the accepted G1
-performance result. The old 111.461-second / 2.316-GiB O4/O2 run remains the
-ideal-host pre-optimization reference only.
+complete tamper and then-current five-case fault suites. The production-host
+confirmation completed in 115.770 seconds / 1.4627 GiB under substantially
+heavier concurrent load; it confirms coherence rather than replacing the
+accepted G1 performance result. The old 111.461-second / 2.316-GiB O4/O2 run
+remains the ideal-host pre-optimization reference only.
 
 Credential-discovery release evidence uses immutable release
 `proof-assets-ownership-destination-v2-preprod-9fac96b-g3a-2m-key-discovery-r1`.
@@ -113,6 +113,41 @@ and a cold Chromium proof for account 3, role 2, index 0 completed in 90.534
 seconds with 0.833 GiB peak main-WASM heap and `verified_locally=true`. Heavy
 unrelated host work contaminated the timing sample, so it qualifies the full
 discovery-to-proof path and artifact coherence, not a new performance record.
+
+The bounded worker/chunk recovery change passed its final 2026-07-31
+no-regression gate against a same-revision baseline. The counterbalanced gate
+ran three clean, locally verified proofs per runtime for each cache mode with
+16 workers and shards, range-fetch concurrency two, W1/W2/W3/W5/W6/W7,
+`GOGC=15`, and `GOMEMLIMIT=3200MiB`. Cold-cache median proving time was
+`51.470 s` for the recovery candidate versus `51.881 s` baseline (`-0.792%`);
+warm-cache median was `48.370 s` versus `48.609 s` (`-0.492%`). Median peak
+heap was `0.110%` lower in the cold gate and `0.111%` lower in the warm gate.
+Both passed the hard ceilings of `0.5%` proving-time regression and `1.0%`
+peak-heap regression, with no accepted sample carrying a transient
+contamination observation. This qualifies the healthy path as
+performance-preserving; the small apparent improvements are benchmark noise,
+not an optimization claim.
+
+The HTTP-Range compatibility fix was held to the same ceiling before release.
+An initial Go/WASM fallback was rejected because an otherwise-dormant code
+change increased the guarded cold median from `39.101 s` to `41.363 s`
+(`+5.785%`). The accepted design instead leaves both proving WASM binaries
+byte-identical and intercepts only proving-key range requests in the outer
+`prover-worker.js`. A healthy HTTP 206 response is returned untouched with one
+native request; only an observed HTTP 200 cancels the full-object body and
+switches that operation to the signed, digest-verified 2 MiB chunks.
+
+The corrected production-worker A/B gate ran the pre-change and final workers
+through their real message protocol, three clean locally verified proofs per
+worker in each cache mode. Cold medians were `43.443 s` baseline and `41.969 s`
+candidate (`-3.393%`); warm medians were `42.144 s` and `40.216 s`
+(`-4.575%`). Median peak heap changed by `+0.177%` cold and `+0.118%` warm.
+All samples passed the unchanged contamination guards and the `0.5%` time /
+`1.0%` heap ceilings. The favorable time deltas are treated as benchmark noise,
+not as an optimization claim. Unit and browser fault gates additionally cover
+the no-extra-request 206 path, sticky 200-to-chunk recovery, signature and
+SHA-256 rejection, bounded retry recovery, abort, and chunk corruption without
+CPU fallback.
 
 These are browser-prover source defaults and proof-runtime measurements. They
 do not change claim batching by themselves. Until the statement-bound V2
