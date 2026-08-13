@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -142,8 +143,9 @@ type ContributionEnvironment struct {
 }
 
 func (e ContributionEnvironment) Validate() error {
-	if e.OS == "" || e.Architecture == "" {
-		return errors.New("contribution environment OS and architecture are required")
+	if strings.TrimSpace(e.OS) == "" || e.OS != strings.TrimSpace(e.OS) ||
+		strings.TrimSpace(e.Architecture) == "" || e.Architecture != strings.TrimSpace(e.Architecture) {
+		return errors.New("contribution environment OS and architecture must be non-empty and trimmed")
 	}
 	if e.EntropySource != "operating-system-csprng" {
 		return fmt.Errorf("entropy_source %q, want operating-system-csprng", e.EntropySource)

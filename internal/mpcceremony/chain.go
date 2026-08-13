@@ -9,6 +9,7 @@ import (
 	"hash"
 	"math"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -1035,7 +1036,7 @@ func (r AuditRecord) validate(requireID bool) error {
 		return errors.New("failed audit must contain at least one finding")
 	}
 	for _, finding := range r.Findings {
-		if finding == "" {
+		if strings.TrimSpace(finding) == "" {
 			return errors.New("audit findings must not be empty")
 		}
 	}
