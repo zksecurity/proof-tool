@@ -672,6 +672,23 @@ func transcriptPaths(root, chain, signature string) mpcceremony.PhaseTranscriptP
 		RootDir:            root,
 		ChainPath:          chain,
 		ChainSignaturePath: signature,
+		Progress:           replayProgressReporter(),
+	}
+}
+
+// replayProgressReporter renders replay progress to stderr. A K=21 replay runs
+// for hours; without this an operator cannot tell running from hung, and cannot
+// measure how long a close takes in order to choose a beacon round far enough
+// ahead. Output goes to stderr because stdout carries the result contract, and
+// it reports only a phase, an index and a count — never a path or key material.
+func replayProgressReporter() mpcceremony.ReplayProgress {
+	start := time.Now()
+	return func(phase mpcceremony.Phase, index, total int) {
+		fmt.Fprintf(
+			os.Stderr,
+			"replaying %s contribution %d/%d (%s elapsed)\n",
+			phase, index, total, time.Since(start).Round(time.Second),
+		)
 	}
 }
 

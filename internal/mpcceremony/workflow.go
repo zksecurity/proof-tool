@@ -372,10 +372,32 @@ func InitializeCeremonyFiles(options InitFilesOptions) (result InitFilesResult, 
 	return result, nil
 }
 
+// ReplayProgress reports how far a chain replay has advanced. It is called once
+// per accepted contribution, immediately before that contribution is read, with
+// a one-based index and the total the replay will process.
+//
+// This package deliberately has no logger: it handles signing keys and secret
+// contribution state, so having no output path at all is stronger than having a
+// careful one. A callback keeps that property. The values carry no secret
+// material — a phase, an index and a count — and rendering is entirely the
+// caller's business. The CLI writes them to stderr, never stdout, which is
+// reserved for the result contract.
+//
+// A K=21 close replays for hours. Without progress an operator cannot tell
+// running from hung, and cannot measure how long a close takes on their
+// hardware. That measurement is what makes it possible to choose a beacon round
+// far enough ahead; misjudging it is what caused the 2026-07-24 closure-timing
+// incident.
+type ReplayProgress func(phase Phase, index, total int)
+
 type PhaseTranscriptPaths struct {
 	RootDir            string
 	ChainPath          string
 	ChainSignaturePath string
+
+	// Progress is optional. When nil the replay is silent, which is the
+	// behaviour every existing caller gets.
+	Progress ReplayProgress
 }
 
 // LoadSignedChain verifies the exact coordinator-signed chain at paths.
@@ -465,7 +487,7 @@ func loadReplayPhase1FilesState(
 	if err != nil {
 		return Chain{}, nil, err
 	}
-	loader := phase1FileLoader(paths.RootDir, chain, circuit.Binding.DomainSize)
+	loader := phase1FileLoader(paths.RootDir, chain, circuit.Binding.DomainSize, paths.Progress)
 	head, err := replayPhase1State(circuit.Binding.DomainSize, len(chain.Records), loader)
 	if err != nil {
 		return Chain{}, nil, err
@@ -553,7 +575,7 @@ func LoadReplayPhase2Files(
 	if err != nil {
 		return Chain{}, err
 	}
-	loader := phase2FileLoader(paths.RootDir, chain, contributionPhase2Shape(circuit.Binding.Phase2Shape))
+	loader := phase2FileLoader(paths.RootDir, chain, contributionPhase2Shape(circuit.Binding.Phase2Shape), paths.Progress)
 	if err := ReplayPhase2Loaded(circuit, commons, len(chain.Records), loader); err != nil {
 		return Chain{}, err
 	}
@@ -625,7 +647,7 @@ func CreateContributionCandidate(options ContributionFilesOptions) (result Contr
 			contribution, contributeErr := ContributePhase1Loaded(
 				options.Circuit.Binding.DomainSize,
 				len(chain.Records),
-				phase1FileLoader(options.Transcript.RootDir, chain, options.Circuit.Binding.DomainSize),
+				phase1FileLoader(options.Transcript.RootDir, chain, options.Circuit.Binding.DomainSize, options.Transcript.Progress),
 			)
 			if contributeErr != nil {
 				return nil, contributeErr
@@ -649,7 +671,7 @@ func CreateContributionCandidate(options ContributionFilesOptions) (result Contr
 				options.Circuit,
 				commons,
 				len(chain.Records),
-				phase2FileLoader(options.Transcript.RootDir, chain, contributionPhase2Shape(options.Circuit.Binding.Phase2Shape)),
+				phase2FileLoader(options.Transcript.RootDir, chain, contributionPhase2Shape(options.Circuit.Binding.Phase2Shape), options.Transcript.Progress),
 			)
 			if contributeErr != nil {
 				return nil, contributeErr
@@ -1011,6 +1033,7 @@ func VerifyAndAcceptContribution(options AcceptContributionFilesOptions) (result
 				options.Transcript.RootDir,
 				chain,
 				options.Circuit.Binding.DomainSize,
+				nil,
 			)(index - 2)
 		}
 		if err != nil {
@@ -1038,6 +1061,7 @@ func VerifyAndAcceptContribution(options AcceptContributionFilesOptions) (result
 				options.Transcript.RootDir,
 				chain,
 				contributionPhase2Shape(options.Circuit.Binding.Phase2Shape),
+				nil,
 			)(index - 2)
 		}
 		if err != nil {
@@ -2827,10 +2851,13 @@ func verifyChainFiles(trusted *TrustedCeremony, root string, chain Chain, basePh
 	return nil
 }
 
-func phase1FileLoader(root string, chain Chain, domainN uint64) Phase1Loader {
+func phase1FileLoader(root string, chain Chain, domainN uint64, progress ReplayProgress) Phase1Loader {
 	return func(index int) (*gnarkmpc.Phase1, error) {
 		if index < 0 || index >= len(chain.Records) {
 			return nil, fmt.Errorf("Phase 1 contribution index %d out of range", index)
+		}
+		if progress != nil {
+			progress(Phase1, index+1, len(chain.Records))
 		}
 		path, err := resolveArtifactPath(root, chain.Records[index].OutputPayload.Name)
 		if err != nil {
@@ -2841,10 +2868,13 @@ func phase1FileLoader(root string, chain Chain, domainN uint64) Phase1Loader {
 	}
 }
 
-func phase2FileLoader(root string, chain Chain, shape Phase2Shape) Phase2Loader {
+func phase2FileLoader(root string, chain Chain, shape Phase2Shape, progress ReplayProgress) Phase2Loader {
 	return func(index int) (*gnarkmpc.Phase2, error) {
 		if index < 0 || index >= len(chain.Records) {
 			return nil, fmt.Errorf("Phase 2 contribution index %d out of range", index)
+		}
+		if progress != nil {
+			progress(Phase2, index+1, len(chain.Records))
 		}
 		path, err := resolveArtifactPath(root, chain.Records[index].OutputPayload.Name)
 		if err != nil {

@@ -44,6 +44,7 @@ func TestCoordinatorDirectTransitionProtocolBoundaries(t *testing.T) {
 			fixture.ceremonyRoot,
 			chain,
 			fixture.circuit.Binding.DomainSize,
+			nil,
 		)(0)
 		if err != nil {
 			t.Fatalf("load authenticated Phase 1 head: %v", err)
@@ -95,6 +96,7 @@ func TestCoordinatorDirectTransitionProtocolBoundaries(t *testing.T) {
 			fixture.ceremonyRoot,
 			chain,
 			contributionPhase2Shape(fixture.circuit.Binding.Phase2Shape),
+			nil,
 		)(0)
 		if err != nil {
 			t.Fatalf("load authenticated Phase 2 head: %v", err)
