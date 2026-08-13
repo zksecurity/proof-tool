@@ -11,8 +11,10 @@ import (
 	"path"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
+	"filippo.io/edwards25519"
 	"golang.org/x/crypto/blake2b"
 )
 
@@ -141,6 +143,9 @@ func (i Identity) Validate() error {
 	}
 	pub, err := decodeFixedHex(i.Ed25519PublicKeyHex, 32)
 	if err != nil {
+		return fmt.Errorf("identity ed25519_public_key_hex: %w", err)
+	}
+	if err := validateEd25519PublicKey(pub); err != nil {
 		return fmt.Errorf("identity ed25519_public_key_hex: %w", err)
 	}
 	want := taggedSHA256(pub)
@@ -500,6 +505,34 @@ func scanJSONValue(decoder *json.Decoder) error {
 	return nil
 }
 
+// validateEd25519PublicKey rejects the byte strings that decode without error
+// but are unusable as a ceremony identity.
+//
+// Ed25519 verification computes [-k]A + [S]B and compares it to R. When A is a
+// small-order point that equation collapses: the signature R = identity, S = 0
+// then verifies against every message, so anyone can forge signatures for that
+// identity without holding a private key. Enrolling such a key in the roster
+// therefore voids every signature-based control for that participant, auditor,
+// witness, coordinator, or release signer.
+//
+// Non-canonical encodings are rejected separately. Identity uniqueness across
+// the definition is enforced on public_key_fingerprint, which is a hash of
+// these exact bytes, so two encodings of one point would otherwise present as
+// two distinct identities.
+func validateEd25519PublicKey(pub []byte) error {
+	point, err := new(edwards25519.Point).SetBytes(pub)
+	if err != nil {
+		return fmt.Errorf("not a valid Ed25519 curve point: %w", err)
+	}
+	if !bytes.Equal(point.Bytes(), pub) {
+		return errors.New("Ed25519 public key is not canonically encoded")
+	}
+	if new(edwards25519.Point).MultByCofactor(point).Equal(edwards25519.NewIdentityPoint()) == 1 {
+		return errors.New("Ed25519 public key has small order; signatures under it are forgeable")
+	}
+	return nil
+}
+
 func validateTaggedHex(value, prefix string, bytes int) error {
 	if !strings.HasPrefix(value, prefix) {
 		return fmt.Errorf("must start with %q", prefix)
@@ -546,6 +579,16 @@ func validateArtifactName(value string) error {
 	}
 	if strings.Contains(value, "\\") || strings.HasPrefix(value, "/") || path.Clean(value) != value || value == "." {
 		return fmt.Errorf("artifact name %q must be a clean relative logical path", value)
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("artifact name %q contains a control character", value)
+		}
+	}
+	for segment := range strings.SplitSeq(value, "/") {
+		if segment != strings.TrimSpace(segment) {
+			return fmt.Errorf("artifact name %q has untrimmed whitespace in a path segment", value)
+		}
 	}
 	return nil
 }
