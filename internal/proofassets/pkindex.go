@@ -165,6 +165,63 @@ func ValidatePKIndex(idx *PKIndex) error {
 	return nil
 }
 
+// ValidatePKIndexAllocations bounds the counter fields that drive memory
+// allocation when a proving key is opened: make([]bool, NbWires) and
+// make([]pedersen.ProvingKey, NbCommitmentKeys) in KeySource.loadSmallFields,
+// and len(wires)-NbInfinityA in the prove path. It is separate from
+// ValidatePKIndex because the manifest-derived index carries only section
+// geometry (the counters live outside the signed digest); call this only where
+// a full index with populated counters is consumed. Each counter is bounded
+// against FileSize and Sections — fields the manifest digest does cover — so an
+// out-of-range counter is unrepresentable without also changing a signed field.
+//
+// ValidatePKIndex must have passed first.
+func ValidatePKIndexAllocations(idx *PKIndex) error {
+	if idx == nil {
+		return fmt.Errorf("index is required")
+	}
+	g2b, ok := idx.Sections["G2B"]
+	if !ok {
+		return fmt.Errorf("index missing section \"G2B\"")
+	}
+	// Layout after G2B: nbWires|NbInfinityA|NbInfinityB (3×8 bytes), then the
+	// two infinity bitmaps of NbWires bytes each, then the 4-byte commitment
+	// count. Everything must fit inside FileSize.
+	const infHeaderLen = 3 * 8
+	infOff := g2b.Offset + g2b.Len
+	if idx.NbWires > math.MaxInt64/2 {
+		return fmt.Errorf("nb_wires %d is implausibly large", idx.NbWires)
+	}
+	bitmapEnd := infOff + infHeaderLen + 2*int64(idx.NbWires)
+	if bitmapEnd+4 > idx.FileSize {
+		return fmt.Errorf("nb_wires %d does not fit within file_size %d", idx.NbWires, idx.FileSize)
+	}
+	if idx.NbInfinityA > idx.NbWires || idx.NbInfinityB > idx.NbWires {
+		return fmt.Errorf("nb_infinity (%d, %d) exceeds nb_wires %d", idx.NbInfinityA, idx.NbInfinityB, idx.NbWires)
+	}
+	// Each commitment key contributes exactly two sections (Basis,
+	// BasisExpSigma) on top of the five base sections, so the count is bounded
+	// by the section map — itself bounded by the parsed input — and every
+	// referenced section must be present.
+	if 5+2*uint64(idx.NbCommitmentKeys) != uint64(len(idx.Sections)) {
+		return fmt.Errorf("nb_commitment_keys %d is inconsistent with %d sections", idx.NbCommitmentKeys, len(idx.Sections))
+	}
+	for i := 0; i < int(idx.NbCommitmentKeys); i++ {
+		basisName, sigmaName := "Basis", "BasisExpSigma"
+		if i > 0 {
+			basisName = fmt.Sprintf("Basis_%d", i)
+			sigmaName = fmt.Sprintf("BasisExpSigma_%d", i)
+		}
+		if _, ok := idx.Sections[basisName]; !ok {
+			return fmt.Errorf("index missing commitment section %q", basisName)
+		}
+		if _, ok := idx.Sections[sigmaName]; !ok {
+			return fmt.Errorf("index missing commitment section %q", sigmaName)
+		}
+	}
+	return nil
+}
+
 func WritePKIndex(path string, idx *PKIndex) error {
 	if err := ValidatePKIndex(idx); err != nil {
 		return err
@@ -190,6 +247,9 @@ func ReadPKIndex(path string) (*PKIndex, error) {
 		return nil, fmt.Errorf("parse index %s: %w", path, err)
 	}
 	if err := ValidatePKIndex(&idx); err != nil {
+		return nil, err
+	}
+	if err := ValidatePKIndexAllocations(&idx); err != nil {
 		return nil, err
 	}
 	return &idx, nil

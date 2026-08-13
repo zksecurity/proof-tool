@@ -183,15 +183,16 @@ func decodeDomainHeader(header []byte, precompute bool) (fft.Domain, error) {
 	if flag := header[DomainHeaderBytes-1]; flag > 1 {
 		return fft.Domain{}, fmt.Errorf("decode domain: precompute flag byte %d is not canonical", flag)
 	}
+	// Always decode without precompute first. fft.Domain.ReadFrom precomputes
+	// twiddle and coset tables (make([]fr.Element, Cardinality) ×2) the moment
+	// it reads Cardinality, before any validation — a hostile cardinality of
+	// 2^32 would allocate ~274 GB before being rejected. Decode the header,
+	// validate the cardinality is canonical (power of two with a real FFT
+	// generator, bounding it to the field's 2-adicity), and only then rebuild
+	// the precomputed tables if the caller asked for them.
 	var domain fft.Domain
 	reader := bytes.NewReader(header)
-	var err error
-	if precompute {
-		_, err = domain.ReadFrom(reader)
-	} else {
-		_, err = domain.ReadFromWithoutPrecompute(reader)
-	}
-	if err != nil {
+	if _, err := domain.ReadFromWithoutPrecompute(reader); err != nil {
 		return fft.Domain{}, fmt.Errorf("decode domain: %w", err)
 	}
 	if reader.Len() != 0 {
@@ -199,6 +200,13 @@ func decodeDomainHeader(header []byte, precompute bool) (fft.Domain, error) {
 	}
 	if err := validateCanonicalDomain(&domain); err != nil {
 		return fft.Domain{}, fmt.Errorf("decode domain: %w", err)
+	}
+	if precompute {
+		precomputed := fft.NewDomain(domain.Cardinality)
+		if precomputed.Cardinality != domain.Cardinality {
+			return fft.Domain{}, fmt.Errorf("decode domain: precompute cardinality mismatch")
+		}
+		domain = *precomputed
 	}
 	return domain, nil
 }
