@@ -123,6 +123,17 @@ func (ks *KeySource) loadSmallFields(config openConfig) error {
 	if err := g1Decoder.Decode(&ks.delta); err != nil {
 		return fmt.Errorf("decode Delta: %w", err)
 	}
+	// Subgroup checks are skipped for throughput on a proving key that callers
+	// are expected to have digest-authenticated first. On-curve validation is
+	// cheap and is kept, so a point that is neither a valid curve point nor in
+	// the authenticated key cannot silently enter a multi-scalar
+	// multiplication. See internal/msmengine/serialize.go, which makes the same
+	// trade explicitly.
+	for name, point := range map[string]*curve.G1Affine{"Alpha": &ks.alpha, "Beta": &ks.beta, "Delta": &ks.delta} {
+		if !point.IsOnCurve() {
+			return fmt.Errorf("%s is not on the G1 curve", name)
+		}
+	}
 
 	kSec := ks.idx.Sections["K"]
 	g2Off := kSec.Offset + kSec.Len
@@ -136,6 +147,11 @@ func (ks *KeySource) loadSmallFields(config openConfig) error {
 	}
 	if err := g2Decoder.Decode(&ks.g2delta); err != nil {
 		return fmt.Errorf("decode G2.Delta: %w", err)
+	}
+	for name, point := range map[string]*curve.G2Affine{"G2.Beta": &ks.g2beta, "G2.Delta": &ks.g2delta} {
+		if !point.IsOnCurve() {
+			return fmt.Errorf("%s is not on the G2 curve", name)
+		}
 	}
 
 	g2bSec := ks.idx.Sections["G2B"]
