@@ -484,9 +484,16 @@ func (d ProductionDecision) Validate() error {
 	if err := d.OperationalEvidence.Validate(); err != nil {
 		return fmt.Errorf("operational_evidence: %w", err)
 	}
-	if len(d.Audits) != 2 {
-		return fmt.Errorf("production decision requires exactly two audits, got %d", len(d.Audits))
+	// Two is the floor, not the ceiling. A ceremony may enroll more than two
+	// auditors (definition.go requires at least two), and SignRelease accepts
+	// every passing report it is given. Demanding exactly two here would let a
+	// three-auditor ceremony produce a valid signed release that could never be
+	// recorded in a valid decision, and the failure would only surface at final
+	// GO signing when nothing can be redone.
+	if len(d.Audits) < 2 {
+		return fmt.Errorf("production decision requires at least two audits, got %d", len(d.Audits))
 	}
+	auditKeyIDs := make(map[string]struct{}, len(d.Audits))
 	for index, audit := range d.Audits {
 		if err := audit.Validate(); err != nil {
 			return fmt.Errorf("audit %d: %w", index, err)
@@ -494,13 +501,15 @@ func (d ProductionDecision) Validate() error {
 		if index > 0 && audit.AuditorID <= d.Audits[index-1].AuditorID {
 			return errors.New("audits must be ordered by distinct auditor_id")
 		}
+		if _, duplicate := auditKeyIDs[audit.AuditorKeyID]; duplicate {
+			return errors.New("production audit key ids must be distinct")
+		}
+		auditKeyIDs[audit.AuditorKeyID] = struct{}{}
 	}
-	if d.Audits[0].AuditorKeyID == d.Audits[1].AuditorKeyID {
-		return errors.New("production audit key ids must be distinct")
+	if len(d.ExternalAudits) < 2 {
+		return fmt.Errorf("production decision requires at least two external audits, got %d", len(d.ExternalAudits))
 	}
-	if len(d.ExternalAudits) != 2 {
-		return fmt.Errorf("production decision requires exactly two external audits, got %d", len(d.ExternalAudits))
-	}
+	externalFingerprints := make(map[string]struct{}, len(d.ExternalAudits))
 	for index, external := range d.ExternalAudits {
 		if err := external.Validate(); err != nil {
 			return fmt.Errorf("external audit %d: %w", index, err)
@@ -508,10 +517,10 @@ func (d ProductionDecision) Validate() error {
 		if index > 0 && external.Auditor.ID <= d.ExternalAudits[index-1].Auditor.ID {
 			return errors.New("external audits must be ordered by distinct auditor identity")
 		}
-	}
-	if d.ExternalAudits[0].Auditor.PublicKeyFingerprint ==
-		d.ExternalAudits[1].Auditor.PublicKeyFingerprint {
-		return errors.New("external audit signer keys must be distinct")
+		if _, duplicate := externalFingerprints[external.Auditor.PublicKeyFingerprint]; duplicate {
+			return errors.New("external audit signer keys must be distinct")
+		}
+		externalFingerprints[external.Auditor.PublicKeyFingerprint] = struct{}{}
 	}
 	if err := d.K21Rehearsal.Validate(); err != nil {
 		return err
@@ -940,9 +949,12 @@ func verifyDecisionRelease(definition CeremonyDefinition, decision ProductionDec
 	if err := UnmarshalCanonical(transcriptBytes, &transcript); err != nil {
 		return fmt.Errorf("final transcript: %w", err)
 	}
-	expectedAuditRefs := []ArtifactRef{
-		releaseLogicalArtifact(releaseDirName, decision.Audits[0].Audit.Record.Artifact),
-		releaseLogicalArtifact(releaseDirName, decision.Audits[1].Audit.Record.Artifact),
+	expectedAuditRefs := make([]ArtifactRef, 0, len(decision.Audits))
+	for _, audit := range decision.Audits {
+		expectedAuditRefs = append(
+			expectedAuditRefs,
+			releaseLogicalArtifact(releaseDirName, audit.Audit.Record.Artifact),
+		)
 	}
 	expectedOperationalRefs := SignedArtifactRefs{
 		Record: releaseLogicalArtifact(
@@ -1250,13 +1262,18 @@ func decisionSignerIdentity(
 	}
 }
 
+// requiredDecisionSigners lists every signature a GO decision must carry.
+// Every named auditor is required, not just the first two: the decision accepts
+// two or more audits, and an auditor whose report is bound into the decision but
+// whose consent is not required would be recorded as having reviewed the release
+// without having agreed to it.
 func requiredDecisionSigners(definition CeremonyDefinition, decision ProductionDecision) []string {
-	return []string{
-		string(DecisionSignerCoordinator) + "\x00" + definition.Coordinator.ID,
-		string(DecisionSignerAuditor) + "\x00" + decision.Audits[0].AuditorID,
-		string(DecisionSignerAuditor) + "\x00" + decision.Audits[1].AuditorID,
-		string(DecisionSignerRelease) + "\x00" + definition.ReleaseSigner.ID,
+	required := make([]string, 0, len(decision.Audits)+2)
+	required = append(required, string(DecisionSignerCoordinator)+"\x00"+definition.Coordinator.ID)
+	for _, audit := range decision.Audits {
+		required = append(required, string(DecisionSignerAuditor)+"\x00"+audit.AuditorID)
 	}
+	return append(required, string(DecisionSignerRelease)+"\x00"+definition.ReleaseSigner.ID)
 }
 
 func validateLocatedArtifactCoherence(decision ProductionDecision) error {
@@ -1286,13 +1303,12 @@ func allLocatedArtifacts(decision ProductionDecision) []LocatedArtifactRef {
 		decision.SourceRelease.SignedTagObject,
 		decision.OperationalEvidence.Record,
 		decision.OperationalEvidence.Signature,
-		decision.Audits[0].Audit.Record,
-		decision.Audits[0].Audit.Signature,
-		decision.Audits[1].Audit.Record,
-		decision.Audits[1].Audit.Signature,
 		decision.K21Rehearsal.Evidence,
 		decision.MainnetDeploymentPlan,
 		decision.FormalChecklist,
+	}
+	for _, audit := range decision.Audits {
+		refs = append(refs, audit.Audit.Record, audit.Audit.Signature)
 	}
 	refs = append(refs, decision.Release.Artifacts...)
 	for _, external := range decision.ExternalAudits {
