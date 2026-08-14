@@ -1039,10 +1039,18 @@ func VerifyAndAcceptContribution(options AcceptContributionFilesOptions) (result
 		if err != nil {
 			return result, fmt.Errorf("load authenticated Phase 1 head: %w", err)
 		}
+		// gnark's Verify writes next.Challenge, and this candidate is retained
+		// and re-serialized into the authoritative transcript below. Hand the
+		// verifier a throwaway clone so no gnark call ever holds the archived
+		// pointer.
+		verifyCandidate := new(gnarkmpc.Phase1)
+		if err := streamClone(candidate, verifyCandidate); err != nil {
+			return result, fmt.Errorf("clone Phase 1 candidate for verification: %w", err)
+		}
 		if err := verifyPhase1Transition(
 			options.Circuit.Binding.DomainSize,
 			previous,
-			candidate,
+			verifyCandidate,
 		); err != nil {
 			return result, fmt.Errorf("verify candidate Phase 1 transition: %w", err)
 		}
@@ -1067,7 +1075,13 @@ func VerifyAndAcceptContribution(options AcceptContributionFilesOptions) (result
 		if err != nil {
 			return result, fmt.Errorf("load authenticated Phase 2 head: %w", err)
 		}
-		if err := verifyPhase2Transition(previous, candidate); err != nil {
+		// Same hazard as Phase 1: Verify writes next.Challenge and this
+		// candidate is retained for the transcript, so verify a clone.
+		verifyCandidate := new(gnarkmpc.Phase2)
+		if err := streamClone(candidate, verifyCandidate); err != nil {
+			return result, fmt.Errorf("clone Phase 2 candidate for verification: %w", err)
+		}
+		if err := verifyPhase2Transition(previous, verifyCandidate); err != nil {
 			return result, fmt.Errorf("verify candidate Phase 2 transition: %w", err)
 		}
 	}
@@ -1835,6 +1849,9 @@ func SealPhase1Files(options SealPhase1FilesOptions) (result SealPhase1FilesResu
 		challenge,
 		replayedHead,
 	)
+	// Seal spends the head and the returned commons aliases its backing
+	// arrays. Drop the reference here so a later reuse cannot compile.
+	replayedHead = nil
 	if err != nil {
 		return result, err
 	}
@@ -3100,6 +3117,9 @@ func loadPhase1CommonsForPhase2(
 		challenge,
 		replayedHead,
 	)
+	// Seal spends the head and the returned commons aliases its backing
+	// arrays. Drop the reference here so a later reuse cannot compile.
+	replayedHead = nil
 	if err != nil {
 		return nil, SealRecord{}, CloseRecord{}, fmt.Errorf(
 			"derive Phase 1 commons from authenticated chain and beacon: %w",
