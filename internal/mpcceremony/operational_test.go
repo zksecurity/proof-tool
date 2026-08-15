@@ -184,13 +184,13 @@ func TestPublicWitnessLeadBoundaryAndActorIndependence(t *testing.T) {
 		BeaconScheduledAt:      roundTime.Format(time.RFC3339),
 		PublicationLocationSHA: taggedSHA256([]byte("https://independent.example/phase1/closure.json")),
 		Witness:                witness,
-		ObservedAt:             roundTime.Add(-24 * time.Hour).Format(time.RFC3339),
+		ObservedAt:             roundTime.Add(-productionWitnessLead).Format(time.RFC3339),
 	}
 	if err := ValidatePublicWitnessReceipt(definition, close, closeBytes, receipt); err != nil {
 		t.Fatalf("exact signed minimum lead rejected: %v", err)
 	}
 	tooLate := receipt
-	tooLate.ObservedAt = roundTime.Add(-24*time.Hour + time.Second).Format(time.RFC3339)
+	tooLate.ObservedAt = roundTime.Add(-productionWitnessLead + time.Second).Format(time.RFC3339)
 	if err := ValidatePublicWitnessReceipt(definition, close, closeBytes, tooLate); err == nil {
 		t.Fatal("below-minimum witness lead unexpectedly accepted")
 	}
@@ -224,7 +224,7 @@ func TestPublicWitnessQuorumRejectsDuplicateIdentityAndKey(t *testing.T) {
 			BeaconScheduledAt:      roundTime.Format(time.RFC3339),
 			PublicationLocationSHA: taggedSHA256([]byte(id)),
 			Witness:                identity,
-			ObservedAt:             roundTime.Add(-24 * time.Hour).Format(time.RFC3339),
+			ObservedAt:             roundTime.Add(-productionWitnessLead).Format(time.RFC3339),
 		}
 		recordBytes, signatureBytes, err := SignRecord(record, identity.KeyID, privateKey)
 		if err != nil {
@@ -365,3 +365,10 @@ func operationalClose(
 	}
 	return record
 }
+
+// productionWitnessLead is the signed minimum witness lead as a duration.
+//
+// The boundary tests derive their timestamps from this rather than hardcoding
+// 24 hours, so they keep testing the boundary rather than a fixed offset that
+// happens to sit above it.
+var productionWitnessLead = time.Duration(ProductionMinimumWitnessLeadSeconds) * time.Second

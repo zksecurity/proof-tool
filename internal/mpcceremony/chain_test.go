@@ -227,7 +227,9 @@ func TestValidateBeaconRecomputesAgainstBoundClose(t *testing.T) {
 		t.Fatalf("production close reserving the witness window rejected: %v", err)
 	}
 	belowLead := exactLead
-	belowLead.ClosedAt = "2026-07-23T14:01:00.000000001Z"
+	// Derived from the round rather than written literally, so this stays one
+	// nanosecond inside the boundary whatever the signed minimum lead is.
+	belowLead.ClosedAt = roundTime.Add(-minimumLead + time.Nanosecond).Format(time.RFC3339Nano)
 	belowLead, err = NewCloseRecord(belowLead)
 	if err != nil {
 		t.Fatal(err)

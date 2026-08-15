@@ -135,7 +135,8 @@ func TestPreparePublicWitnessReceiptEnforcesRoleIdentityAndObservationTiming(t *
 		t.Fatal(err)
 	}
 	location := "https://independent.example/phase1/closure.json"
-	observedAt := roundTime.Add(-24 * time.Hour).Format(time.RFC3339)
+	minimumLead := time.Duration(definition.BeaconPolicy.MinimumWitnessLeadSeconds) * time.Second
+	observedAt := roundTime.Add(-minimumLead).Format(time.RFC3339)
 	receipt, canonical, err := PreparePublicWitnessReceipt(
 		definition,
 		closeRecord,
@@ -176,7 +177,7 @@ func TestPreparePublicWitnessReceiptEnforcesRoleIdentityAndObservationTiming(t *
 		{name: "before closure", observedAt: roundTime.Add(-26 * time.Hour)},
 		{name: "at beacon round", observedAt: roundTime},
 		{name: "after beacon round", observedAt: roundTime.Add(time.Second)},
-		{name: "below minimum lead", observedAt: roundTime.Add(-24*time.Hour + time.Second)},
+		{name: "below minimum lead", observedAt: roundTime.Add(-minimumLead + time.Second)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if _, _, err := PreparePublicWitnessReceipt(

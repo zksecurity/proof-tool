@@ -5,7 +5,23 @@ import (
 	"fmt"
 )
 
-const ProductionMinimumWitnessLeadSeconds uint32 = 24 * 60 * 60
+// WARNING: THIS BRANCH IS NOT FIT FOR A REAL CEREMONY.
+//
+// The released value is 24 hours. It is the window in which a public witness
+// can observe a phase closure before the randomness that seals that phase
+// exists, which is what stops a coordinator who already knows the beacon
+// output from closing the phase around it. Two phase closes make it 48 hours
+// of mandated waiting, and that is the intended cost.
+//
+// It is reduced to 10 minutes here for one purpose: exercising the production
+// code path end to end in hours instead of days, so the audit can reach the
+// finalize, audit, release, and decision stages that no rehearsal run touches.
+//
+// Any transcript produced from this branch is a test artifact. It records this
+// commit in its software binding, so a verifier who fetches the named revision
+// finds this comment; do not merge this branch, and do not present its output
+// as a ceremony.
+const ProductionMinimumWitnessLeadSeconds uint32 = 10 * 60
 
 // ProductionWitnessObservationWindowSeconds is the observation time a
 // production close must reserve for public witnesses on top of the signed
@@ -20,7 +36,11 @@ const ProductionMinimumWitnessLeadSeconds uint32 = 24 * 60 * 60
 // signed closure. Reserving an explicit window at close keeps the witness
 // requirement satisfiable. Rehearsals are exempt: their leads are minutes and
 // their witness receipts are same-host fixtures.
-const ProductionWitnessObservationWindowSeconds uint32 = 60 * 60
+//
+// TEST BRANCH: cut from one hour to two minutes, proportionally with the
+// 10-minute lead above, so the reproduction still exercises the reserved
+// window without restoring the multi-hour wait. Same caveat: do not merge.
+const ProductionWitnessObservationWindowSeconds uint32 = 2 * 60
 
 type CeremonyDefinition struct {
 	Schema          string          `json:"schema"`
