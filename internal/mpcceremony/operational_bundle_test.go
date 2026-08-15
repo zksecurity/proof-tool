@@ -289,7 +289,7 @@ func TestVerifyOperationalEvidenceBundleEndToEndAndNegatives(t *testing.T) {
 			t.Fatal(err)
 		}
 		roundTime, _ := QuicknetRoundTime(receipt.BeaconRound)
-		receipt.ObservedAt = roundTime.Add(-24*time.Hour + time.Second).Format(time.RFC3339)
+		receipt.ObservedAt = roundTime.Add(-productionWitnessLead + time.Second).Format(time.RFC3339)
 		rewriteSignedPair(t, f.root, pair, receipt, f.witnessKeys[receipt.Witness.ID])
 		f.bundle.Phase1.PublicWitnessReceipts[0] = refreshPair(t, f.root, pair)
 		resignBundle(t, &f)
@@ -801,7 +801,7 @@ func buildOperationalPhaseFixture(
 			witness.identity,
 			closePair.Record.Name,
 			taggedSHA256([]byte("https://public.example/"+string(phase)+"/"+witness.identity.ID)),
-			roundTime.Add(-24*time.Hour).Format(time.RFC3339),
+			roundTime.Add(-productionWitnessLead).Format(time.RFC3339),
 		)
 		if err != nil {
 			t.Fatal(err)
