@@ -16,6 +16,12 @@ import (
 
 const supportedKeyVersion = "ownership-destination-v2"
 
+// rehearsalKeyVersion selects the tiny circuit used to exercise the ceremony at
+// a small domain. It is accepted here only alongside --mode rehearsal; the
+// signed definition enforces the same rule independently, so this check is
+// convenience rather than the control.
+const rehearsalKeyVersion = "rehearsal-tiny-v1"
+
 type helpRequest struct {
 	topic []string
 }
@@ -605,7 +611,7 @@ func parseInit(args []string) (InitOptions, error) {
 	fs := commandFlagSet("init")
 	fs.StringVar(&options.SessionNonceHex, "session-nonce-hex", "", "optional 32-byte session nonce as hex; generated securely when omitted")
 	fs.StringVar(&options.CreatedAt, "created-at", "", "ceremony creation timestamp in RFC3339")
-	fs.StringVar(&options.KeyVersion, "key-version", "", "repository key version (ownership-destination-v2 only)")
+	fs.StringVar(&options.KeyVersion, "key-version", "", "repository key version (ownership-destination-v2, or rehearsal-tiny-v1 with --mode rehearsal)")
 	fs.StringVar(&options.ParticipantsPath, "participants", "", "participant roster JSON path")
 	fs.StringVar(&options.PolicyPath, "policy", "", "ceremony policy JSON path")
 	fs.StringVar(&options.CoordinatorKeyID, "coordinator-key-id", "", "coordinator signing key identifier")
@@ -618,8 +624,16 @@ func parseInit(args []string) (InitOptions, error) {
 	if options.Mode != "rehearsal" && options.Mode != "production" {
 		return options, errors.New("--mode must be rehearsal or production")
 	}
-	if options.KeyVersion != "" && options.KeyVersion != supportedKeyVersion {
-		return options, fmt.Errorf("--key-version must be %q", supportedKeyVersion)
+	switch options.KeyVersion {
+	case "", supportedKeyVersion:
+	case rehearsalKeyVersion:
+		if options.Mode != "rehearsal" {
+			return options, fmt.Errorf(
+				"--key-version %q requires --mode rehearsal", rehearsalKeyVersion)
+		}
+	default:
+		return options, fmt.Errorf(
+			"--key-version must be %q or %q", supportedKeyVersion, rehearsalKeyVersion)
 	}
 	if options.SessionNonceHex != "" {
 		raw, err := hex.DecodeString(options.SessionNonceHex)

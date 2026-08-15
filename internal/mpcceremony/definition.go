@@ -137,6 +137,20 @@ func (d CeremonyDefinition) validate(requireID bool) error {
 	switch d.Mode {
 	case ModeRehearsal:
 	case ModeProduction:
+		// The circuit registry accepts a tiny rehearsal circuit so the ceremony
+		// machinery can be exercised at a small domain. Production must never
+		// see it: a transcript at domain 2^16 proves nothing about a 2^21
+		// ceremony, and the exact-k21-rehearsal gate exists precisely so a
+		// smaller run cannot satisfy it. This is the only place that knows the
+		// mode, so it is the only place the restriction can live, and it is
+		// decided before any environment-dependent check so the failure is
+		// about the definition rather than the host.
+		if d.Circuit.KeyVersion != KeyVersionDestinationV2 {
+			return fmt.Errorf(
+				"production ceremony must use key_version %q, not %q",
+				KeyVersionDestinationV2, d.Circuit.KeyVersion,
+			)
+		}
 		if d.Software.SourceDirty {
 			return errors.New("production ceremony requires a clean source tree")
 		}
