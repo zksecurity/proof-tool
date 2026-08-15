@@ -132,11 +132,8 @@ func (i Identity) Validate() error {
 	if err := validateID("identity id", i.ID); err != nil {
 		return err
 	}
-	if strings.TrimSpace(i.DisplayName) == "" || i.DisplayName != strings.TrimSpace(i.DisplayName) {
-		return errors.New("identity display_name must be non-empty and trimmed")
-	}
-	if !utf8.ValidString(i.DisplayName) {
-		return errors.New("identity display_name must be valid UTF-8")
+	if err := validateDisplayName(i.DisplayName); err != nil {
+		return fmt.Errorf("identity display_name: %w", err)
 	}
 	if err := validateID("identity key_id", i.KeyID); err != nil {
 		return err
@@ -580,14 +577,80 @@ func validateArtifactName(value string) error {
 	if strings.Contains(value, "\\") || strings.HasPrefix(value, "/") || path.Clean(value) != value || value == "." {
 		return fmt.Errorf("artifact name %q must be a clean relative logical path", value)
 	}
-	for _, r := range value {
-		if unicode.IsControl(r) {
-			return fmt.Errorf("artifact name %q contains a control character", value)
-		}
+	if err := rejectDeceptiveRunes(value); err != nil {
+		return fmt.Errorf("artifact name %q %w", value, err)
 	}
 	for segment := range strings.SplitSeq(value, "/") {
 		if segment != strings.TrimSpace(segment) {
 			return fmt.Errorf("artifact name %q has untrimmed whitespace in a path segment", value)
+		}
+	}
+	return nil
+}
+
+// maxDisplayNameBytes bounds a human-readable label. It is generous for a name
+// plus an affiliation and small enough that a roster stays readable; without a
+// cap a single identity can inflate the signed definition and every log line
+// that mentions it.
+const maxDisplayNameBytes = 256
+
+// validateDisplayName checks a human-readable label that is never used for a
+// decision but is read by people reviewing a transcript.
+//
+// The ceremony's audit and release steps depend on humans reading these
+// records, so a label must render as the bytes that were signed. Length and
+// UTF-8 validity are not enough for that; see rejectDeceptiveRunes.
+func validateDisplayName(value string) error {
+	if value == "" || len(value) > maxDisplayNameBytes {
+		return fmt.Errorf("must contain 1 to %d bytes", maxDisplayNameBytes)
+	}
+	if !utf8.ValidString(value) {
+		return errors.New("must be valid UTF-8")
+	}
+	if value != strings.TrimSpace(value) {
+		return errors.New("must be trimmed")
+	}
+	if strings.TrimSpace(value) == "" {
+		return errors.New("must not be blank")
+	}
+	return rejectDeceptiveRunes(value)
+}
+
+// rejectDeceptiveRunes rejects characters that make a string render as
+// something other than the bytes that were signed.
+//
+// Three classes, all invisible:
+//
+//   - Control characters (Unicode Cc). ANSI escape sequences are terminal
+//     commands rather than text, so a value printed to a terminal can move the
+//     cursor and repaint what was already written.
+//   - Bidirectional formatting (U+202A-U+202E, U+2066-U+2069, U+200E, U+200F).
+//     These force rendering direction, so bytes stored as U+202E followed by
+//     "ecila" display as "alice". This is the Trojan Source technique,
+//     CVE-2021-42574.
+//   - Zero-width space (U+200B), which renders as nothing, so two values that
+//     differ in bytes can be indistinguishable on screen.
+//
+// unicode.IsControl is not sufficient on its own: it reports category Cc only,
+// while every bidi and zero-width character above is category Cf.
+//
+// The bidi and zero-width sets are listed explicitly rather than rejecting all
+// of category Cf, because U+200C (ZWNJ) is required for correct Persian and
+// Indic text and U+200D (ZWJ) joins emoji sequences. Banning the whole category
+// would make legitimate names unwritable.
+func rejectDeceptiveRunes(value string) error {
+	for _, r := range value {
+		switch {
+		case unicode.IsControl(r):
+			return fmt.Errorf("contains control character %U", r)
+		// Written as escapes on purpose: these characters are invisible, and
+		// two of them would reorder this source file in an editor.
+		case r >= '\u202A' && r <= '\u202E',
+			r >= '\u2066' && r <= '\u2069',
+			r == '\u200E', r == '\u200F':
+			return fmt.Errorf("contains bidirectional formatting character %U", r)
+		case r == '\u200B':
+			return fmt.Errorf("contains zero-width character %U", r)
 		}
 	}
 	return nil
