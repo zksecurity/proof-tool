@@ -107,8 +107,27 @@ think has hung was the only long one saying nothing.
 `SealPhase1FilesOptions` now carries `Progress` and threads it into the paths it
 builds; the CLI attaches the same reporter it uses elsewhere. The workflow
 integration helper asserts the callback fires during a seal, so the wiring
-cannot be silently dropped again. `RecordBeaconFiles` and `InitializePhase2Files`
-also take a bare root but perform no replay, so they need nothing.
+cannot be silently dropped again.
+
+**Second gap: the callback shape does not fit every long command.** With the
+seal covered, phase 2 initialization was still silent past 2h20m on the same
+run. It is not a plumbing omission — `InitializePhase2Files` performs no replay,
+so a per-contribution callback has nothing to count. It loads and verifies the
+sealed phase 1 commons, transforms them into circuit-specific parameters across
+the whole 2^21 domain, and publishes the result; the transform is one monolithic
+computation inside gnark that exposes no progress of its own.
+
+`ReplayProgress` therefore cannot describe it, and reporting a fabricated
+percentage would be worse than silence. Added `StageProgress`
+(`func(stage string, index, total int)`) and three reported stages, so an
+operator sees which stage is running and how long it has been running. Coarser
+than a replay index, and honest about it: the value is separating running from
+hung and naming what is being waited on. The CLI renders it to stderr like the
+replay reporter, and the integration helper asserts all three stages arrive in
+order.
+
+`RecordBeaconFiles` also takes a bare transcript root but is short and performs
+no replay, so it needs nothing.
 
 ### A4 · CLI error redaction is a per-call-site blocklist — low, verified
 

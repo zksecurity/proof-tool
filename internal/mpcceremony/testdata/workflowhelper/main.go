@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -473,6 +474,10 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		return errors.New("Phase 1 seal replayed without reporting progress")
 	}
 
+	// Phase 2 initialization reports stages rather than contributions, because
+	// its cost is one monolithic transform rather than a per-contribution
+	// replay. Assert every stage arrives, in order.
+	var phase2Stages []int
 	phase2Initialized, err := mpcceremony.InitializePhase2Files(mpcceremony.InitPhase2FilesOptions{
 		Trust:                     trust,
 		Circuit:                   circuit,
@@ -480,10 +485,19 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		Phase1SealPath:            phase1Seal.SealPath,
 		Phase1SealSignaturePath:   phase1Seal.SignaturePath,
 		CoordinatorPrivateKeyPath: coordinatorKeyPath,
-		OutputDir:                 filepath.Join(ceremonyRoot, "phase2"),
+		Progress: func(stage string, index, total int) {
+			if stage == "" || index < 1 || index > total {
+				panic(fmt.Sprintf("phase 2 stage %q reported %d/%d", stage, index, total))
+			}
+			phase2Stages = append(phase2Stages, index)
+		},
+		OutputDir: filepath.Join(ceremonyRoot, "phase2"),
 	})
 	if err != nil {
 		return fmt.Errorf("initialize Phase 2: %w", err)
+	}
+	if !slices.Equal(phase2Stages, []int{1, 2, 3}) {
+		return fmt.Errorf("phase 2 initialization reported stages %v, want [1 2 3]", phase2Stages)
 	}
 	phase2Paths := mpcceremony.PhaseTranscriptPaths{
 		RootDir:            ceremonyRoot,

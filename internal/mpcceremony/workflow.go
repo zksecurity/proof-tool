@@ -390,6 +390,24 @@ func InitializeCeremonyFiles(options InitFilesOptions) (result InitFilesResult, 
 // incident.
 type ReplayProgress func(phase Phase, index, total int)
 
+// StageProgress reports entry into a named stage of a long operation, with a
+// one-based index and the total number of stages.
+//
+// ReplayProgress counts accepted contributions, which suits any command whose
+// cost is dominated by replaying a chain. Phase 2 initialization has no
+// contributions to count: it loads and verifies the sealed phase 1 commons,
+// transforms them into circuit-specific parameters over the whole 2^21 domain,
+// and publishes the result. That transform is a single monolithic computation
+// running for hours, so a per-contribution callback reports nothing at all.
+//
+// This is coarser than an index into work completed, and deliberately so. The
+// expensive stage lives inside gnark and exposes no progress of its own, so the
+// honest signal is which stage is running rather than a fabricated percentage.
+// It still separates running from hung, and it names the stage an operator is
+// waiting on. Like ReplayProgress it carries no secret material and does not
+// print: rendering is the caller's business.
+type StageProgress func(stage string, index, total int)
+
 type PhaseTranscriptPaths struct {
 	RootDir            string
 	ChainPath          string
@@ -2010,6 +2028,9 @@ func SealPhase1Files(options SealPhase1FilesOptions) (result SealPhase1FilesResu
 	return result, nil
 }
 
+// initPhase2StageCount is the number of stages InitializePhase2Files reports.
+const initPhase2StageCount = 3
+
 type InitPhase2FilesOptions struct {
 	Trust                     TrustPaths
 	Circuit                   *CompiledCircuit
@@ -2018,6 +2039,9 @@ type InitPhase2FilesOptions struct {
 	Phase1SealSignaturePath   string
 	CoordinatorPrivateKeyPath string
 	OutputDir                 string
+	// Progress is optional and reports stage entry. When nil this runs silent,
+	// which is the behaviour every existing caller gets.
+	Progress StageProgress
 }
 
 type InitPhase2FilesResult struct {
@@ -2037,6 +2061,14 @@ func InitializePhase2Files(options InitPhase2FilesOptions) (result InitPhase2Fil
 	if err := validateWorkflowCircuit(trusted, options.Circuit); err != nil {
 		return result, err
 	}
+	// Three stages, of wildly unequal cost. Stage 2 dominates: it transforms the
+	// commons over the whole domain and is where hours are spent.
+	stage := func(name string, index int) {
+		if options.Progress != nil {
+			options.Progress(name, index, initPhase2StageCount)
+		}
+	}
+	stage("verify sealed phase 1 commons", 1)
 	commons, phase1Seal, _, err := loadPhase1CommonsForPhase2(
 		trusted,
 		options.Circuit,
@@ -2051,10 +2083,12 @@ func InitializePhase2Files(options InitPhase2FilesOptions) (result InitPhase2Fil
 	if err != nil {
 		return result, err
 	}
+	stage("derive circuit-specific phase 2 parameters", 2)
 	initial, shape, err := InitializePhase2(options.Circuit, commons)
 	if err != nil {
 		return result, err
 	}
+	stage("publish phase 2 genesis", 3)
 	if !equalPhase2Shape(shape, options.Circuit.Binding.Phase2Shape) {
 		return result, errors.New("initialized Phase 2 shape differs from signed circuit binding")
 	}

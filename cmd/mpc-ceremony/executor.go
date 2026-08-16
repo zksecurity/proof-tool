@@ -410,6 +410,7 @@ func executePhase2Init(options Phase2InitOptions) (CommandResult, error) {
 		Phase1SealSignaturePath:   options.Phase1SealSignaturePath,
 		CoordinatorPrivateKeyPath: options.CoordinatorSigningKey,
 		OutputDir:                 options.OutDir,
+		Progress:                  stageProgressReporter(),
 	})
 	if err != nil {
 		return CommandResult{}, err
@@ -690,6 +691,20 @@ func replayProgressReporter() mpcceremony.ReplayProgress {
 			os.Stderr,
 			"replaying %s contribution %d/%d (%s elapsed)\n",
 			phase, index, total, time.Since(start).Round(time.Second),
+		)
+	}
+}
+
+// stageProgressReporter renders stage entry to stderr. Phase 2 initialization
+// has no contributions to count and its expensive stage is a single call into
+// gnark, so naming the running stage is the honest signal available.
+func stageProgressReporter() mpcceremony.StageProgress {
+	start := time.Now()
+	return func(stage string, index, total int) {
+		fmt.Fprintf(
+			os.Stderr,
+			"stage %d/%d: %s (%s elapsed)\n",
+			index, total, stage, time.Since(start).Round(time.Second),
 		)
 	}
 }
