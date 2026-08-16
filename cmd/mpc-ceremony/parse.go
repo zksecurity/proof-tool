@@ -560,6 +560,8 @@ func parseClose(name string, args []string, phase2 bool) (CloseOptions, error) {
 	fs.StringVar(&options.ChainSignaturePath, "chain-signature", "", "detached final accepted chain signature path")
 	fs.StringVar(&options.CoordinatorSigningKey, "coordinator-signing-key", "", "existing Ed25519 coordinator private key path")
 	fs.Uint64Var(&options.BeaconRound, "beacon-round", 0, "precommitted future beacon round")
+	fs.UintVar(&options.BeaconRoundLeadSeconds, "beacon-round-lead", 0,
+		"derive the beacon round this many seconds past the clock sampled after replay")
 	if err := parseFlags(fs, args); err != nil {
 		return options, err
 	}
@@ -572,8 +574,12 @@ func parseClose(name string, args []string, phase2 bool) (CloseOptions, error) {
 		pathValue("--chain-signature", options.ChainSignaturePath),
 		pathValue("--coordinator-signing-key", options.CoordinatorSigningKey),
 	}
-	if options.BeaconRound == 0 {
-		required = append(required, requiredValue{name: "--beacon-round"})
+	// A close replays for hours at K=21 before it stamps closed_at, so naming
+	// the round up front asks the operator to predict their own replay time.
+	// --beacon-round-lead derives it from the clock sampled after the replay.
+	if (options.BeaconRound == 0) == (options.BeaconRoundLeadSeconds == 0) {
+		return options, errors.New(
+			"exactly one of --beacon-round and --beacon-round-lead is required")
 	}
 	if phase2 {
 		required = append(

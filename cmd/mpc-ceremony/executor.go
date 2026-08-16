@@ -297,6 +297,7 @@ func executeClose(phase mpcceremony.Phase, options CloseOptions) (CommandResult,
 		Phase1SealSignaturePath:   options.Phase1SealSignaturePath,
 		CoordinatorPrivateKeyPath: options.CoordinatorSigningKey,
 		BeaconRound:               options.BeaconRound,
+		BeaconRoundLeadSeconds:    uint32(options.BeaconRoundLeadSeconds),
 	})
 	if err != nil {
 		return CommandResult{}, err

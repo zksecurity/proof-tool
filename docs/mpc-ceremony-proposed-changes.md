@@ -118,6 +118,60 @@ through one helper that redacts by construction, so a new call site cannot opt
 out by accident; and add a minimum-length floor in `addCLIErrorCandidate` to stop
 short values blanking unrelated text. Neither changes the trust boundary.
 
+### A5 · The beacon round is chosen before the replay that decides whether it is still valid — medium, verified
+
+`phase1 close` and `phase2 close` take `--beacon-round N` up front, then replay
+the whole accepted phase, then sample `closed_at` and check the round is still
+in the future with the signed lead intact. At K=21 that replay takes hours, so
+the operator is really being asked to predict their own hardware: name a round
+too near and the entire replay is discarded.
+
+This is the same failure as the 2026-07-24 incident. A3 added replay progress
+reporting, which tells an operator how long the replay took once they have
+already run one — so it informs the round they pick when retrying a close that
+was just rejected, and does nothing for the first close on a given host, which
+is the one that must be guessed blind. It
+was hit again on 2026-08-16 during a full production-mode run, on a machine
+whose replay had never been measured, by picking the round from the signed lead
+plus a margin — which is the only rule written down anywhere. Measured cost of
+the discarded attempt: 1h40m of replay, from this progress output:
+
+    replaying phase1 contribution 1/3 (48m34s elapsed)
+    replaying phase1 contribution 2/3 (1h14m34s elapsed)
+    replaying phase1 contribution 3/3 (1h40m24s elapsed)
+
+The signed `minimum_witness_lead_seconds` states how much time *witnesses* need.
+It says nothing about how long *this host* takes to replay. Those are unrelated
+quantities and only the first is recorded in the ceremony.
+
+Nothing requires the round to be chosen early. It is not published, signed, or
+observable until the closure record is written at the end, so choosing it after
+the replay is indistinguishable to every observer and cannot help a coordinator:
+the round is still in the future at publication, and its randomness does not
+exist under either ordering.
+
+**Fix — implemented 2026-08-16.** `--beacon-round-lead SECONDS` on both close
+commands, mutually exclusive with `--beacon-round`.
+
+The derivation has to happen inside the package, not the CLI. Only the package
+knows when the replay finished, and `closedAt` is sampled in
+`publishReplayedPhaseClose` after it; a CLI deriving beforehand would be making
+the same blind guess. `FirstQuicknetRoundAfter` (`chain.go`) inverts
+`QuicknetRoundTime`, and the round is derived from `closedAt` plus the larger of
+the requested lead and the signed minimum, plus the publication safety margin
+that `validateCloseCommitTime` re-checks against a second clock sample.
+
+Two existing checks assumed an explicit round and were narrowed rather than
+removed. Retry recovery compares a published closure's round against the
+requested one; with derivation there is no operator intent to contradict, so the
+comparison now applies only when a round was named, and the existing record is
+authenticated and fully revalidated either way. The phase 2 round-reuse check
+runs before the replay, so a derived round is checked for reuse after
+derivation instead.
+
+`--beacon-round` is unchanged, for staged runs where the round is announced out
+of band.
+
 ## B · Documentation integrity
 
 ### B1 · Eight governance documents were stripped from `main`; ten links to them remain — high, verified

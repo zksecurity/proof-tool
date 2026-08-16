@@ -785,6 +785,34 @@ func QuicknetRoundTime(round uint64) (time.Time, error) {
 	return time.Unix(seconds, 0).UTC(), nil
 }
 
+// FirstQuicknetRoundAfter returns the earliest round whose scheduled time is
+// strictly after the supplied instant.
+//
+// It is the inverse of QuicknetRoundTime and exists so a phase close can name
+// its beacon round using the clock it sampled after replaying, rather than a
+// round an operator had to guess before the replay began. Rounds are pure
+// arithmetic from the pinned genesis and period, so this needs no network
+// access and stays deterministic.
+func FirstQuicknetRoundAfter(instant time.Time) (uint64, error) {
+	seconds := instant.UTC().Unix()
+	if seconds < BeaconQuicknetGenesis {
+		return 1, nil
+	}
+	period := int64(BeaconQuicknetPeriod)
+	elapsed := seconds - BeaconQuicknetGenesis
+	// Round index is one-based, and the result must be strictly after the
+	// instant, so a time landing exactly on a round schedule advances past it.
+	round := uint64(elapsed/period) + 2
+	roundTime, err := QuicknetRoundTime(round)
+	if err != nil {
+		return 0, err
+	}
+	if !roundTime.After(instant) {
+		return 0, errors.New("derived beacon round is not after the supplied instant")
+	}
+	return round, nil
+}
+
 // DeriveBeaconChallenge maps authenticated public beacon randomness to the
 // exact 32-byte challenge supplied to gnark. Length prefixes make every input
 // tuple unambiguous and the domain tag prevents reuse in another protocol.

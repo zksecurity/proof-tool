@@ -113,6 +113,7 @@ type CloseOptions struct {
 	ChainSignaturePath       string
 	CoordinatorSigningKey    string
 	BeaconRound              uint64
+	BeaconRoundLeadSeconds   uint
 }
 
 type Phase1SealOptions struct {

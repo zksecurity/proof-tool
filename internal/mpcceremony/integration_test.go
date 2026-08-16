@@ -599,7 +599,7 @@ func TestSignedFileWorkflowRejectsReusedPhase1RoundBeforePublicationAndReplays(t
 			t.Fatalf("atomic closure member %q is absent or unsafe: %v", path, err)
 		}
 	}
-	retriedClose, err := publishReplayedPhaseClose(closeOptions, trusted, loaded.phase1Chain, func() time.Time {
+	retriedClose, err := publishReplayedPhaseClose(closeOptions, trusted, loaded.phase1Chain, nil, func() time.Time {
 		panic("completed closure retry must not consult the clock")
 	})
 	if err != nil {

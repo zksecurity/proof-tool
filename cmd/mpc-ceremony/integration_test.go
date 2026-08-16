@@ -98,6 +98,7 @@ func TestParticipantCLIHelpHasExplicitSafeFlagAllowlist(t *testing.T) {
 		"--beacon",
 		"--beacon-signature",
 		"--beacon-round",
+		"--beacon-round-lead",
 		"--candidate-bundle",
 		"--candidate-dir",
 		"--ceremony",

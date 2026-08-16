@@ -1388,7 +1388,25 @@ type ClosePhaseFilesOptions struct {
 	Phase1SealPath            string
 	Phase1SealSignaturePath   string
 	CoordinatorPrivateKeyPath string
-	BeaconRound               uint64
+	// BeaconRound names the future round explicitly. Exactly one of this and
+	// BeaconRoundLeadSeconds must be set.
+	BeaconRound uint64
+	// BeaconRoundLeadSeconds derives the round instead of naming it, using the
+	// clock sampled after the replay.
+	//
+	// A close replays the entire accepted phase before it stamps closed_at, and
+	// at domain 2^21 that takes hours. An explicit round therefore forces the
+	// coordinator to predict their own replay duration: name a round too near
+	// and the whole replay is discarded for naming a round that was no longer
+	// in the future. That is what caused the 2026-07-24 closure-timing
+	// incident.
+	//
+	// Deriving here is not weaker. The round is not published, signed, or
+	// observable until the closure record is written at the end of this
+	// function, so choosing it before or after the replay is indistinguishable
+	// to every observer, and under either ordering the round is still in the
+	// future and its randomness does not yet exist.
+	BeaconRoundLeadSeconds uint32
 }
 
 type ClosePhaseFilesResult struct {
@@ -1412,6 +1430,10 @@ func closePhaseFiles(
 	if now == nil {
 		return ClosePhaseFilesResult{}, errors.New("closure clock is required")
 	}
+	if (options.BeaconRound == 0) == (options.BeaconRoundLeadSeconds == 0) {
+		return ClosePhaseFilesResult{}, errors.New(
+			"exactly one of beacon round and beacon round lead is required")
+	}
 	trusted, err := loadOperationalCeremony(options.Trust)
 	if err != nil {
 		return ClosePhaseFilesResult{}, err
@@ -1430,21 +1452,27 @@ func closePhaseFilesAuthenticated(
 	}
 	var chain Chain
 	var err error
+	// Retained past the switch so a derived phase 2 round can be checked for
+	// reuse of the phase 1 round, which an explicit round is checked for here.
+	var phase1Close *CloseRecord
 	switch options.Phase {
 	case Phase1:
 		chain, err = LoadReplayPhase1Files(trusted, options.Circuit, options.Transcript)
 	case Phase2:
 		var commons *gnarkmpc.SrsCommons
 		var phase1Seal SealRecord
-		var phase1Close CloseRecord
-		commons, phase1Seal, phase1Close, err = loadPhase1CommonsForPhase2(
+		var loadedClose CloseRecord
+		commons, phase1Seal, loadedClose, err = loadPhase1CommonsForPhase2(
 			trusted,
 			options.Circuit,
 			options.Transcript.RootDir,
 			options.Phase1SealPath,
 			options.Phase1SealSignaturePath,
 		)
-		if err == nil && options.BeaconRound == phase1Close.BeaconRound {
+		if err == nil {
+			phase1Close = &loadedClose
+		}
+		if err == nil && options.BeaconRound != 0 && options.BeaconRound == loadedClose.BeaconRound {
 			err = fmt.Errorf(
 				"phase2 beacon round %d reuses the authenticated phase1 beacon round; a distinct round is required",
 				options.BeaconRound,
@@ -1459,13 +1487,16 @@ func closePhaseFilesAuthenticated(
 	if err != nil {
 		return result, err
 	}
-	return publishReplayedPhaseClose(options, trusted, chain, now)
+	return publishReplayedPhaseClose(options, trusted, chain, phase1Close, now)
 }
 
 func publishReplayedPhaseClose(
 	options ClosePhaseFilesOptions,
 	trusted *TrustedCeremony,
 	chain Chain,
+	// phase1Close is non-nil only for a phase 2 close, and is what a derived
+	// round is checked against for round reuse.
+	phase1Close *CloseRecord,
 	now func() time.Time,
 ) (ClosePhaseFilesResult, error) {
 	var result ClosePhaseFilesResult
@@ -1500,7 +1531,10 @@ func publishReplayedPhaseClose(
 		); err != nil {
 			return result, fmt.Errorf("load existing atomic phase closure: %w", err)
 		}
-		if existing.BeaconRound != options.BeaconRound {
+		// Only an explicitly requested round can disagree with what was
+		// published; a derived round has no operator intent to contradict, and
+		// the existing record is authenticated and revalidated below either way.
+		if options.BeaconRound != 0 && existing.BeaconRound != options.BeaconRound {
 			return result, fmt.Errorf(
 				"existing phase closure commits beacon round %d, not requested round %d",
 				existing.BeaconRound,
@@ -1523,13 +1557,39 @@ func publishReplayedPhaseClose(
 		return result, fmt.Errorf("inspect phase closure destination: %w", statErr)
 	}
 
-	roundTime, err := QuicknetRoundTime(options.BeaconRound)
-	if err != nil {
-		return result, err
-	}
 	closedAt := now().UTC()
 	if closedAt.IsZero() {
 		return result, errors.New("closure clock returned the zero time")
+	}
+	// Sampled before the round is resolved, so a derived round is measured from
+	// the moment the replay actually finished.
+	beaconRound := options.BeaconRound
+	if beaconRound == 0 {
+		// The publication guard re-checks the lead against a second clock
+		// sample and demands the signed minimum plus a safety margin, so derive
+		// past that rather than past the bare minimum.
+		lead := time.Duration(options.BeaconRoundLeadSeconds) * time.Second
+		if minimum := time.Duration(
+			trusted.Definition.BeaconPolicy.MinimumWitnessLeadSeconds,
+		) * time.Second; lead < minimum {
+			lead = minimum
+		}
+		beaconRound, err = FirstQuicknetRoundAfter(
+			closedAt.Add(lead + closePublicationSafetyMargin),
+		)
+		if err != nil {
+			return result, fmt.Errorf("derive beacon round from close time: %w", err)
+		}
+		if options.Phase == Phase2 && phase1Close != nil && beaconRound == phase1Close.BeaconRound {
+			return result, fmt.Errorf(
+				"derived phase2 beacon round %d reuses the authenticated phase1 beacon round",
+				beaconRound,
+			)
+		}
+	}
+	roundTime, err := QuicknetRoundTime(beaconRound)
+	if err != nil {
+		return result, err
 	}
 	closeRecord, err := NewCloseRecord(CloseRecord{
 		CeremonyID:           trusted.Definition.CeremonyID,
@@ -1541,7 +1601,7 @@ func publishReplayedPhaseClose(
 		AcceptedParticipants: participants,
 		BeaconProvider:       trusted.Definition.BeaconPolicy.Provider,
 		BeaconNetwork:        trusted.Definition.BeaconPolicy.Network,
-		BeaconRound:          options.BeaconRound,
+		BeaconRound:          beaconRound,
 		BeaconNotBefore:      roundTime.Format(time.RFC3339Nano),
 		ClosedAt:             closedAt.Format(time.RFC3339Nano),
 		CoordinatorID:        trusted.Definition.Coordinator.ID,
