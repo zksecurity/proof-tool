@@ -445,6 +445,10 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	if err != nil {
 		return fmt.Errorf("record Phase 1 beacon: %w", err)
 	}
+	// The seal replays the whole phase and is the longest operation in a K=21
+	// ceremony, so its progress callback is wired here and asserted below: a
+	// silent multi-hour command is the defect this reports against.
+	sealProgress := 0
 	phase1Seal, err := mpcceremony.SealPhase1Files(mpcceremony.SealPhase1FilesOptions{
 		Trust:                     trust,
 		Circuit:                   circuit,
@@ -455,9 +459,18 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		BeaconSignaturePath:       phase1Beacon.SignaturePath,
 		CoordinatorPrivateKeyPath: coordinatorKeyPath,
 		OutputDir:                 filepath.Join(ceremonyRoot, "phase1", "sealed"),
+		Progress: func(phase mpcceremony.Phase, index, total int) {
+			if phase != mpcceremony.Phase1 || index < 1 || index > total {
+				panic(fmt.Sprintf("seal progress reported %s %d/%d", phase, index, total))
+			}
+			sealProgress++
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("seal Phase 1: %w", err)
+	}
+	if sealProgress == 0 {
+		return errors.New("Phase 1 seal replayed without reporting progress")
 	}
 
 	phase2Initialized, err := mpcceremony.InitializePhase2Files(mpcceremony.InitPhase2FilesOptions{

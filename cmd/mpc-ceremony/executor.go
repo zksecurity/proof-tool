@@ -372,6 +372,7 @@ func executePhase1Seal(options Phase1SealOptions) (CommandResult, error) {
 		BeaconSignaturePath:       options.BeaconSignaturePath,
 		CoordinatorPrivateKeyPath: options.CoordinatorSigningKey,
 		OutputDir:                 options.OutDir,
+		Progress:                  replayProgressReporter(),
 	})
 	if err != nil {
 		return CommandResult{}, err

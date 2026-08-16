@@ -91,6 +91,25 @@ beacon-round choice: an operator who can see "contribution 3 of 5, 41 minutes
 elapsed" can pick a safe round. Neither form prints from the package, and neither
 carries secret material — an index, a count, and a duration only.
 
+**Coverage gap, found 2026-08-16 and fixed.** The callback landed on
+`PhaseTranscriptPaths`, so it reached every command that builds its paths
+through the CLI's `transcriptPaths` helper — contribute, verify, close. It did
+not reach `phase1 seal`, whose options carry a bare `TranscriptRoot` string and
+which constructs its own `PhaseTranscriptPaths` internally (`workflow.go:1881`)
+with no `Progress` field to populate.
+
+The seal replays the entire phase and then applies the beacon contribution, so
+it does strictly more work than a close. Observed on a production-mode K=21 run:
+the close reported three progress lines and completed in 1h40m33s, while the
+seal ran silently past 2h25m. The one operation an operator is most likely to
+think has hung was the only long one saying nothing.
+
+`SealPhase1FilesOptions` now carries `Progress` and threads it into the paths it
+builds; the CLI attaches the same reporter it uses elsewhere. The workflow
+integration helper asserts the callback fires during a seal, so the wiring
+cannot be silently dropped again. `RecordBeaconFiles` and `InitializePhase2Files`
+also take a bare root but perform no replay, so they need nothing.
+
 ### A4 · CLI error redaction is a per-call-site blocklist — low, verified
 
 Before printing an error, the CLI runs the message through `redactCLIError`

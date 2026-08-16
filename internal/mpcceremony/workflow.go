@@ -1847,6 +1847,12 @@ type SealPhase1FilesOptions struct {
 	BeaconSignaturePath       string
 	CoordinatorPrivateKeyPath string
 	OutputDir                 string
+	// Progress is optional and reports the replay this seal performs before it
+	// applies the beacon contribution. The seal replays the whole phase and
+	// then does strictly more work than a close, so at domain 2^21 it is the
+	// longest operation in the ceremony; without this it is also the only long
+	// one that is completely silent.
+	Progress ReplayProgress
 }
 
 type SealPhase1FilesResult struct {
@@ -1882,6 +1888,7 @@ func SealPhase1Files(options SealPhase1FilesOptions) (result SealPhase1FilesResu
 		RootDir:            options.TranscriptRoot,
 		ChainPath:          chainPath,
 		ChainSignaturePath: DefaultSignaturePath(chainPath),
+		Progress:           options.Progress,
 	}
 	chain, replayedHead, err := loadReplayPhase1FilesState(trusted, options.Circuit, chainPaths)
 	if err != nil {
