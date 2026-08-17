@@ -22,6 +22,26 @@ import (
 
 const resultSchema = "proof-tool-mpc-public-evidence-generation-result-v1"
 
+// The repository's public golden test vector. This is not user wallet
+// material; keeping it in this separate helper is what proves the
+// participant and coordinator binary never handles a wallet secret.
+//
+// These must derive to mpcceremony.GoldenPublicCredentialHex and equal
+// mpcceremony.GoldenPublicDestinationHex, because
+// PublicFinalizationEvidence.Validate accepts nothing else. They are named
+// here rather than inlined so golden_vector_test.go can assert that
+// agreement; when they were inlined the path drifted from the pinned
+// credential and finalization became unreachable.
+const (
+	goldenMasterXPrvHex = "c065afd2832cd8b087c4d9ab7011f481ee1e0721e78ea5dd609f3ab3f156d245" +
+		"d176bd8fd4ec60b4731c3918a2a72a0226c0cd119ec35b47e4d55884667f552a" +
+		"23f7fdcd4a10c6cd2c7393ac61d877873e248f417634aa3d812af327ffe9d620"
+	goldenDestinationHex = "010038ff22c6562b1277ef0d3eb3b8b4892523eeba04d0ef0c9d7da111000000" +
+		"0000000000000000000000000000000000000000000000000000"
+)
+
+var goldenPath = ownership.Path{Account: 0, Role: 0, Index: 0}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -70,23 +90,15 @@ func run() error {
 	// This is the repository's public golden test witness, not user wallet
 	// material. Keeping it in this separate rehearsal helper proves that the
 	// participant/coordinator ceremony binary never handles a wallet secret.
-	master, err := ownership.DecodeMasterXPrvHex(
-		"c065afd2832cd8b087c4d9ab7011f481ee1e0721e78ea5dd609f3ab3f156d245" +
-			"d176bd8fd4ec60b4731c3918a2a72a0226c0cd119ec35b47e4d55884667f552a" +
-			"23f7fdcd4a10c6cd2c7393ac61d877873e248f417634aa3d812af327ffe9d620",
-	)
+	master, err := ownership.DecodeMasterXPrvHex(goldenMasterXPrvHex)
 	if err != nil {
 		return err
 	}
-	destination, err := ownershipdest.DecodeDestinationAddressV1Hex(
-		"010038ff22c6562b1277ef0d3eb3b8b4892523eeba04d0ef0c9d7da111000000" +
-			"0000000000000000000000000000000000000000000000000000",
-	)
+	destination, err := ownershipdest.DecodeDestinationAddressV1Hex(goldenDestinationHex)
 	if err != nil {
 		return err
 	}
-	path := ownership.Path{Account: 3, Role: 2, Index: 0}
-	credential, err := ownership.DeriveCredential(master, path)
+	credential, err := ownership.DeriveCredential(master, goldenPath)
 	if err != nil {
 		return err
 	}
@@ -98,7 +110,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	assignment, err := ownershipdest.Assignment(master, path, destination, publicInput)
+	assignment, err := ownershipdest.Assignment(master, goldenPath, destination, publicInput)
 	if err != nil {
 		return err
 	}
