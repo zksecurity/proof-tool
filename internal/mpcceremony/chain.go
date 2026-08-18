@@ -588,7 +588,30 @@ func ValidateClose(definition CeremonyDefinition, chain Chain, close CloseRecord
 			minimumLead,
 		)
 	}
+	if requiredLead := requiredCloseLead(definition); roundTime.Sub(closedAt) < requiredLead {
+		return fmt.Errorf(
+			"beacon round lead %s does not reserve the production witness observation window: need %s (signed minimum %s plus %s window)",
+			roundTime.Sub(closedAt),
+			requiredLead,
+			minimumLead,
+			requiredLead-minimumLead,
+		)
+	}
 	return nil
+}
+
+// requiredCloseLead is the beacon lead a close must reserve, measured from
+// closed_at: the signed minimum witness lead, plus — in production — the
+// witness observation window. Witness receipts measure the same signed
+// minimum from their own observation time, which is strictly after closed_at,
+// so without the reserved window a close at the bare minimum makes every
+// witness receipt unsatisfiable. See ProductionWitnessObservationWindowSeconds.
+func requiredCloseLead(definition CeremonyDefinition) time.Duration {
+	lead := time.Duration(definition.BeaconPolicy.MinimumWitnessLeadSeconds) * time.Second
+	if definition.Mode == ModeProduction {
+		lead += time.Duration(ProductionWitnessObservationWindowSeconds) * time.Second
+	}
+	return lead
 }
 
 type BeaconRecord struct {

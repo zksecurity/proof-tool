@@ -188,9 +188,13 @@ func TestValidateBeaconRecomputesAgainstBoundClose(t *testing.T) {
 		BeaconNetwork:        definition.BeaconPolicy.Network,
 		BeaconRound:          30699432,
 		BeaconNotBefore:      roundTime.Format(time.RFC3339),
-		ClosedAt:             roundTime.Add(-minimumLead - time.Minute).Format(time.RFC3339),
-		CoordinatorID:        definition.Coordinator.ID,
-		CoordinatorKeyID:     definition.Coordinator.KeyID,
+		ClosedAt: roundTime.Add(
+			-minimumLead -
+				time.Duration(ProductionWitnessObservationWindowSeconds)*time.Second -
+				time.Minute,
+		).Format(time.RFC3339),
+		CoordinatorID:    definition.Coordinator.ID,
+		CoordinatorKeyID: definition.Coordinator.KeyID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -198,14 +202,29 @@ func TestValidateBeaconRecomputesAgainstBoundClose(t *testing.T) {
 	if err := ValidateClose(definition, chain, closeRecord); err != nil {
 		t.Fatal(err)
 	}
+	// Production must reserve the witness observation window on top of the
+	// signed minimum: witness receipts measure the same minimum from their
+	// observation time, which is strictly after closed_at, so a close at the
+	// bare minimum would make every witness receipt unsatisfiable.
+	window := time.Duration(ProductionWitnessObservationWindowSeconds) * time.Second
 	exactLead := closeRecord
 	exactLead.ClosedAt = roundTime.Add(-minimumLead).Format(time.RFC3339)
 	exactLead, err = NewCloseRecord(exactLead)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ValidateClose(definition, chain, exactLead); err != nil {
-		t.Fatalf("close at exact signed minimum witness lead rejected: %v", err)
+	if err := ValidateClose(definition, chain, exactLead); err == nil ||
+		!strings.Contains(err.Error(), "witness observation window") {
+		t.Fatalf("production close at bare signed minimum error = %v, want witness-window rejection", err)
+	}
+	windowedLead := closeRecord
+	windowedLead.ClosedAt = roundTime.Add(-minimumLead - window).Format(time.RFC3339)
+	windowedLead, err = NewCloseRecord(windowedLead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateClose(definition, chain, windowedLead); err != nil {
+		t.Fatalf("production close reserving the witness window rejected: %v", err)
 	}
 	belowLead := exactLead
 	belowLead.ClosedAt = "2026-07-23T14:01:00.000000001Z"

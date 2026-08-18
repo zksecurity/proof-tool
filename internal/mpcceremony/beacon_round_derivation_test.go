@@ -60,6 +60,10 @@ func TestFirstQuicknetRoundAfterBeforeGenesis(t *testing.T) {
 // that rejects a round an operator named before a multi-hour replay.
 func TestDerivedRoundClearsTheSignedLead(t *testing.T) {
 	const leadSeconds = 600
+	definition := CeremonyDefinition{
+		Mode:         ModeRehearsal,
+		BeaconPolicy: BeaconPolicy{MinimumWitnessLeadSeconds: leadSeconds},
+	}
 	closedAt := time.Unix(BeaconQuicknetGenesis+1_000_000, 0).UTC()
 	lead := leadSeconds * time.Second
 
@@ -71,7 +75,7 @@ func TestDerivedRoundClearsTheSignedLead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := validateCloseCommitTime(closedAt, closedAt, roundTime, leadSeconds); err != nil {
+	if err := validateCloseCommitTime(closedAt, closedAt, roundTime, definition); err != nil {
 		t.Fatalf("derived round rejected by the publication guard: %v", err)
 	}
 	if roundTime.Sub(closedAt) < lead {
@@ -84,6 +88,10 @@ func TestDerivedRoundClearsTheSignedLead(t *testing.T) {
 // the past when the closure is published.
 func TestExplicitRoundStaleAfterLongReplayIsRejected(t *testing.T) {
 	const leadSeconds = 600
+	definition := CeremonyDefinition{
+		Mode:         ModeRehearsal,
+		BeaconPolicy: BeaconPolicy{MinimumWitnessLeadSeconds: leadSeconds},
+	}
 	chosenAt := time.Unix(BeaconQuicknetGenesis+1_000_000, 0).UTC()
 
 	// The operator picks a round just past the signed lead, as the only written
@@ -99,7 +107,7 @@ func TestExplicitRoundStaleAfterLongReplayIsRejected(t *testing.T) {
 
 	// The replay then takes an hour and forty minutes.
 	closedAt := chosenAt.Add(100 * time.Minute)
-	if err := validateCloseCommitTime(closedAt, closedAt, roundTime, leadSeconds); err == nil {
+	if err := validateCloseCommitTime(closedAt, closedAt, roundTime, definition); err == nil {
 		t.Fatal("stale round was accepted after a long replay")
 	}
 
@@ -114,7 +122,7 @@ func TestExplicitRoundStaleAfterLongReplayIsRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := validateCloseCommitTime(closedAt, closedAt, derivedTime, leadSeconds); err != nil {
+	if err := validateCloseCommitTime(closedAt, closedAt, derivedTime, definition); err != nil {
 		t.Fatalf("derived round rejected: %v", err)
 	}
 }

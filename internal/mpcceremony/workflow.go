@@ -75,6 +75,9 @@ func (p InitParticipants) Validate() error {
 	if len(p.Auditors) < 2 {
 		return errors.New("at least two independent auditors are required")
 	}
+	if len(p.Auditors) > MaxAuditors {
+		return fmt.Errorf("auditors exceed maximum %d recordable in the final transcript", MaxAuditors)
+	}
 	if len(p.Roster) == 0 || len(p.Roster) > MaxParticipants {
 		return fmt.Errorf("roster must contain between 1 and %d participants", MaxParticipants)
 	}
@@ -1587,10 +1590,8 @@ func publishReplayedPhaseClose(
 		// sample and demands the signed minimum plus a safety margin, so derive
 		// past that rather than past the bare minimum.
 		lead := time.Duration(options.BeaconRoundLeadSeconds) * time.Second
-		if minimum := time.Duration(
-			trusted.Definition.BeaconPolicy.MinimumWitnessLeadSeconds,
-		) * time.Second; lead < minimum {
-			lead = minimum
+		if required := requiredCloseLead(trusted.Definition); lead < required {
+			lead = required
 		}
 		beaconRound, err = FirstQuicknetRoundAfter(
 			closedAt.Add(lead + closePublicationSafetyMargin),
@@ -1659,7 +1660,7 @@ func publishReplayedPhaseClose(
 				closedAt,
 				now().UTC(),
 				roundTime,
-				trusted.Definition.BeaconPolicy.MinimumWitnessLeadSeconds,
+				trusted.Definition,
 			)
 		},
 	); err != nil {
@@ -1673,7 +1674,7 @@ func validateCloseCommitTime(
 	closedAt time.Time,
 	commitTime time.Time,
 	roundTime time.Time,
-	minimumWitnessLeadSeconds uint32,
+	definition CeremonyDefinition,
 ) error {
 	if closedAt.IsZero() {
 		return errors.New("closure clock returned the zero time")
@@ -1684,11 +1685,11 @@ func validateCloseCommitTime(
 	if commitTime.Before(closedAt) {
 		return errors.New("closure clock moved backwards before publication")
 	}
-	minimumLead := time.Duration(minimumWitnessLeadSeconds) * time.Second
+	minimumLead := requiredCloseLead(definition)
 	requiredLead := minimumLead + closePublicationSafetyMargin
 	if roundTime.Sub(commitTime) < requiredLead {
 		return fmt.Errorf(
-			"beacon round lead at closure publication %s is below required %s (signed witness lead %s plus publication margin %s)",
+			"beacon round lead at closure publication %s is below required %s (required witness lead %s plus publication margin %s)",
 			roundTime.Sub(commitTime),
 			requiredLead,
 			minimumLead,
