@@ -54,7 +54,7 @@ type ProductionGate string
 const (
 	GateSignedRelease          ProductionGate = "signed-release"
 	GateOperationalEvidence    ProductionGate = "operational-evidence"
-	GateIndependentAudits      ProductionGate = "two-independent-audits"
+	GateIndependentAudits      ProductionGate = "independent-audits"
 	GateExternalAudit          ProductionGate = "third-party-security-audit"
 	GateK21Rehearsal           ProductionGate = "exact-k21-rehearsal"
 	GateMainnetDeploymentPlan  ProductionGate = "mainnet-deployment-plan"
