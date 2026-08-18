@@ -1318,9 +1318,19 @@ func copyOperationalEvidence(
 	return nil
 }
 
+// bundleAuditArtifacts copies the audit reports into the staging tree in
+// ascending auditor-ID order. The bundled order is frozen into the final
+// transcript, and the production decision independently requires its audits
+// ascending by auditor ID and then requires the transcript refs to match that
+// order exactly — so bundling in the caller's flag order would sign a release
+// for which no valid decision can ever exist.
 func bundleAuditArtifacts(inputs []AuditArtifact, stagingDir string) ([]AuditArtifact, error) {
 	auditDir := filepath.Join(stagingDir, "audits")
 	if err := os.Mkdir(auditDir, 0o700); err != nil {
+		return nil, err
+	}
+	inputs, err := sortAuditArtifactsByAuditorID(inputs)
+	if err != nil {
 		return nil, err
 	}
 	result := make([]AuditArtifact, len(inputs))
@@ -1342,6 +1352,36 @@ func bundleAuditArtifacts(inputs []AuditArtifact, stagingDir string) ([]AuditArt
 		}
 	}
 	return result, nil
+}
+
+// sortAuditArtifactsByAuditorID orders the supplied reports by the auditor ID
+// each record names. The records are only read here; authentication and
+// enrollment checks run in verifyPassingAudits on the bundled copies.
+func sortAuditArtifactsByAuditorID(inputs []AuditArtifact) ([]AuditArtifact, error) {
+	type keyed struct {
+		artifact  AuditArtifact
+		auditorID string
+	}
+	entries := make([]keyed, len(inputs))
+	for index, input := range inputs {
+		recordBytes, err := readRegularFile(input.RecordPath)
+		if err != nil {
+			return nil, fmt.Errorf("audit %d: %w", index, err)
+		}
+		var record AuditRecord
+		if err := UnmarshalCanonical(recordBytes, &record); err != nil {
+			return nil, fmt.Errorf("audit %d: %w", index, err)
+		}
+		entries[index] = keyed{artifact: input, auditorID: record.AuditorID}
+	}
+	slices.SortStableFunc(entries, func(a, b keyed) int {
+		return strings.Compare(a.auditorID, b.auditorID)
+	})
+	sorted := make([]AuditArtifact, len(entries))
+	for index, entry := range entries {
+		sorted[index] = entry.artifact
+	}
+	return sorted, nil
 }
 
 func bundledAuditsForTranscript(keysDir string, refs []ArtifactRef) ([]AuditArtifact, error) {

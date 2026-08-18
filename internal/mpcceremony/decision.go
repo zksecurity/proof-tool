@@ -24,7 +24,14 @@ const (
 	ProductionDecisionSchema          = "proof-tool-mpc-production-decision-v1"
 	ProductionDecisionDraftSchema     = "proof-tool-mpc-production-decision-draft-v1"
 	ProductionDecisionSignatureSchema = "proof-tool-mpc-production-decision-signature-v1"
-	MaxProductionReleaseArtifacts     = 4096
+	// MaxProductionReleaseArtifacts must admit the largest release tree the
+	// earlier layers can produce, or a fully valid signed release strands at
+	// decision preparation. Upper bound of the evidence a bundle may reference:
+	// up to 128 governance records with up to 128 evidence artifacts each
+	// (~16.5k), plus enrollments (128 x 3), witness receipts (32 x 2 phases x 2
+	// files), mirror receipts (8 x 20 heads x 2 phases), relay evidence, audits,
+	// and the fixed candidate set — comfortably under 32768.
+	MaxProductionReleaseArtifacts = 32768
 )
 
 type ProductionDecisionOutcome string
@@ -1256,7 +1263,7 @@ func decisionSignerIdentity(
 				return identity, nil
 			}
 		}
-		return Identity{}, errors.New("auditor decision signature is not from either audit bound by the decision")
+		return Identity{}, errors.New("auditor decision signature is not from any audit bound by the decision")
 	default:
 		return Identity{}, fmt.Errorf("unsupported decision signer role %q", role)
 	}

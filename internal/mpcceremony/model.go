@@ -57,6 +57,12 @@ const (
 	ModeProduction          = "production"
 
 	MaxParticipants = 20
+	// MaxAuditors bounds enrolled auditors. The final transcript stores audit
+	// reports in an artifact list capped at MaxParticipants entries, so the
+	// bound must be enforced at enrollment too: without it a ceremony could
+	// enroll more auditors than the transcript can record and discover that
+	// only at release, after every audit had already been performed.
+	MaxAuditors = MaxParticipants
 )
 
 type Phase string

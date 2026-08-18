@@ -345,8 +345,9 @@ the accountable roles should sign.
     --signing-key KEY --out FRESH_FILE
 
 Signs the exact canonical decision bytes with one enrolled ceremony identity.
-A GO record requires the coordinator, the two auditors named by the record,
-and the distinct release signer to sign the same bytes. Before loading a GO
+A GO record requires the coordinator, every auditor named by the record,
+and the distinct release signer to sign the same bytes — one signature per
+named auditor, so a ceremony with three auditors needs five signatures. Before loading a GO
 signing key, the command hashes and semantically verifies the full local
 evidence set. Evidence verification is optional for a NO-GO record so an
 accountable role can sign a fail-closed decision that reports unavailable
@@ -355,7 +356,7 @@ evidence.
 	"decision verify": `Usage:
   mpc-ceremony decision verify --ceremony FILE --ceremony-signature FILE \
     --coordinator-public-key-file KEY --decision FILE \
-    --signature FILE --signature FILE --signature FILE --signature FILE \
+    --signature FILE [--signature FILE ...] \
     --evidence-root DIR
 
 Strictly parses the record and detached role signatures, hashes every local
