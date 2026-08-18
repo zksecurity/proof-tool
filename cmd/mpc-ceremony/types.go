@@ -14,6 +14,7 @@ type Command string
 
 const (
 	CommandInit             Command = "init"
+	CommandInspect          Command = "inspect"
 	CommandPhase1Contribute Command = "phase1 contribute"
 	CommandPhase1Erasure    Command = "phase1 attest-erasure"
 	CommandPhase1Verify     Command = "phase1 verify"
@@ -326,4 +327,13 @@ type unwiredExecutor struct{}
 
 func (unwiredExecutor) Execute(context.Context, Invocation) (CommandResult, error) {
 	return CommandResult{}, errExecutorNotWired
+}
+
+// InspectOptions configures the read-only ceremony inspection command.
+type InspectOptions struct {
+	CeremonyPath             string
+	CeremonySignaturePath    string
+	CoordinatorPublicKeyFile string
+	TranscriptDir            string
+	Full                     bool
 }

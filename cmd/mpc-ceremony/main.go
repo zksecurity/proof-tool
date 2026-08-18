@@ -239,7 +239,7 @@ func identifyCLICommandArguments(args []string) map[int]struct{} {
 
 command:
 	topLevel := map[string]struct{}{
-		"audit": {}, "decision": {}, "finalize": {}, "help": {}, "init": {},
+		"audit": {}, "decision": {}, "finalize": {}, "help": {}, "init": {}, "inspect": {},
 		"ops": {}, "phase1": {}, "phase2": {}, "release": {},
 	}
 	if _, ok := topLevel[args[index]]; !ok {

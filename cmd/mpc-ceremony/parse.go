@@ -61,6 +61,10 @@ func parseInvocation(args []string) (Invocation, error) {
 		options, err := parseInit(rest[1:])
 		invocation.Command, invocation.Options = CommandInit, options
 		return invocation, wrapCommandError(err, "init")
+	case "inspect":
+		options, err := parseInspect(rest[1:])
+		invocation.Command, invocation.Options = CommandInspect, options
+		return invocation, wrapCommandError(err, "inspect")
 	case "phase1":
 		return parsePhase1(invocation, rest[1:])
 	case "phase2":
@@ -978,4 +982,21 @@ func (s *stringList) Set(value string) error {
 	}
 	*s = append(*s, value)
 	return nil
+}
+
+func parseInspect(args []string) (InspectOptions, error) {
+	var options InspectOptions
+	fs := commandFlagSet("inspect")
+	addCeremonyTrustFlags(fs, &options.CeremonyPath, &options.CeremonySignaturePath, &options.CoordinatorPublicKeyFile)
+	fs.StringVar(&options.TranscriptDir, "transcript-dir", "", "ceremony transcript root directory")
+	fs.BoolVar(&options.Full, "full", false, "re-verify every chain record and artifact digest instead of metadata only")
+	if err := parseFlags(fs, args); err != nil {
+		return options, err
+	}
+	return options, requireValues(
+		pathValue("--ceremony", options.CeremonyPath),
+		pathValue("--ceremony-signature", options.CeremonySignaturePath),
+		pathValue("--coordinator-public-key-file", options.CoordinatorPublicKeyFile),
+		pathValue("--transcript-dir", options.TranscriptDir),
+	)
 }

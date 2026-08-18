@@ -617,6 +617,48 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		Phase2BeaconPath:          phase2Beacon.BeaconPath,
 		Phase2BeaconSignaturePath: phase2Beacon.SignaturePath,
 	}
+	// Both phases are complete, closed, beaconed, and phase 1 is sealed.
+	// Exercise the read-only inspection at both depths from inside the same
+	// binary that ran init, so the running-software gate verifies a real
+	// executable identity exactly as it does for every other command.
+	for _, full := range []bool{false, true} {
+		inspection, err := mpcceremony.InspectCeremony(mpcceremony.InspectCeremonyOptions{
+			Trust: mpcceremony.TrustPaths{
+				DefinitionPath:           initialized.DefinitionPath,
+				DefinitionSignaturePath:  initialized.DefinitionSignaturePath,
+				CoordinatorPublicKeyPath: trustedCoordinatorPath,
+			},
+			TranscriptRoot: ceremonyRoot,
+			Full:           full,
+		})
+		if err != nil {
+			return fmt.Errorf("inspect ceremony (full=%v): %w", full, err)
+		}
+		if inspection.CeremonyID != initialized.Definition.CeremonyID {
+			return fmt.Errorf("inspect ceremony id %q, want %q", inspection.CeremonyID, initialized.Definition.CeremonyID)
+		}
+		if len(inspection.Phases) != 2 {
+			return fmt.Errorf("inspect reported %d phases, want 2", len(inspection.Phases))
+		}
+		for _, phase := range inspection.Phases {
+			if !phase.Started || !phase.ContributionsComplete || !phase.Closed || !phase.BeaconRecorded {
+				return fmt.Errorf("inspect %s state = %+v, want complete/closed/beaconed", phase.Phase, phase)
+			}
+			if phase.AcceptedCount != 2 || phase.ScheduledTotal != 2 {
+				return fmt.Errorf("inspect %s accepted %d/%d, want 2/2", phase.Phase, phase.AcceptedCount, phase.ScheduledTotal)
+			}
+			if phase.NextParticipantID != "" || phase.NextIndex != 0 {
+				return fmt.Errorf("inspect %s still schedules %q at %d", phase.Phase, phase.NextParticipantID, phase.NextIndex)
+			}
+			if len(phase.MissingArtifacts) != 0 {
+				return fmt.Errorf("inspect %s reports missing artifacts: %v", phase.Phase, phase.MissingArtifacts)
+			}
+			if wantSealed := phase.Phase == mpcceremony.Phase1; phase.Sealed != wantSealed {
+				return fmt.Errorf("inspect %s sealed = %v, want %v", phase.Phase, phase.Sealed, wantSealed)
+			}
+		}
+	}
+
 	preliminaryDir := filepath.Join(outputRoot, "preliminary")
 	if _, err := mpcceremony.PrepareFinalization(mpcceremony.PrepareFinalizationOptions{
 		Replay:                replay,

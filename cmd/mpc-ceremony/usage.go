@@ -28,6 +28,7 @@ It performs no network access and never selects a mutable "latest" artifact.
 
 Commands:
   init                 Bind a ceremony to the compiled repository circuit
+  inspect              Report chain state and next scheduled contribution
   phase1 contribute    Verify the full phase 1 chain and contribute
   phase1 attest-erasure Sign a participant destruction attestation
   phase1 verify        Verify and append one candidate contribution
@@ -59,6 +60,26 @@ verification-bypass flags.
 Run "mpc-ceremony help <command>" for command-specific help.
 `
 
+var inspectHelp = `Usage:
+  mpc-ceremony inspect --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --transcript-dir DIR [--full]
+
+Read-only recovery inspection. Reports ceremony identity and mode, per-phase
+accepted count and head record, the next scheduled participant and index, the
+closure/beacon/seal state, and which referenced artifacts are present.
+
+It requires no signing key, writes nothing, and never replays contributions.
+Unlike every other command it discovers the highest published chain file per
+phase; that is safe only because the result feeds no signing or verification
+decision, and every discovered file is authenticated against the trust anchor
+before being reported.
+
+The default depth verifies signatures and structure and checks artifact
+presence by size in seconds. --full additionally re-verifies every payload
+digest, attestation, erasure, and verification record, which re-hashes every
+artifact. The output states which depth ran.
+`
+
 const replayFlagsHelp = `
 Required immutable replay evidence:
   --transcript-root DIR
@@ -78,6 +99,7 @@ second path list.
 `
 
 var commandHelp = map[string]string{
+	"inspect": inspectHelp,
 	"init": `Usage:
   mpc-ceremony init --key-version ownership-destination-v2 \
     --participants ROSTER.json --policy POLICY.json \
