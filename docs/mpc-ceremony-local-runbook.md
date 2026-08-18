@@ -10,7 +10,7 @@ ceremony on one machine, and read what comes out. It is **not** a production
 procedure.
 
 The production procedure is `docs/mpc-ceremony-runbook.md` (1,590 lines), which
-is currently absent from `main` — see `mpc-ceremony-proposed-changes.md` item B1.
+is currently absent from `main`; it was removed by a history-filtering rewrite.
 It survives in `refs/pull/34/head` of `Anastasia-Labs/proof-tool` at commit
 `fd8516e`. Anything about enrollment, custody, witnessing, mirrors, beacon
 selection, or release gates comes from that document, not this one.
@@ -204,8 +204,8 @@ came from an independent channel.
 
 The next step is `phase1 contribute` for the first scheduled participant, which
 replays the entire accepted chain before sampling entropy. At K=21 with three
-participants that is gigabytes of I/O and hours of verification, with **no
-progress output** — see `mpc-ceremony-proposed-changes.md` item A3.
+participants that is gigabytes of I/O and hours of verification. Replay
+progress is reported on stderr so running can be told apart from hung.
 
 For a staged, resumable local run through the whole lifecycle, use the real
 harness instead of driving the CLI by hand:
