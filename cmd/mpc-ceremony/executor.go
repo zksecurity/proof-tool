@@ -67,6 +67,10 @@ func (workflowExecutor) Execute(ctx context.Context, invocation Invocation) (Com
 		return executeReleaseSign(invocation.Options.(ReleaseSignOptions))
 	case CommandReleaseVerify:
 		return executeReleaseVerify(invocation.Options.(ReleaseVerifyOptions))
+	case CommandOpsPreparePublicWitnessReceipt:
+		return executeOpsPreparePublicWitnessReceipt(invocation.Options.(OpsPreparePublicWitnessReceiptOptions))
+	case CommandOpsPrepareMirrorReceipt:
+		return executeOpsPrepareMirrorReceipt(invocation.Options.(OpsPrepareMirrorReceiptOptions))
 	case CommandOpsExportSigning:
 		return executeOpsExportSigning(invocation.Options.(OpsExportSigningOptions))
 	case CommandOpsImportSig:
@@ -79,6 +83,14 @@ func (workflowExecutor) Execute(ctx context.Context, invocation Invocation) (Com
 		return executeDecisionSign(invocation.Options.(DecisionSignOptions))
 	case CommandDecisionVerify:
 		return executeDecisionVerify(invocation.Options.(DecisionVerifyOptions))
+	case CommandInspectDefinition:
+		return executeInspectDefinition(invocation.Options.(InspectDefinitionOptions))
+	case CommandInspectChain:
+		return executeInspectChain(invocation.Options.(InspectChainOptions))
+	case CommandInspectParticipant:
+		return executeInspectParticipant(invocation.Options.(InspectParticipantOptions))
+	case CommandInspectEnrollment:
+		return executeInspectEnrollment(invocation.Options.(InspectEnrollmentOptions))
 	default:
 		return CommandResult{}, fmt.Errorf("%w: %s", errExecutorNotWired, invocation.Command)
 	}

@@ -49,6 +49,12 @@ Commands:
   decision prepare     Derive the canonical production GO/NO-GO record
   decision sign        Sign the canonical production GO/NO-GO record
   decision verify      Verify decision evidence and role threshold
+  inspect definition   Authenticate and describe a ceremony definition
+  inspect chain        Authenticate and describe an accepted chain
+  inspect participant  Match an existing key to the participant roster
+  inspect enrollment   Authenticate an operational enrollment
+  ops prepare-public-witness-receipt  Prepare witnessed closure bytes
+  ops prepare-mirror-receipt  Authenticate a relay draft for offline signing
   ops export-signing   Export canonical operational bytes for offline signing
   ops import-signature Import and verify a raw offline Ed25519 signature
   ops verify           Verify a signed operational record fail-closed
@@ -99,7 +105,49 @@ second path list.
 `
 
 var commandHelp = map[string]string{
-	"inspect": inspectHelp,
+	"inspect": inspectHelp + `
+Authenticated record projections are also available as subcommands:
+  mpc-ceremony inspect <definition|chain|participant|enrollment> [flags]
+
+These subcommands are read-only and machine-readable. They perform no network
+access, replay, signing, or writes.
+`,
+	"inspect definition": `Usage:
+  mpc-ceremony --format json inspect definition --ceremony FILE \
+    --ceremony-signature FILE --coordinator-public-key-file KEY
+
+Authenticates the exact canonical ceremony definition against the out-of-band
+coordinator public key and reports its identity, mode, schedules, and circuit.
+`,
+	"inspect chain": `Usage:
+  mpc-ceremony --format json inspect chain --ceremony FILE \
+    --ceremony-signature FILE --coordinator-public-key-file KEY \
+    --transcript-root DIR --chain FILE --chain-signature FILE
+
+Authenticates the definition and accepted chain, validates the chain against
+the frozen ceremony, and reports its records and digest-pinned artifacts. It
+does not replay contribution payloads.
+`,
+	"inspect participant": `Usage:
+  mpc-ceremony --format json inspect participant --ceremony FILE \
+    --ceremony-signature FILE --coordinator-public-key-file KEY \
+    --participant-signing-key KEY
+
+Loads the existing Ed25519 private key with the hardened contribution-key
+rules, derives only its public key, and matches it to exactly one identity in
+the authenticated participant roster. Reports one-based phase schedule
+positions, using null when the participant is absent. It performs no signing or
+writes and never emits private-key bytes.
+`,
+	"inspect enrollment": `Usage:
+  mpc-ceremony --format json inspect enrollment --ceremony FILE \
+    --ceremony-signature FILE --coordinator-public-key-file KEY \
+    --enrollment FILE --enrollment-signature FILE
+
+Authenticates the exact canonical operational enrollment and its detached
+proof-of-possession signature, then reports an immutable public projection of
+the identity, role, role index, timestamp, and independence disclosure.
+`,
 	"init": `Usage:
   mpc-ceremony init --key-version ownership-destination-v2 \
     --participants ROSTER.json --policy POLICY.json \
@@ -365,11 +413,40 @@ coherence, and fail-closes GO unless all gates PASS and all four roles signed.
 Evidence URIs are content bindings only; the command performs no network fetch.
 `,
 	"ops": `Usage:
-  mpc-ceremony ops <export-signing|import-signature|verify> [flags]
+  mpc-ceremony ops <prepare-public-witness-receipt|prepare-mirror-receipt|export-signing|import-signature|verify> [flags]
 
 Operational records cover proof-of-possession enrollment, transfers and
 receipts, immutable mirrors, pre-beacon public witnesses, multi-operator relay
 evidence, governance events, and the release-bound operational evidence bundle.
+`,
+	"ops prepare-public-witness-receipt": `Usage:
+  mpc-ceremony ops prepare-public-witness-receipt \
+    --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --transcript-root DIR \
+    --closure FILE --closure-signature FILE \
+    --witness-enrollment FILE --witness-enrollment-signature FILE \
+    --publication-location URI --observed-at RFC3339_UTC \
+    --out-dir FRESH_DIR
+
+Authenticates the ceremony, coordinator-signed closure, and public-witness
+proof-of-possession enrollment. It validates the human-claimed observation
+against the signed closure and beacon schedule, hashes the publication location,
+and exports canonical.json plus signing-request.json for offline review and
+signing. The program validates coherence; it does not claim to have observed
+publication itself and never reads the witness private key.
+`,
+	"ops prepare-mirror-receipt": `Usage:
+  mpc-ceremony ops prepare-mirror-receipt --draft FILE \
+    --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --transcript-root DIR \
+    --chain FILE --chain-signature FILE \
+    --mirror-enrollment FILE --mirror-enrollment-signature FILE \
+    --out-dir FRESH_DIR
+
+Authenticates the exact accepted chain prefix and the mirror operator's signed
+proof-of-possession enrollment, recomputes every receipt file reference, and
+requires the relay draft to match. It then exports canonical.json and
+signing-request.json without reading a private signing key.
 `,
 	"ops export-signing": `Usage:
   mpc-ceremony ops export-signing --record-type TYPE --record FILE \

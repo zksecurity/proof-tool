@@ -350,6 +350,80 @@ type ImmutableMirrorReceipt struct {
 	StoredAt              string        `json:"stored_at"`
 }
 
+// MirrorReceiptDraft is the human-reviewable, unsigned input produced by a
+// mirror after it stores an authenticated accepted-head prefix. It deliberately
+// omits the schema and mirror identity: the ceremony derives both rather than
+// trusting operator-authored draft fields.
+type MirrorReceiptDraft struct {
+	CeremonyID            string        `json:"ceremony_id"`
+	Phase                 Phase         `json:"phase"`
+	Index                 uint8         `json:"index"`
+	AcceptedHeadID        string        `json:"accepted_head_id"`
+	Files                 []ArtifactRef `json:"files"`
+	StorageLocationSHA256 string        `json:"storage_location_sha256"`
+	StoredAt              string        `json:"stored_at"`
+}
+
+func (d MirrorReceiptDraft) Validate() error {
+	if err := validateOperationalScope(d.CeremonyID, d.Phase, d.Index, d.AcceptedHeadID); err != nil {
+		return err
+	}
+	if err := validateMirrorDraftArtifactSet(d.Files); err != nil {
+		return err
+	}
+	if err := validateTaggedHex(d.StorageLocationSHA256, "sha256:", sha256.Size); err != nil {
+		return fmt.Errorf("storage_location_sha256: %w", err)
+	}
+	return validateTimestamp("stored_at", d.StoredAt)
+}
+
+func validateMirrorDraftArtifactSet(artifacts []ArtifactRef) error {
+	if len(artifacts) == 0 || len(artifacts) > 128 {
+		return errors.New("files must contain between 1 and 128 artifacts")
+	}
+	previous := ""
+	for index, artifact := range artifacts {
+		if err := validateArtifactName(artifact.Name); err != nil {
+			return fmt.Errorf("files %d: %w", index, err)
+		}
+		if index > 0 && artifact.Name <= previous {
+			return errors.New("files must be ordered by unique artifact name")
+		}
+		if err := validateTaggedHex(artifact.Digest.SHA256, "sha256:", sha256.Size); err != nil {
+			return fmt.Errorf("files %d artifact %q sha256: %w", index, artifact.Name, err)
+		}
+		if artifact.Digest.Blake2b256 != "" {
+			if err := validateTaggedHex(artifact.Digest.Blake2b256, "blake2b256:", 32); err != nil {
+				return fmt.Errorf("files %d artifact %q blake2b256: %w", index, artifact.Name, err)
+			}
+		}
+		if artifact.Digest.Size <= 0 {
+			return fmt.Errorf("files %d artifact %q size must be positive", index, artifact.Name)
+		}
+		previous = artifact.Name
+	}
+	return nil
+}
+
+// ParseMirrorReceiptDraft accepts ordinary JSON for operator review while
+// still rejecting duplicate/unknown fields and trailing input. Canonical byte
+// encoding is produced only after every draft field has been recomputed.
+func ParseMirrorReceiptDraft(data []byte) (MirrorReceiptDraft, error) {
+	if err := rejectDuplicateKeysAndTrailing(data); err != nil {
+		return MirrorReceiptDraft{}, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var draft MirrorReceiptDraft
+	if err := decoder.Decode(&draft); err != nil {
+		return MirrorReceiptDraft{}, fmt.Errorf("decode mirror receipt draft: %w", err)
+	}
+	if err := draft.Validate(); err != nil {
+		return MirrorReceiptDraft{}, err
+	}
+	return draft, nil
+}
+
 func (r ImmutableMirrorReceipt) Validate() error {
 	if r.Schema != ImmutableMirrorReceiptSchema {
 		return fmt.Errorf("mirror receipt schema %q, want %q", r.Schema, ImmutableMirrorReceiptSchema)
@@ -789,10 +863,7 @@ func ValidatePublicWitnessReceipt(
 	closeBytes []byte,
 	receipt PublicWitnessReceipt,
 ) error {
-	if err := definition.Validate(); err != nil {
-		return err
-	}
-	if err := close.Validate(); err != nil {
+	if err := validatePublicWitnessCloseBinding(definition, close); err != nil {
 		return err
 	}
 	if err := receipt.Validate(); err != nil {
@@ -827,6 +898,54 @@ func ValidatePublicWitnessReceipt(
 		receipt.ChainHeadID != close.ChainHeadID || receipt.BeaconRound != close.BeaconRound ||
 		receipt.Closure.Digest != NewDigest(closeBytes) {
 		return errors.New("public witness receipt does not exactly bind the signed closure")
+	}
+	return nil
+}
+
+func validatePublicWitnessCloseBinding(definition CeremonyDefinition, close CloseRecord) error {
+	if err := definition.Validate(); err != nil {
+		return err
+	}
+	if err := close.Validate(); err != nil {
+		return err
+	}
+	if close.CeremonyID != definition.CeremonyID {
+		return errors.New("closure ceremony does not match authenticated definition")
+	}
+	if close.CoordinatorID != definition.Coordinator.ID ||
+		close.CoordinatorKeyID != definition.Coordinator.KeyID {
+		return errors.New("closure coordinator does not match authenticated definition")
+	}
+	if close.BeaconProvider != definition.BeaconPolicy.Provider ||
+		close.BeaconNetwork != definition.BeaconPolicy.Network {
+		return errors.New("closure beacon does not match authenticated definition policy")
+	}
+	createdAt, _ := time.Parse(time.RFC3339Nano, definition.CreatedAt)
+	closedAt, _ := time.Parse(time.RFC3339Nano, close.ClosedAt)
+	roundTime, err := QuicknetRoundTime(close.BeaconRound)
+	if err != nil {
+		return err
+	}
+	if !closedAt.After(createdAt) {
+		return errors.New("closure must be created after the ceremony definition")
+	}
+	if !roundTime.After(closedAt) {
+		return errors.New("closure beacon round was not in the future when the phase closed")
+	}
+	minimumLead := time.Duration(definition.BeaconPolicy.MinimumWitnessLeadSeconds) * time.Second
+	if roundTime.Sub(closedAt) < minimumLead {
+		return fmt.Errorf(
+			"closure beacon round lead %s is below signed minimum %s",
+			roundTime.Sub(closedAt),
+			minimumLead,
+		)
+	}
+	if requiredLead := requiredCloseLead(definition); roundTime.Sub(closedAt) < requiredLead {
+		return fmt.Errorf(
+			"closure beacon round lead %s does not reserve the production witness observation window: need %s",
+			roundTime.Sub(closedAt),
+			requiredLead,
+		)
 	}
 	return nil
 }

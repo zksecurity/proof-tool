@@ -423,33 +423,58 @@ type PhaseTranscriptPaths struct {
 
 // LoadSignedChain verifies the exact coordinator-signed chain at paths.
 func LoadSignedChain(trusted *TrustedCeremony, paths PhaseTranscriptPaths) (Chain, error) {
+	chain, _, err := LoadSignedChainExact(trusted, paths)
+	return chain, err
+}
+
+// LoadSignedChainExact verifies a coordinator-signed chain and returns artifact
+// references computed from the same exact bytes that were authenticated.
+func LoadSignedChainExact(trusted *TrustedCeremony, paths PhaseTranscriptPaths) (Chain, SignedArtifactRefs, error) {
 	if err := validateTrustedCeremony(trusted); err != nil {
-		return Chain{}, err
+		return Chain{}, SignedArtifactRefs{}, err
 	}
 	if strings.TrimSpace(paths.RootDir) == "" ||
 		strings.TrimSpace(paths.ChainPath) == "" ||
 		strings.TrimSpace(paths.ChainSignaturePath) == "" {
-		return Chain{}, errors.New("transcript root, chain, and chain signature paths are required")
+		return Chain{}, SignedArtifactRefs{}, errors.New("transcript root, chain, and chain signature paths are required")
 	}
-	if _, err := logicalPathWithin(paths.RootDir, paths.ChainPath); err != nil {
-		return Chain{}, fmt.Errorf("chain path: %w", err)
+	chainName, err := logicalPathWithin(paths.RootDir, paths.ChainPath)
+	if err != nil {
+		return Chain{}, SignedArtifactRefs{}, fmt.Errorf("chain path: %w", err)
 	}
-	if _, err := logicalPathWithin(paths.RootDir, paths.ChainSignaturePath); err != nil {
-		return Chain{}, fmt.Errorf("chain signature path: %w", err)
+	signatureName, err := logicalPathWithin(paths.RootDir, paths.ChainSignaturePath)
+	if err != nil {
+		return Chain{}, SignedArtifactRefs{}, fmt.Errorf("chain signature path: %w", err)
+	}
+	chainBytes, err := readRegularBounded(paths.ChainPath, maxSignedRecordBytes)
+	if err != nil {
+		return Chain{}, SignedArtifactRefs{}, fmt.Errorf("load signed chain: %w", err)
+	}
+	signatureBytes, err := readRegularBounded(paths.ChainSignaturePath, maxSignedRecordBytes)
+	if err != nil {
+		return Chain{}, SignedArtifactRefs{}, fmt.Errorf("load signed chain: %w", err)
 	}
 	var chain Chain
-	if err := loadCoordinatorSignedRecord(
-		trusted,
-		paths.ChainPath,
-		paths.ChainSignaturePath,
+	if err := VerifySignedRecord(
+		chainBytes,
+		signatureBytes,
 		&chain,
+		trusted.Definition.Coordinator.KeyID,
+		trusted.CoordinatorPublicKey,
 	); err != nil {
-		return Chain{}, fmt.Errorf("load signed chain: %w", err)
+		return Chain{}, SignedArtifactRefs{}, fmt.Errorf("load signed chain: %w", err)
 	}
 	if err := chain.ValidateAgainstDefinition(trusted.Definition); err != nil {
-		return Chain{}, fmt.Errorf("chain against definition: %w", err)
+		return Chain{}, SignedArtifactRefs{}, fmt.Errorf("chain against definition: %w", err)
 	}
-	return chain, nil
+	refs := SignedArtifactRefs{
+		Record:    ArtifactRef{Name: chainName, Digest: NewDigest(chainBytes)},
+		Signature: ArtifactRef{Name: signatureName, Digest: NewDigest(signatureBytes)},
+	}
+	if err := refs.Validate(); err != nil {
+		return Chain{}, SignedArtifactRefs{}, err
+	}
+	return chain, refs, nil
 }
 
 // LoadReplayPhase1Files strictly reads all accepted evidence and replays every
