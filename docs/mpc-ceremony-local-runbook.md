@@ -33,7 +33,9 @@ source commit, and dependency versions; `VerifyRunningSoftware` refuses to
 proceed on a mismatch. So the binary is a trust input too: built from a verified
 signed tag, reproduced in two independent environments, hashes published
 separately. `scripts/build-mpc-ceremony-release.sh` and
-`scripts/verify-mpc-ceremony-reproducible.sh` do this for production.
+`scripts/verify-mpc-ceremony-reproducible.sh` do this for production. Maintainers
+publish the directly downloadable binary and its full verification package by
+following `docs/mpc-ceremony-release.md`.
 
 Everything else — `ceremony.json`, `ceremony.sig`, chains, contributions,
 closures — may travel over untrusted transport. Tampering makes verification
