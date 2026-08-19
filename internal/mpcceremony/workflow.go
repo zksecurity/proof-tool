@@ -1960,9 +1960,6 @@ func SealPhase1Files(options SealPhase1FilesOptions) (result SealPhase1FilesResu
 		challenge,
 		replayedHead,
 	)
-	// Seal spends the head and the returned commons aliases its backing
-	// arrays. Drop the reference here so a later reuse cannot compile.
-	replayedHead = nil
 	if err != nil {
 		return result, err
 	}
@@ -3244,9 +3241,6 @@ func loadPhase1CommonsForPhase2(
 		challenge,
 		replayedHead,
 	)
-	// Seal spends the head and the returned commons aliases its backing
-	// arrays. Drop the reference here so a later reuse cannot compile.
-	replayedHead = nil
 	if err != nil {
 		return nil, SealRecord{}, CloseRecord{}, fmt.Errorf(
 			"derive Phase 1 commons from authenticated chain and beacon: %w",
