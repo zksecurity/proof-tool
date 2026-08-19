@@ -16,5 +16,8 @@ func BuildIndex(path string) (*Index, error) {
 }
 
 func ValidateIndex(idx *Index) error {
-	return proofassets.ValidatePKIndex(idx)
+	if err := proofassets.ValidatePKIndex(idx); err != nil {
+		return err
+	}
+	return proofassets.ValidatePKIndexAllocations(idx)
 }

@@ -3,6 +3,7 @@ package prover
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"os"
 	"path/filepath"
@@ -53,6 +54,62 @@ func TestSmallProofMarshalVerifyAndRejectsWrongPublicInput(t *testing.T) {
 	}
 	if err := VerifyProof(vk, decoded, &sq{Y: 10}); err == nil {
 		t.Fatal("proof verified against wrong public input")
+	}
+}
+
+func TestUnmarshalProofRejectsHostileCommitmentCount(t *testing.T) {
+	// A proof whose commitment-count prefix is enormous would drive
+	// make([]G1Affine, count) in gnark-crypto's decoder — a memory-exhaustion
+	// primitive for any endpoint that decodes untrusted proofs. It must be
+	// rejected before ReadFrom is ever called.
+	raw := make([]byte, proofCommitmentCountOffset+4)
+	raw[0] = 0xc0
+	raw[g1Len] = 0xc0
+	raw[g1Len+g2Len] = 0xc0
+	binary.BigEndian.PutUint32(raw[proofCommitmentCountOffset:], 0xFFFFFFFF)
+	if _, err := UnmarshalProof(base64.StdEncoding.EncodeToString(raw)); err == nil ||
+		!strings.Contains(err.Error(), "commitments") {
+		t.Fatalf("expected commitment-count rejection, got %v", err)
+	}
+
+	// Oversized body rejected by the coarse gate.
+	big := make([]byte, maxEncodedProofBytes+1)
+	if _, err := UnmarshalProof(base64.StdEncoding.EncodeToString(big)); err == nil ||
+		!strings.Contains(err.Error(), "maximum") {
+		t.Fatalf("expected oversize rejection, got %v", err)
+	}
+
+	// Too short to carry the count prefix.
+	if _, err := UnmarshalProof(base64.StdEncoding.EncodeToString(make([]byte, 8))); err == nil ||
+		!strings.Contains(err.Error(), "too short") {
+		t.Fatalf("expected too-short rejection, got %v", err)
+	}
+
+	// Declared count is in range but the body length does not match it.
+	mismatch := make([]byte, proofCommitmentCountOffset+4)
+	mismatch[0] = 0xc0
+	mismatch[g1Len] = 0xc0
+	mismatch[g1Len+g2Len] = 0xc0
+	binary.BigEndian.PutUint32(mismatch[proofCommitmentCountOffset:], 1)
+	if _, err := UnmarshalProof(base64.StdEncoding.EncodeToString(mismatch)); err == nil ||
+		!strings.Contains(err.Error(), "want") {
+		t.Fatalf("expected length-mismatch rejection, got %v", err)
+	}
+}
+
+func TestUnmarshalProofRejectsShiftedCommitmentCount(t *testing.T) {
+	// Ar and Bs are compressed infinity, while Krs is uncompressed infinity.
+	// The old fixed-offset preflight read zero halfway through Krs, then gnark
+	// reached the actual count after the 96-byte Krs and allocated from it.
+	raw := make([]byte, proofCommitmentCountOffset+4+g1Len)
+	raw[0] = 0xc0
+	raw[g1Len] = 0xc0
+	raw[g1Len+g2Len] = 0x40
+	binary.BigEndian.PutUint32(raw[len(raw)-4:], maxProofCommitments+1)
+
+	if _, err := UnmarshalProof(base64.StdEncoding.EncodeToString(raw)); err == nil ||
+		!strings.Contains(err.Error(), "Krs must use canonical compressed encoding") {
+		t.Fatalf("expected non-canonical Krs rejection, got %v", err)
 	}
 }
 

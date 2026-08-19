@@ -123,6 +123,17 @@ func (ks *KeySource) loadSmallFields(config openConfig) error {
 	if err := g1Decoder.Decode(&ks.delta); err != nil {
 		return fmt.Errorf("decode Delta: %w", err)
 	}
+	// Subgroup checks are skipped for throughput on a proving key that callers
+	// are expected to have digest-authenticated first. On-curve validation is
+	// cheap and is kept, so a point that is neither a valid curve point nor in
+	// the authenticated key cannot silently enter a multi-scalar
+	// multiplication. See internal/msmengine/serialize.go, which makes the same
+	// trade explicitly.
+	for name, point := range map[string]*curve.G1Affine{"Alpha": &ks.alpha, "Beta": &ks.beta, "Delta": &ks.delta} {
+		if !point.IsOnCurve() {
+			return fmt.Errorf("%s is not on the G1 curve", name)
+		}
+	}
 
 	kSec := ks.idx.Sections["K"]
 	g2Off := kSec.Offset + kSec.Len
@@ -136,6 +147,11 @@ func (ks *KeySource) loadSmallFields(config openConfig) error {
 	}
 	if err := g2Decoder.Decode(&ks.g2delta); err != nil {
 		return fmt.Errorf("decode G2.Delta: %w", err)
+	}
+	for name, point := range map[string]*curve.G2Affine{"G2.Beta": &ks.g2beta, "G2.Delta": &ks.g2delta} {
+		if !point.IsOnCurve() {
+			return fmt.Errorf("%s is not on the G2 curve", name)
+		}
 	}
 
 	g2bSec := ks.idx.Sections["G2B"]
@@ -167,15 +183,16 @@ func decodeDomainHeader(header []byte, precompute bool) (fft.Domain, error) {
 	if flag := header[DomainHeaderBytes-1]; flag > 1 {
 		return fft.Domain{}, fmt.Errorf("decode domain: precompute flag byte %d is not canonical", flag)
 	}
+	// Always decode without precompute first. fft.Domain.ReadFrom precomputes
+	// twiddle and coset tables (make([]fr.Element, Cardinality) ×2) the moment
+	// it reads Cardinality, before any validation — a hostile cardinality of
+	// 2^32 would allocate ~274 GB before being rejected. Decode the header,
+	// validate the cardinality is canonical (power of two with a real FFT
+	// generator, bounding it to the field's 2-adicity), and only then rebuild
+	// the precomputed tables if the caller asked for them.
 	var domain fft.Domain
 	reader := bytes.NewReader(header)
-	var err error
-	if precompute {
-		_, err = domain.ReadFrom(reader)
-	} else {
-		_, err = domain.ReadFromWithoutPrecompute(reader)
-	}
-	if err != nil {
+	if _, err := domain.ReadFromWithoutPrecompute(reader); err != nil {
 		return fft.Domain{}, fmt.Errorf("decode domain: %w", err)
 	}
 	if reader.Len() != 0 {
@@ -183,6 +200,13 @@ func decodeDomainHeader(header []byte, precompute bool) (fft.Domain, error) {
 	}
 	if err := validateCanonicalDomain(&domain); err != nil {
 		return fft.Domain{}, fmt.Errorf("decode domain: %w", err)
+	}
+	if precompute {
+		precomputed := fft.NewDomain(domain.Cardinality)
+		if precomputed.Cardinality != domain.Cardinality {
+			return fft.Domain{}, fmt.Errorf("decode domain: precompute cardinality mismatch")
+		}
+		domain = *precomputed
 	}
 	return domain, nil
 }

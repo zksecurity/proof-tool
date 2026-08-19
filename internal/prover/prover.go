@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"hash"
@@ -55,6 +56,40 @@ const (
 	CmtOff = CardanoProofLen
 	PokOff = CmtOff + 2*g1Len
 )
+
+const (
+	// maxProofCommitments bounds the BSB22 commitment slice declared in an
+	// encoded proof. The ownership circuits use a single commitment; the cap
+	// is generous so unrelated circuits still decode, while a hostile count is
+	// rejected before gnark-crypto allocates it.
+	maxProofCommitments = 16
+
+	// proofCommitmentCountOffset is the byte offset of the big-endian uint32
+	// commitment count in a compressed groth16-BLS12-381 proof: it follows
+	// Ar(G1) | Bs(G2) | Krs(G1). See the gnark Proof.ReadFrom field order.
+	proofCommitmentCountOffset = CardanoProofLen // 2*g1Len + g2Len
+
+	// maxEncodedProofBytes bounds the raw proof before decoding. A well-formed
+	// proof for this family is a few hundred bytes; the cap is a coarse first
+	// gate so an oversized body is rejected cheaply.
+	maxEncodedProofBytes = 4096
+)
+
+func requireCompressedPoint(raw []byte, offset int, name string) error {
+	if offset < 0 || offset >= len(raw) {
+		return fmt.Errorf("proof is too short for %s", name)
+	}
+	// gnark accepts compressed and uncompressed encodings. The fixed offsets
+	// below are safe only for the canonical compressed representation emitted
+	// by MarshalProof. Accept the two compressed sign encodings and compressed
+	// infinity; reject every uncompressed or reserved metadata mask.
+	switch raw[offset] & 0xe0 {
+	case 0x80, 0xa0, 0xc0:
+		return nil
+	default:
+		return fmt.Errorf("proof %s must use canonical compressed encoding", name)
+	}
+}
 
 type OwnershipBundle struct {
 	Dir          string
@@ -420,6 +455,48 @@ func UnmarshalProof(encoded string) (groth16.Proof, error) {
 	raw, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return nil, fmt.Errorf("decode proof: %w", err)
+	}
+	// Preflight the length-prefixed commitment slice before gnark-crypto's
+	// decoder reaches it. That decoder does make([]G1Affine, count) directly
+	// from an attacker-controlled uint32 (gnark-crypto ecc/bls12-381 marshal),
+	// so an unchecked count is a memory-exhaustion primitive on any caller
+	// that decodes untrusted proofs (e.g. the verifier HTTP API). Bounding the
+	// count and requiring the exact encoded length makes the decode allocate
+	// only what the bytes actually carry.
+	if len(raw) > maxEncodedProofBytes {
+		return nil, fmt.Errorf("proof is %d bytes, exceeds maximum %d", len(raw), maxEncodedProofBytes)
+	}
+	if len(raw) < proofCommitmentCountOffset+4 {
+		return nil, fmt.Errorf("proof is %d bytes, too short to be well-formed", len(raw))
+	}
+	if err := requireCompressedPoint(raw, 0, "Ar"); err != nil {
+		return nil, err
+	}
+	if err := requireCompressedPoint(raw, g1Len, "Bs"); err != nil {
+		return nil, err
+	}
+	if err := requireCompressedPoint(raw, g1Len+g2Len, "Krs"); err != nil {
+		return nil, err
+	}
+	nbCommitments := binary.BigEndian.Uint32(raw[proofCommitmentCountOffset : proofCommitmentCountOffset+4])
+	if nbCommitments > maxProofCommitments {
+		return nil, fmt.Errorf("proof declares %d commitments, exceeds maximum %d", nbCommitments, maxProofCommitments)
+	}
+	// Ar|Bs|Krs, then the 4-byte count, then nbCommitments compressed G1
+	// points, then the compressed G1 proof-of-knowledge.
+	wantLen := proofCommitmentCountOffset + 4 + int(nbCommitments)*g1Len + g1Len
+	if len(raw) != wantLen {
+		return nil, fmt.Errorf("proof is %d bytes, want %d for %d commitments", len(raw), wantLen, nbCommitments)
+	}
+	pointOffset := proofCommitmentCountOffset + 4
+	for i := uint32(0); i < nbCommitments; i++ {
+		if err := requireCompressedPoint(raw, pointOffset, fmt.Sprintf("commitment[%d]", i)); err != nil {
+			return nil, err
+		}
+		pointOffset += g1Len
+	}
+	if err := requireCompressedPoint(raw, pointOffset, "commitment proof"); err != nil {
+		return nil, err
 	}
 	proof := groth16.NewProof(curve)
 	if _, err := proof.ReadFrom(bytes.NewReader(raw)); err != nil {
