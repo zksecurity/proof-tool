@@ -198,6 +198,10 @@ func SealPhase2Loaded(
 		return nil, nil, err
 	}
 
+	// Seal does not copy the evaluations: the returned proving and verifying
+	// keys retain evals.G1.CKK and evals.G1.VKK directly. The evaluations must
+	// therefore stay per-call and must never be cached or shared between
+	// seals, or two key sets would alias one set of commitment arrays.
 	var provingKey, verifyingKey any
 	if err := runGnarkMutation("seal Phase 2", func() {
 		provingKey, verifyingKey = head.Seal(commons, evaluations, append([]byte(nil), beaconChallenge...))
@@ -270,6 +274,10 @@ func replayPhase2State(
 		}
 		previous = next
 	}
+	// The returned evaluations are freshly derived for this replay and must be
+	// treated that way. Seal retains their CKK and VKK slices in the keys it
+	// produces, so a cached or reused Phase2Evaluations would leave two key
+	// sets aliasing one set of commitment arrays.
 	return previous, &evaluations, nil
 }
 

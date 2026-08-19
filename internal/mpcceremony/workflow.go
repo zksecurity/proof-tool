@@ -75,6 +75,9 @@ func (p InitParticipants) Validate() error {
 	if len(p.Auditors) < 2 {
 		return errors.New("at least two independent auditors are required")
 	}
+	if len(p.Auditors) > MaxAuditors {
+		return fmt.Errorf("auditors exceed maximum %d recordable in the final transcript", MaxAuditors)
+	}
 	if len(p.Roster) == 0 || len(p.Roster) > MaxParticipants {
 		return fmt.Errorf("roster must contain between 1 and %d participants", MaxParticipants)
 	}
@@ -372,10 +375,50 @@ func InitializeCeremonyFiles(options InitFilesOptions) (result InitFilesResult, 
 	return result, nil
 }
 
+// ReplayProgress reports how far a chain replay has advanced. It is called once
+// per accepted contribution, immediately before that contribution is read, with
+// a one-based index and the total the replay will process.
+//
+// This package deliberately has no logger: it handles signing keys and secret
+// contribution state, so having no output path at all is stronger than having a
+// careful one. A callback keeps that property. The values carry no secret
+// material — a phase, an index and a count — and rendering is entirely the
+// caller's business. The CLI writes them to stderr, never stdout, which is
+// reserved for the result contract.
+//
+// A K=21 close replays for hours. Without progress an operator cannot tell
+// running from hung, and cannot measure how long a close takes on their
+// hardware. That measurement is what makes it possible to choose a beacon round
+// far enough ahead; misjudging it is what caused the 2026-07-24 closure-timing
+// incident.
+type ReplayProgress func(phase Phase, index, total int)
+
+// StageProgress reports entry into a named stage of a long operation, with a
+// one-based index and the total number of stages.
+//
+// ReplayProgress counts accepted contributions, which suits any command whose
+// cost is dominated by replaying a chain. Phase 2 initialization has no
+// contributions to count: it loads and verifies the sealed phase 1 commons,
+// transforms them into circuit-specific parameters over the whole 2^21 domain,
+// and publishes the result. That transform is a single monolithic computation
+// running for hours, so a per-contribution callback reports nothing at all.
+//
+// This is coarser than an index into work completed, and deliberately so. The
+// expensive stage lives inside gnark and exposes no progress of its own, so the
+// honest signal is which stage is running rather than a fabricated percentage.
+// It still separates running from hung, and it names the stage an operator is
+// waiting on. Like ReplayProgress it carries no secret material and does not
+// print: rendering is the caller's business.
+type StageProgress func(stage string, index, total int)
+
 type PhaseTranscriptPaths struct {
 	RootDir            string
 	ChainPath          string
 	ChainSignaturePath string
+
+	// Progress is optional. When nil the replay is silent, which is the
+	// behaviour every existing caller gets.
+	Progress ReplayProgress
 }
 
 // LoadSignedChain verifies the exact coordinator-signed chain at paths.
@@ -465,7 +508,7 @@ func loadReplayPhase1FilesState(
 	if err != nil {
 		return Chain{}, nil, err
 	}
-	loader := phase1FileLoader(paths.RootDir, chain, circuit.Binding.DomainSize)
+	loader := phase1FileLoader(paths.RootDir, chain, circuit.Binding.DomainSize, paths.Progress)
 	head, err := replayPhase1State(circuit.Binding.DomainSize, len(chain.Records), loader)
 	if err != nil {
 		return Chain{}, nil, err
@@ -553,7 +596,7 @@ func LoadReplayPhase2Files(
 	if err != nil {
 		return Chain{}, err
 	}
-	loader := phase2FileLoader(paths.RootDir, chain, contributionPhase2Shape(circuit.Binding.Phase2Shape))
+	loader := phase2FileLoader(paths.RootDir, chain, contributionPhase2Shape(circuit.Binding.Phase2Shape), paths.Progress)
 	if err := ReplayPhase2Loaded(circuit, commons, len(chain.Records), loader); err != nil {
 		return Chain{}, err
 	}
@@ -625,7 +668,7 @@ func CreateContributionCandidate(options ContributionFilesOptions) (result Contr
 			contribution, contributeErr := ContributePhase1Loaded(
 				options.Circuit.Binding.DomainSize,
 				len(chain.Records),
-				phase1FileLoader(options.Transcript.RootDir, chain, options.Circuit.Binding.DomainSize),
+				phase1FileLoader(options.Transcript.RootDir, chain, options.Circuit.Binding.DomainSize, options.Transcript.Progress),
 			)
 			if contributeErr != nil {
 				return nil, contributeErr
@@ -649,7 +692,7 @@ func CreateContributionCandidate(options ContributionFilesOptions) (result Contr
 				options.Circuit,
 				commons,
 				len(chain.Records),
-				phase2FileLoader(options.Transcript.RootDir, chain, contributionPhase2Shape(options.Circuit.Binding.Phase2Shape)),
+				phase2FileLoader(options.Transcript.RootDir, chain, contributionPhase2Shape(options.Circuit.Binding.Phase2Shape), options.Transcript.Progress),
 			)
 			if contributeErr != nil {
 				return nil, contributeErr
@@ -1011,15 +1054,24 @@ func VerifyAndAcceptContribution(options AcceptContributionFilesOptions) (result
 				options.Transcript.RootDir,
 				chain,
 				options.Circuit.Binding.DomainSize,
+				nil,
 			)(index - 2)
 		}
 		if err != nil {
 			return result, fmt.Errorf("load authenticated Phase 1 head: %w", err)
 		}
+		// gnark's Verify writes next.Challenge, and this candidate is retained
+		// and re-serialized into the authoritative transcript below. Hand the
+		// verifier a throwaway clone so no gnark call ever holds the archived
+		// pointer.
+		verifyCandidate := new(gnarkmpc.Phase1)
+		if err := streamClone(candidate, verifyCandidate); err != nil {
+			return result, fmt.Errorf("clone Phase 1 candidate for verification: %w", err)
+		}
 		if err := verifyPhase1Transition(
 			options.Circuit.Binding.DomainSize,
 			previous,
-			candidate,
+			verifyCandidate,
 		); err != nil {
 			return result, fmt.Errorf("verify candidate Phase 1 transition: %w", err)
 		}
@@ -1038,12 +1090,19 @@ func VerifyAndAcceptContribution(options AcceptContributionFilesOptions) (result
 				options.Transcript.RootDir,
 				chain,
 				contributionPhase2Shape(options.Circuit.Binding.Phase2Shape),
+				nil,
 			)(index - 2)
 		}
 		if err != nil {
 			return result, fmt.Errorf("load authenticated Phase 2 head: %w", err)
 		}
-		if err := verifyPhase2Transition(previous, candidate); err != nil {
+		// Same hazard as Phase 1: Verify writes next.Challenge and this
+		// candidate is retained for the transcript, so verify a clone.
+		verifyCandidate := new(gnarkmpc.Phase2)
+		if err := streamClone(candidate, verifyCandidate); err != nil {
+			return result, fmt.Errorf("clone Phase 2 candidate for verification: %w", err)
+		}
+		if err := verifyPhase2Transition(previous, verifyCandidate); err != nil {
 			return result, fmt.Errorf("verify candidate Phase 2 transition: %w", err)
 		}
 	}
@@ -1350,7 +1409,25 @@ type ClosePhaseFilesOptions struct {
 	Phase1SealPath            string
 	Phase1SealSignaturePath   string
 	CoordinatorPrivateKeyPath string
-	BeaconRound               uint64
+	// BeaconRound names the future round explicitly. Exactly one of this and
+	// BeaconRoundLeadSeconds must be set.
+	BeaconRound uint64
+	// BeaconRoundLeadSeconds derives the round instead of naming it, using the
+	// clock sampled after the replay.
+	//
+	// A close replays the entire accepted phase before it stamps closed_at, and
+	// at domain 2^21 that takes hours. An explicit round therefore forces the
+	// coordinator to predict their own replay duration: name a round too near
+	// and the whole replay is discarded for naming a round that was no longer
+	// in the future. That is what caused the 2026-07-24 closure-timing
+	// incident.
+	//
+	// Deriving here is not weaker. The round is not published, signed, or
+	// observable until the closure record is written at the end of this
+	// function, so choosing it before or after the replay is indistinguishable
+	// to every observer, and under either ordering the round is still in the
+	// future and its randomness does not yet exist.
+	BeaconRoundLeadSeconds uint32
 }
 
 type ClosePhaseFilesResult struct {
@@ -1374,6 +1451,10 @@ func closePhaseFiles(
 	if now == nil {
 		return ClosePhaseFilesResult{}, errors.New("closure clock is required")
 	}
+	if (options.BeaconRound == 0) == (options.BeaconRoundLeadSeconds == 0) {
+		return ClosePhaseFilesResult{}, errors.New(
+			"exactly one of beacon round and beacon round lead is required")
+	}
 	trusted, err := loadOperationalCeremony(options.Trust)
 	if err != nil {
 		return ClosePhaseFilesResult{}, err
@@ -1392,21 +1473,27 @@ func closePhaseFilesAuthenticated(
 	}
 	var chain Chain
 	var err error
+	// Retained past the switch so a derived phase 2 round can be checked for
+	// reuse of the phase 1 round, which an explicit round is checked for here.
+	var phase1Close *CloseRecord
 	switch options.Phase {
 	case Phase1:
 		chain, err = LoadReplayPhase1Files(trusted, options.Circuit, options.Transcript)
 	case Phase2:
 		var commons *gnarkmpc.SrsCommons
 		var phase1Seal SealRecord
-		var phase1Close CloseRecord
-		commons, phase1Seal, phase1Close, err = loadPhase1CommonsForPhase2(
+		var loadedClose CloseRecord
+		commons, phase1Seal, loadedClose, err = loadPhase1CommonsForPhase2(
 			trusted,
 			options.Circuit,
 			options.Transcript.RootDir,
 			options.Phase1SealPath,
 			options.Phase1SealSignaturePath,
 		)
-		if err == nil && options.BeaconRound == phase1Close.BeaconRound {
+		if err == nil {
+			phase1Close = &loadedClose
+		}
+		if err == nil && options.BeaconRound != 0 && options.BeaconRound == loadedClose.BeaconRound {
 			err = fmt.Errorf(
 				"phase2 beacon round %d reuses the authenticated phase1 beacon round; a distinct round is required",
 				options.BeaconRound,
@@ -1421,13 +1508,16 @@ func closePhaseFilesAuthenticated(
 	if err != nil {
 		return result, err
 	}
-	return publishReplayedPhaseClose(options, trusted, chain, now)
+	return publishReplayedPhaseClose(options, trusted, chain, phase1Close, now)
 }
 
 func publishReplayedPhaseClose(
 	options ClosePhaseFilesOptions,
 	trusted *TrustedCeremony,
 	chain Chain,
+	// phase1Close is non-nil only for a phase 2 close, and is what a derived
+	// round is checked against for round reuse.
+	phase1Close *CloseRecord,
 	now func() time.Time,
 ) (ClosePhaseFilesResult, error) {
 	var result ClosePhaseFilesResult
@@ -1462,7 +1552,10 @@ func publishReplayedPhaseClose(
 		); err != nil {
 			return result, fmt.Errorf("load existing atomic phase closure: %w", err)
 		}
-		if existing.BeaconRound != options.BeaconRound {
+		// Only an explicitly requested round can disagree with what was
+		// published; a derived round has no operator intent to contradict, and
+		// the existing record is authenticated and revalidated below either way.
+		if options.BeaconRound != 0 && existing.BeaconRound != options.BeaconRound {
 			return result, fmt.Errorf(
 				"existing phase closure commits beacon round %d, not requested round %d",
 				existing.BeaconRound,
@@ -1485,13 +1578,37 @@ func publishReplayedPhaseClose(
 		return result, fmt.Errorf("inspect phase closure destination: %w", statErr)
 	}
 
-	roundTime, err := QuicknetRoundTime(options.BeaconRound)
-	if err != nil {
-		return result, err
-	}
 	closedAt := now().UTC()
 	if closedAt.IsZero() {
 		return result, errors.New("closure clock returned the zero time")
+	}
+	// Sampled before the round is resolved, so a derived round is measured from
+	// the moment the replay actually finished.
+	beaconRound := options.BeaconRound
+	if beaconRound == 0 {
+		// The publication guard re-checks the lead against a second clock
+		// sample and demands the signed minimum plus a safety margin, so derive
+		// past that rather than past the bare minimum.
+		lead := time.Duration(options.BeaconRoundLeadSeconds) * time.Second
+		if required := requiredCloseLead(trusted.Definition); lead < required {
+			lead = required
+		}
+		beaconRound, err = FirstQuicknetRoundAfter(
+			closedAt.Add(lead + closePublicationSafetyMargin),
+		)
+		if err != nil {
+			return result, fmt.Errorf("derive beacon round from close time: %w", err)
+		}
+		if options.Phase == Phase2 && phase1Close != nil && beaconRound == phase1Close.BeaconRound {
+			return result, fmt.Errorf(
+				"derived phase2 beacon round %d reuses the authenticated phase1 beacon round",
+				beaconRound,
+			)
+		}
+	}
+	roundTime, err := QuicknetRoundTime(beaconRound)
+	if err != nil {
+		return result, err
 	}
 	closeRecord, err := NewCloseRecord(CloseRecord{
 		CeremonyID:           trusted.Definition.CeremonyID,
@@ -1503,7 +1620,7 @@ func publishReplayedPhaseClose(
 		AcceptedParticipants: participants,
 		BeaconProvider:       trusted.Definition.BeaconPolicy.Provider,
 		BeaconNetwork:        trusted.Definition.BeaconPolicy.Network,
-		BeaconRound:          options.BeaconRound,
+		BeaconRound:          beaconRound,
 		BeaconNotBefore:      roundTime.Format(time.RFC3339Nano),
 		ClosedAt:             closedAt.Format(time.RFC3339Nano),
 		CoordinatorID:        trusted.Definition.Coordinator.ID,
@@ -1543,7 +1660,7 @@ func publishReplayedPhaseClose(
 				closedAt,
 				now().UTC(),
 				roundTime,
-				trusted.Definition.BeaconPolicy.MinimumWitnessLeadSeconds,
+				trusted.Definition,
 			)
 		},
 	); err != nil {
@@ -1557,7 +1674,7 @@ func validateCloseCommitTime(
 	closedAt time.Time,
 	commitTime time.Time,
 	roundTime time.Time,
-	minimumWitnessLeadSeconds uint32,
+	definition CeremonyDefinition,
 ) error {
 	if closedAt.IsZero() {
 		return errors.New("closure clock returned the zero time")
@@ -1568,11 +1685,11 @@ func validateCloseCommitTime(
 	if commitTime.Before(closedAt) {
 		return errors.New("closure clock moved backwards before publication")
 	}
-	minimumLead := time.Duration(minimumWitnessLeadSeconds) * time.Second
+	minimumLead := requiredCloseLead(definition)
 	requiredLead := minimumLead + closePublicationSafetyMargin
 	if roundTime.Sub(commitTime) < requiredLead {
 		return fmt.Errorf(
-			"beacon round lead at closure publication %s is below required %s (signed witness lead %s plus publication margin %s)",
+			"beacon round lead at closure publication %s is below required %s (required witness lead %s plus publication margin %s)",
 			roundTime.Sub(commitTime),
 			requiredLead,
 			minimumLead,
@@ -1749,6 +1866,12 @@ type SealPhase1FilesOptions struct {
 	BeaconSignaturePath       string
 	CoordinatorPrivateKeyPath string
 	OutputDir                 string
+	// Progress is optional and reports the replay this seal performs before it
+	// applies the beacon contribution. The seal replays the whole phase and
+	// then does strictly more work than a close, so at domain 2^21 it is the
+	// longest operation in the ceremony; without this it is also the only long
+	// one that is completely silent.
+	Progress ReplayProgress
 }
 
 type SealPhase1FilesResult struct {
@@ -1784,6 +1907,7 @@ func SealPhase1Files(options SealPhase1FilesOptions) (result SealPhase1FilesResu
 		RootDir:            options.TranscriptRoot,
 		ChainPath:          chainPath,
 		ChainSignaturePath: DefaultSignaturePath(chainPath),
+		Progress:           options.Progress,
 	}
 	chain, replayedHead, err := loadReplayPhase1FilesState(trusted, options.Circuit, chainPaths)
 	if err != nil {
@@ -1811,6 +1935,9 @@ func SealPhase1Files(options SealPhase1FilesOptions) (result SealPhase1FilesResu
 		challenge,
 		replayedHead,
 	)
+	// Seal spends the head and the returned commons aliases its backing
+	// arrays. Drop the reference here so a later reuse cannot compile.
+	replayedHead = nil
 	if err != nil {
 		return result, err
 	}
@@ -1902,6 +2029,9 @@ func SealPhase1Files(options SealPhase1FilesOptions) (result SealPhase1FilesResu
 	return result, nil
 }
 
+// initPhase2StageCount is the number of stages InitializePhase2Files reports.
+const initPhase2StageCount = 3
+
 type InitPhase2FilesOptions struct {
 	Trust                     TrustPaths
 	Circuit                   *CompiledCircuit
@@ -1910,6 +2040,9 @@ type InitPhase2FilesOptions struct {
 	Phase1SealSignaturePath   string
 	CoordinatorPrivateKeyPath string
 	OutputDir                 string
+	// Progress is optional and reports stage entry. When nil this runs silent,
+	// which is the behaviour every existing caller gets.
+	Progress StageProgress
 }
 
 type InitPhase2FilesResult struct {
@@ -1929,6 +2062,14 @@ func InitializePhase2Files(options InitPhase2FilesOptions) (result InitPhase2Fil
 	if err := validateWorkflowCircuit(trusted, options.Circuit); err != nil {
 		return result, err
 	}
+	// Three stages, of wildly unequal cost. Stage 2 dominates: it transforms the
+	// commons over the whole domain and is where hours are spent.
+	stage := func(name string, index int) {
+		if options.Progress != nil {
+			options.Progress(name, index, initPhase2StageCount)
+		}
+	}
+	stage("verify sealed phase 1 commons", 1)
 	commons, phase1Seal, _, err := loadPhase1CommonsForPhase2(
 		trusted,
 		options.Circuit,
@@ -1943,10 +2084,12 @@ func InitializePhase2Files(options InitPhase2FilesOptions) (result InitPhase2Fil
 	if err != nil {
 		return result, err
 	}
+	stage("derive circuit-specific phase 2 parameters", 2)
 	initial, shape, err := InitializePhase2(options.Circuit, commons)
 	if err != nil {
 		return result, err
 	}
+	stage("publish phase 2 genesis", 3)
 	if !equalPhase2Shape(shape, options.Circuit.Binding.Phase2Shape) {
 		return result, errors.New("initialized Phase 2 shape differs from signed circuit binding")
 	}
@@ -2827,10 +2970,13 @@ func verifyChainFiles(trusted *TrustedCeremony, root string, chain Chain, basePh
 	return nil
 }
 
-func phase1FileLoader(root string, chain Chain, domainN uint64) Phase1Loader {
+func phase1FileLoader(root string, chain Chain, domainN uint64, progress ReplayProgress) Phase1Loader {
 	return func(index int) (*gnarkmpc.Phase1, error) {
 		if index < 0 || index >= len(chain.Records) {
 			return nil, fmt.Errorf("Phase 1 contribution index %d out of range", index)
+		}
+		if progress != nil {
+			progress(Phase1, index+1, len(chain.Records))
 		}
 		path, err := resolveArtifactPath(root, chain.Records[index].OutputPayload.Name)
 		if err != nil {
@@ -2841,10 +2987,13 @@ func phase1FileLoader(root string, chain Chain, domainN uint64) Phase1Loader {
 	}
 }
 
-func phase2FileLoader(root string, chain Chain, shape Phase2Shape) Phase2Loader {
+func phase2FileLoader(root string, chain Chain, shape Phase2Shape, progress ReplayProgress) Phase2Loader {
 	return func(index int) (*gnarkmpc.Phase2, error) {
 		if index < 0 || index >= len(chain.Records) {
 			return nil, fmt.Errorf("Phase 2 contribution index %d out of range", index)
+		}
+		if progress != nil {
+			progress(Phase2, index+1, len(chain.Records))
 		}
 		path, err := resolveArtifactPath(root, chain.Records[index].OutputPayload.Name)
 		if err != nil {
@@ -3070,6 +3219,9 @@ func loadPhase1CommonsForPhase2(
 		challenge,
 		replayedHead,
 	)
+	// Seal spends the head and the returned commons aliases its backing
+	// arrays. Drop the reference here so a later reuse cannot compile.
+	replayedHead = nil
 	if err != nil {
 		return nil, SealRecord{}, CloseRecord{}, fmt.Errorf(
 			"derive Phase 1 commons from authenticated chain and beacon: %w",

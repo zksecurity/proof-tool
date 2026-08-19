@@ -7,6 +7,21 @@ import (
 
 const ProductionMinimumWitnessLeadSeconds uint32 = 24 * 60 * 60
 
+// ProductionWitnessObservationWindowSeconds is the observation time a
+// production close must reserve for public witnesses on top of the signed
+// minimum witness lead.
+//
+// The signed minimum is measured from two different anchors: ValidateClose
+// measures roundTime-closedAt, while witness receipts measure
+// roundTime-observedAt with observedAt strictly after closedAt. A close at
+// exactly the signed minimum therefore leaves witnesses no time in which a
+// valid receipt can exist, and the mismatch surfaces only when the evidence
+// bundle is assembled at release, when the round is already pinned inside the
+// signed closure. Reserving an explicit window at close keeps the witness
+// requirement satisfiable. Rehearsals are exempt: their leads are minutes and
+// their witness receipts are same-host fixtures.
+const ProductionWitnessObservationWindowSeconds uint32 = 60 * 60
+
 type CeremonyDefinition struct {
 	Schema          string          `json:"schema"`
 	CeremonyID      string          `json:"ceremony_id"`
@@ -163,6 +178,9 @@ func (d CeremonyDefinition) validate(requireID bool) error {
 	}
 	if len(d.Auditors) < 2 {
 		return errors.New("at least two independent auditors are required")
+	}
+	if len(d.Auditors) > MaxAuditors {
+		return fmt.Errorf("auditors exceed maximum %d recordable in the final transcript", MaxAuditors)
 	}
 	identityIDs := map[string]string{
 		d.Coordinator.ID:   "coordinator",

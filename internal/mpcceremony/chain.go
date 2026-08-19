@@ -9,6 +9,7 @@ import (
 	"hash"
 	"math"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -587,7 +588,30 @@ func ValidateClose(definition CeremonyDefinition, chain Chain, close CloseRecord
 			minimumLead,
 		)
 	}
+	if requiredLead := requiredCloseLead(definition); roundTime.Sub(closedAt) < requiredLead {
+		return fmt.Errorf(
+			"beacon round lead %s does not reserve the production witness observation window: need %s (signed minimum %s plus %s window)",
+			roundTime.Sub(closedAt),
+			requiredLead,
+			minimumLead,
+			requiredLead-minimumLead,
+		)
+	}
 	return nil
+}
+
+// requiredCloseLead is the beacon lead a close must reserve, measured from
+// closed_at: the signed minimum witness lead, plus — in production — the
+// witness observation window. Witness receipts measure the same signed
+// minimum from their own observation time, which is strictly after closed_at,
+// so without the reserved window a close at the bare minimum makes every
+// witness receipt unsatisfiable. See ProductionWitnessObservationWindowSeconds.
+func requiredCloseLead(definition CeremonyDefinition) time.Duration {
+	lead := time.Duration(definition.BeaconPolicy.MinimumWitnessLeadSeconds) * time.Second
+	if definition.Mode == ModeProduction {
+		lead += time.Duration(ProductionWitnessObservationWindowSeconds) * time.Second
+	}
+	return lead
 }
 
 type BeaconRecord struct {
@@ -782,6 +806,34 @@ func QuicknetRoundTime(round uint64) (time.Time, error) {
 	}
 	seconds := BeaconQuicknetGenesis + int64(offset*period)
 	return time.Unix(seconds, 0).UTC(), nil
+}
+
+// FirstQuicknetRoundAfter returns the earliest round whose scheduled time is
+// strictly after the supplied instant.
+//
+// It is the inverse of QuicknetRoundTime and exists so a phase close can name
+// its beacon round using the clock it sampled after replaying, rather than a
+// round an operator had to guess before the replay began. Rounds are pure
+// arithmetic from the pinned genesis and period, so this needs no network
+// access and stays deterministic.
+func FirstQuicknetRoundAfter(instant time.Time) (uint64, error) {
+	seconds := instant.UTC().Unix()
+	if seconds < BeaconQuicknetGenesis {
+		return 1, nil
+	}
+	period := int64(BeaconQuicknetPeriod)
+	elapsed := seconds - BeaconQuicknetGenesis
+	// Round index is one-based, and the result must be strictly after the
+	// instant, so a time landing exactly on a round schedule advances past it.
+	round := uint64(elapsed/period) + 2
+	roundTime, err := QuicknetRoundTime(round)
+	if err != nil {
+		return 0, err
+	}
+	if !roundTime.After(instant) {
+		return 0, errors.New("derived beacon round is not after the supplied instant")
+	}
+	return round, nil
 }
 
 // DeriveBeaconChallenge maps authenticated public beacon randomness to the
@@ -1035,7 +1087,7 @@ func (r AuditRecord) validate(requireID bool) error {
 		return errors.New("failed audit must contain at least one finding")
 	}
 	for _, finding := range r.Findings {
-		if finding == "" {
+		if strings.TrimSpace(finding) == "" {
 			return errors.New("audit findings must not be empty")
 		}
 	}

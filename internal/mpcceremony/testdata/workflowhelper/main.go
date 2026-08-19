@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -445,6 +446,10 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	if err != nil {
 		return fmt.Errorf("record Phase 1 beacon: %w", err)
 	}
+	// The seal replays the whole phase and is the longest operation in a K=21
+	// ceremony, so its progress callback is wired here and asserted below: a
+	// silent multi-hour command is the defect this reports against.
+	sealProgress := 0
 	phase1Seal, err := mpcceremony.SealPhase1Files(mpcceremony.SealPhase1FilesOptions{
 		Trust:                     trust,
 		Circuit:                   circuit,
@@ -455,11 +460,24 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		BeaconSignaturePath:       phase1Beacon.SignaturePath,
 		CoordinatorPrivateKeyPath: coordinatorKeyPath,
 		OutputDir:                 filepath.Join(ceremonyRoot, "phase1", "sealed"),
+		Progress: func(phase mpcceremony.Phase, index, total int) {
+			if phase != mpcceremony.Phase1 || index < 1 || index > total {
+				panic(fmt.Sprintf("seal progress reported %s %d/%d", phase, index, total))
+			}
+			sealProgress++
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("seal Phase 1: %w", err)
 	}
+	if sealProgress == 0 {
+		return errors.New("Phase 1 seal replayed without reporting progress")
+	}
 
+	// Phase 2 initialization reports stages rather than contributions, because
+	// its cost is one monolithic transform rather than a per-contribution
+	// replay. Assert every stage arrives, in order.
+	var phase2Stages []int
 	phase2Initialized, err := mpcceremony.InitializePhase2Files(mpcceremony.InitPhase2FilesOptions{
 		Trust:                     trust,
 		Circuit:                   circuit,
@@ -467,10 +485,19 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		Phase1SealPath:            phase1Seal.SealPath,
 		Phase1SealSignaturePath:   phase1Seal.SignaturePath,
 		CoordinatorPrivateKeyPath: coordinatorKeyPath,
-		OutputDir:                 filepath.Join(ceremonyRoot, "phase2"),
+		Progress: func(stage string, index, total int) {
+			if stage == "" || index < 1 || index > total {
+				panic(fmt.Sprintf("phase 2 stage %q reported %d/%d", stage, index, total))
+			}
+			phase2Stages = append(phase2Stages, index)
+		},
+		OutputDir: filepath.Join(ceremonyRoot, "phase2"),
 	})
 	if err != nil {
 		return fmt.Errorf("initialize Phase 2: %w", err)
+	}
+	if !slices.Equal(phase2Stages, []int{1, 2, 3}) {
+		return fmt.Errorf("phase 2 initialization reported stages %v, want [1 2 3]", phase2Stages)
 	}
 	phase2Paths := mpcceremony.PhaseTranscriptPaths{
 		RootDir:            ceremonyRoot,
@@ -590,6 +617,48 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		Phase2BeaconPath:          phase2Beacon.BeaconPath,
 		Phase2BeaconSignaturePath: phase2Beacon.SignaturePath,
 	}
+	// Both phases are complete, closed, beaconed, and phase 1 is sealed.
+	// Exercise the read-only inspection at both depths from inside the same
+	// binary that ran init, so the running-software gate verifies a real
+	// executable identity exactly as it does for every other command.
+	for _, full := range []bool{false, true} {
+		inspection, err := mpcceremony.InspectCeremony(mpcceremony.InspectCeremonyOptions{
+			Trust: mpcceremony.TrustPaths{
+				DefinitionPath:           initialized.DefinitionPath,
+				DefinitionSignaturePath:  initialized.DefinitionSignaturePath,
+				CoordinatorPublicKeyPath: trustedCoordinatorPath,
+			},
+			TranscriptRoot: ceremonyRoot,
+			Full:           full,
+		})
+		if err != nil {
+			return fmt.Errorf("inspect ceremony (full=%v): %w", full, err)
+		}
+		if inspection.CeremonyID != initialized.Definition.CeremonyID {
+			return fmt.Errorf("inspect ceremony id %q, want %q", inspection.CeremonyID, initialized.Definition.CeremonyID)
+		}
+		if len(inspection.Phases) != 2 {
+			return fmt.Errorf("inspect reported %d phases, want 2", len(inspection.Phases))
+		}
+		for _, phase := range inspection.Phases {
+			if !phase.Started || !phase.ContributionsComplete || !phase.Closed || !phase.BeaconRecorded {
+				return fmt.Errorf("inspect %s state = %+v, want complete/closed/beaconed", phase.Phase, phase)
+			}
+			if phase.AcceptedCount != 2 || phase.ScheduledTotal != 2 {
+				return fmt.Errorf("inspect %s accepted %d/%d, want 2/2", phase.Phase, phase.AcceptedCount, phase.ScheduledTotal)
+			}
+			if phase.NextParticipantID != "" || phase.NextIndex != 0 {
+				return fmt.Errorf("inspect %s still schedules %q at %d", phase.Phase, phase.NextParticipantID, phase.NextIndex)
+			}
+			if len(phase.MissingArtifacts) != 0 {
+				return fmt.Errorf("inspect %s reports missing artifacts: %v", phase.Phase, phase.MissingArtifacts)
+			}
+			if wantSealed := phase.Phase == mpcceremony.Phase1; phase.Sealed != wantSealed {
+				return fmt.Errorf("inspect %s sealed = %v, want %v", phase.Phase, phase.Sealed, wantSealed)
+			}
+		}
+	}
+
 	preliminaryDir := filepath.Join(outputRoot, "preliminary")
 	if _, err := mpcceremony.PrepareFinalization(mpcceremony.PrepareFinalizationOptions{
 		Replay:                replay,

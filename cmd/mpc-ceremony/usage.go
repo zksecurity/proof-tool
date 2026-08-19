@@ -28,6 +28,7 @@ It performs no network access and never selects a mutable "latest" artifact.
 
 Commands:
   init                 Bind a ceremony to the compiled repository circuit
+  inspect              Report chain state and next scheduled contribution
   phase1 contribute    Verify the full phase 1 chain and contribute
   phase1 attest-erasure Sign a participant destruction attestation
   phase1 verify        Verify and append one candidate contribution
@@ -59,6 +60,26 @@ verification-bypass flags.
 Run "mpc-ceremony help <command>" for command-specific help.
 `
 
+var inspectHelp = `Usage:
+  mpc-ceremony inspect --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --transcript-dir DIR [--full]
+
+Read-only recovery inspection. Reports ceremony identity and mode, per-phase
+accepted count and head record, the next scheduled participant and index, the
+closure/beacon/seal state, and which referenced artifacts are present.
+
+It requires no signing key, writes nothing, and never replays contributions.
+Unlike every other command it discovers the highest published chain file per
+phase; that is safe only because the result feeds no signing or verification
+decision, and every discovered file is authenticated against the trust anchor
+before being reported.
+
+The default depth verifies signatures and structure and checks artifact
+presence by size in seconds. --full additionally re-verifies every payload
+digest, attestation, erasure, and verification record, which re-hashes every
+artifact. The output states which depth ran.
+`
+
 const replayFlagsHelp = `
 Required immutable replay evidence:
   --transcript-root DIR
@@ -78,6 +99,7 @@ second path list.
 `
 
 var commandHelp = map[string]string{
+	"inspect": inspectHelp,
 	"init": `Usage:
   mpc-ceremony init --key-version ownership-destination-v2 \
     --participants ROSTER.json --policy POLICY.json \
@@ -131,11 +153,18 @@ phase close perform the independent full-prefix replays.
   mpc-ceremony phase1 close --ceremony FILE --ceremony-signature FILE \
     --coordinator-public-key-file KEY --transcript-dir DIR --chain FILE \
     --chain-signature FILE --coordinator-signing-key KEY \
-    --beacon-round N
+    --beacon-round N | --beacon-round-lead SECONDS
 
 Replays the full phase, derives the exact Quicknet schedule from the round,
 samples closed_at inside the core after replay, and atomically publishes the
 signed closure only while the policy lead still holds.
+
+At K=21 the replay takes hours, so --beacon-round asks you to predict it: a
+round named too near is already public when the closure is written and the
+whole replay is discarded. --beacon-round-lead instead derives the round from
+the clock sampled after the replay, at least SECONDS ahead and never below the
+signed witness lead. The round is not published or observable until the closure
+record is written either way, so deriving it later commits to nothing sooner.
 `,
 	"phase1 beacon": `Usage:
   mpc-ceremony phase1 beacon --ceremony FILE --ceremony-signature FILE \
@@ -201,11 +230,18 @@ Participant contribution and phase close retain independent full replays.
     --coordinator-public-key-file KEY --phase1-seal FILE \
     --phase1-seal-signature FILE --transcript-dir DIR --chain FILE \
     --chain-signature FILE --coordinator-signing-key KEY \
-    --beacon-round N
+    --beacon-round N | --beacon-round-lead SECONDS
 
 Replays the full phase, derives the exact Quicknet schedule from the round,
 samples closed_at inside the core after replay, and atomically publishes the
 signed closure only while the policy lead still holds.
+
+At K=21 the replay takes hours, so --beacon-round asks you to predict it: a
+round named too near is already public when the closure is written and the
+whole replay is discarded. --beacon-round-lead instead derives the round from
+the clock sampled after the replay, at least SECONDS ahead and never below the
+signed witness lead. The round is not published or observable until the closure
+record is written either way, so deriving it later commits to nothing sooner.
 `,
 	"phase2 beacon": `Usage:
   mpc-ceremony phase2 beacon --ceremony FILE --ceremony-signature FILE \
@@ -309,8 +345,9 @@ the accountable roles should sign.
     --signing-key KEY --out FRESH_FILE
 
 Signs the exact canonical decision bytes with one enrolled ceremony identity.
-A GO record requires the coordinator, the two auditors named by the record,
-and the distinct release signer to sign the same bytes. Before loading a GO
+A GO record requires the coordinator, every auditor named by the record,
+and the distinct release signer to sign the same bytes — one signature per
+named auditor, so a ceremony with three auditors needs five signatures. Before loading a GO
 signing key, the command hashes and semantically verifies the full local
 evidence set. Evidence verification is optional for a NO-GO record so an
 accountable role can sign a fail-closed decision that reports unavailable
@@ -319,7 +356,7 @@ evidence.
 	"decision verify": `Usage:
   mpc-ceremony decision verify --ceremony FILE --ceremony-signature FILE \
     --coordinator-public-key-file KEY --decision FILE \
-    --signature FILE --signature FILE --signature FILE --signature FILE \
+    --signature FILE [--signature FILE ...] \
     --evidence-root DIR
 
 Strictly parses the record and detached role signatures, hashes every local

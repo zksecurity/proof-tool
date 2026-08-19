@@ -30,7 +30,7 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer, execut
 		var help *helpRequest
 		if errors.As(err, &help) {
 			if err := writeUsage(stdout, help.topic); err != nil {
-				writeDiagnostic(stderr, "error: write help: %v\n", err)
+				writeDiagnostic(stderr, args, "error: write help: %v\n", err)
 				return 6
 			}
 			return 0
@@ -39,17 +39,15 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer, execut
 		if errors.As(err, &usage) {
 			message := redactCLIError(usage.message, args)
 			if requestsJSON(args) {
-				return writeParseError(message, stdout, stderr)
+				return writeParseError(message, args, stdout, stderr)
 			}
-			if _, err := fmt.Fprintf(stderr, "error: %s\n\n", message); err != nil {
-				return 6
-			}
+			writeDiagnostic(stderr, args, "error: %s\n\n", message)
 			if err := writeUsage(stderr, usage.topic); err != nil {
 				return 6
 			}
 			return 2
 		}
-		writeDiagnostic(stderr, "error: %s\n", redactCLIError(err.Error(), args))
+		writeDiagnostic(stderr, args, "error: %s\n", err.Error())
 		return 6
 	}
 
@@ -65,19 +63,19 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer, execut
 	result.Command = invocation.Command
 	if invocation.Global.Format == "json" {
 		if err := json.NewEncoder(stdout).Encode(result); err != nil {
-			writeDiagnostic(stderr, "error: encode command result: %v\n", err)
+			writeDiagnostic(stderr, args, "error: encode command result: %v\n", err)
 			return 6
 		}
 		return 0
 	}
 	if result.Summary != "" {
 		if _, err := fmt.Fprintln(stdout, result.Summary); err != nil {
-			writeDiagnostic(stderr, "error: write command result: %v\n", err)
+			writeDiagnostic(stderr, args, "error: write command result: %v\n", err)
 			return 6
 		}
 	} else {
 		if _, err := fmt.Fprintf(stdout, "%s completed\n", invocation.Command); err != nil {
-			writeDiagnostic(stderr, "error: write command result: %v\n", err)
+			writeDiagnostic(stderr, args, "error: write command result: %v\n", err)
 			return 6
 		}
 	}
@@ -89,7 +87,7 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer, execut
 	for _, name := range names {
 		path := result.Outputs[name]
 		if _, err := fmt.Fprintf(stdout, "%s: %s\n", name, path); err != nil {
-			writeDiagnostic(stderr, "error: write command result: %v\n", err)
+			writeDiagnostic(stderr, args, "error: write command result: %v\n", err)
 			return 6
 		}
 	}
@@ -120,11 +118,11 @@ func writeExecutionError(invocation Invocation, err error, args []string, stdout
 		payload.Error.Code = code
 		payload.Error.Message = message
 		if encodeErr := json.NewEncoder(stdout).Encode(payload); encodeErr != nil {
-			writeDiagnostic(stderr, "error: encode command error: %v\n", encodeErr)
+			writeDiagnostic(stderr, args, "error: encode command error: %v\n", encodeErr)
 		}
 		return exitCode
 	}
-	writeDiagnostic(stderr, "error: %s\n", message)
+	writeDiagnostic(stderr, args, "error: %s\n", message)
 	return exitCode
 }
 
@@ -161,9 +159,63 @@ func redactCLIError(message string, args []string) string {
 		return len(ordered[i]) > len(ordered[j])
 	})
 	for _, candidate := range ordered {
-		message = strings.ReplaceAll(message, candidate, redactedCLIValue)
+		message = redactCandidate(message, candidate)
 	}
 	return message
+}
+
+// shortCandidateLength is the length below which redaction switches from
+// substring replacement to whole-token replacement. Long values are replaced
+// wherever they appear: incidental collisions are vanishingly rare and a
+// secret embedded in a longer string must still be caught. Short values are
+// replaced only as complete tokens: a one-to-three character argument such as
+// a participant count would otherwise blank matching digits and letters inside
+// unrelated words, degrading the diagnostic exactly when it is needed. A short
+// value that IS echoed verbatim — validateID permits one-character key ids —
+// still appears as its own token and is still redacted, which is the leak that
+// forced the revert of the plain length-floor approach.
+const shortCandidateLength = 4
+
+func redactCandidate(message, candidate string) string {
+	if len(candidate) >= shortCandidateLength {
+		return strings.ReplaceAll(message, candidate, redactedCLIValue)
+	}
+	var builder strings.Builder
+	remaining := message
+	for {
+		index := strings.Index(remaining, candidate)
+		if index < 0 {
+			builder.WriteString(remaining)
+			return builder.String()
+		}
+		before := remaining[:index]
+		after := remaining[index+len(candidate):]
+		if isTokenBoundary(before, true) && isTokenBoundary(after, false) {
+			builder.WriteString(before)
+			builder.WriteString(redactedCLIValue)
+			remaining = after
+			continue
+		}
+		builder.WriteString(remaining[:index+len(candidate)])
+		remaining = after
+	}
+}
+
+// isTokenBoundary reports whether the text adjacent to a candidate ends (or
+// starts) a token: empty, or a byte that cannot continue an identifier or
+// number. Letters and digits continue a token; everything else separates.
+func isTokenBoundary(adjacent string, atEnd bool) bool {
+	if adjacent == "" {
+		return true
+	}
+	var b byte
+	if atEnd {
+		b = adjacent[len(adjacent)-1]
+	} else {
+		b = adjacent[0]
+	}
+	isAlphanumeric := b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
+	return !isAlphanumeric
 }
 
 func identifyCLICommandArguments(args []string) map[int]struct{} {
@@ -187,7 +239,7 @@ func identifyCLICommandArguments(args []string) map[int]struct{} {
 
 command:
 	topLevel := map[string]struct{}{
-		"audit": {}, "decision": {}, "finalize": {}, "help": {}, "init": {},
+		"audit": {}, "decision": {}, "finalize": {}, "help": {}, "init": {}, "inspect": {},
 		"ops": {}, "phase1": {}, "phase2": {}, "release": {},
 	}
 	if _, ok := topLevel[args[index]]; !ok {
@@ -224,8 +276,12 @@ func addCLIErrorCandidate(candidates map[string]struct{}, value string) {
 	candidates[value] = struct{}{}
 }
 
-func writeDiagnostic(w io.Writer, format string, args ...any) {
-	_, _ = fmt.Fprintf(w, format, args...)
+// writeDiagnostic is the only stderr outlet. It redacts the formatted message
+// against argv by construction, so a new diagnostic call site cannot leak a
+// command-line value by forgetting to call redactCLIError first. Call sites
+// that already redacted are unaffected: redaction is idempotent.
+func writeDiagnostic(w io.Writer, cliArgs []string, format string, args ...any) {
+	_, _ = fmt.Fprint(w, redactCLIError(fmt.Sprintf(format, args...), cliArgs))
 }
 
 func requestsJSON(args []string) bool {
@@ -242,7 +298,7 @@ func requestsJSON(args []string) bool {
 	return false
 }
 
-func writeParseError(message string, stdout, stderr io.Writer) int {
+func writeParseError(message string, args []string, stdout, stderr io.Writer) int {
 	payload := struct {
 		Schema string `json:"schema"`
 		OK     bool   `json:"ok"`
@@ -257,7 +313,7 @@ func writeParseError(message string, stdout, stderr io.Writer) int {
 	payload.Error.Code = "usage_error"
 	payload.Error.Message = message
 	if err := json.NewEncoder(stdout).Encode(payload); err != nil {
-		writeDiagnostic(stderr, "error: encode usage error: %v\n", err)
+		writeDiagnostic(stderr, args, "error: encode usage error: %v\n", err)
 		return 6
 	}
 	return 2

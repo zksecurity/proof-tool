@@ -116,6 +116,12 @@ func SealPhase1Loaded(
 
 // sealReplayedPhase1Head consumes a freshly replayed head. gnark's Seal
 // intentionally mutates that head, so callers must not retain or reuse it.
+//
+// The returned commons also aliases the head: Seal returns p.parameters by
+// value, and those slice headers point at the head's backing arrays rather than
+// at copies. Mutating or re-sealing the head after this call therefore corrupts
+// the commons that was already handed to the caller. Callers must drop their
+// reference to the head at the point of the seal.
 func sealReplayedPhase1Head(
 	domainN uint64,
 	beaconChallenge []byte,

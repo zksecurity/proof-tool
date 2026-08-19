@@ -153,7 +153,7 @@ func TestSignedReleaseInventorySupportsTwentyPartyOperationalScale(t *testing.T)
 		}
 	}
 	if _, err := NewSignedReleaseEvidence(input); err == nil ||
-		!strings.Contains(err.Error(), "4096") {
+		!strings.Contains(err.Error(), fmt.Sprint(MaxProductionReleaseArtifacts)) {
 		t.Fatalf("oversized release inventory error = %v", err)
 	}
 }

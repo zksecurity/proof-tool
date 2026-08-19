@@ -61,6 +61,10 @@ func parseInvocation(args []string) (Invocation, error) {
 		options, err := parseInit(rest[1:])
 		invocation.Command, invocation.Options = CommandInit, options
 		return invocation, wrapCommandError(err, "init")
+	case "inspect":
+		options, err := parseInspect(rest[1:])
+		invocation.Command, invocation.Options = CommandInspect, options
+		return invocation, wrapCommandError(err, "inspect")
 	case "phase1":
 		return parsePhase1(invocation, rest[1:])
 	case "phase2":
@@ -560,6 +564,8 @@ func parseClose(name string, args []string, phase2 bool) (CloseOptions, error) {
 	fs.StringVar(&options.ChainSignaturePath, "chain-signature", "", "detached final accepted chain signature path")
 	fs.StringVar(&options.CoordinatorSigningKey, "coordinator-signing-key", "", "existing Ed25519 coordinator private key path")
 	fs.Uint64Var(&options.BeaconRound, "beacon-round", 0, "precommitted future beacon round")
+	fs.UintVar(&options.BeaconRoundLeadSeconds, "beacon-round-lead", 0,
+		"derive the beacon round this many seconds past the clock sampled after replay")
 	if err := parseFlags(fs, args); err != nil {
 		return options, err
 	}
@@ -572,8 +578,12 @@ func parseClose(name string, args []string, phase2 bool) (CloseOptions, error) {
 		pathValue("--chain-signature", options.ChainSignaturePath),
 		pathValue("--coordinator-signing-key", options.CoordinatorSigningKey),
 	}
-	if options.BeaconRound == 0 {
-		required = append(required, requiredValue{name: "--beacon-round"})
+	// A close replays for hours at K=21 before it stamps closed_at, so naming
+	// the round up front asks the operator to predict their own replay time.
+	// --beacon-round-lead derives it from the clock sampled after the replay.
+	if (options.BeaconRound == 0) == (options.BeaconRoundLeadSeconds == 0) {
+		return options, errors.New(
+			"exactly one of --beacon-round and --beacon-round-lead is required")
 	}
 	if phase2 {
 		required = append(
@@ -867,6 +877,9 @@ func validateAuditArtifacts(reports, signatures []string) error {
 	if len(reports) < 2 {
 		return errors.New("--audit-report must be supplied at least twice for independent audits")
 	}
+	if len(reports) > mpcceremony.MaxAuditors {
+		return fmt.Errorf("--audit-report supplied %d times, exceeds maximum %d recordable in the final transcript", len(reports), mpcceremony.MaxAuditors)
+	}
 	if len(reports) != len(signatures) {
 		return errors.New("--audit-report and --audit-signature counts must match")
 	}
@@ -972,4 +985,21 @@ func (s *stringList) Set(value string) error {
 	}
 	*s = append(*s, value)
 	return nil
+}
+
+func parseInspect(args []string) (InspectOptions, error) {
+	var options InspectOptions
+	fs := commandFlagSet("inspect")
+	addCeremonyTrustFlags(fs, &options.CeremonyPath, &options.CeremonySignaturePath, &options.CoordinatorPublicKeyFile)
+	fs.StringVar(&options.TranscriptDir, "transcript-dir", "", "ceremony transcript root directory")
+	fs.BoolVar(&options.Full, "full", false, "re-verify every chain record and artifact digest instead of metadata only")
+	if err := parseFlags(fs, args); err != nil {
+		return options, err
+	}
+	return options, requireValues(
+		pathValue("--ceremony", options.CeremonyPath),
+		pathValue("--ceremony-signature", options.CeremonySignaturePath),
+		pathValue("--coordinator-public-key-file", options.CoordinatorPublicKeyFile),
+		pathValue("--transcript-dir", options.TranscriptDir),
+	)
 }
