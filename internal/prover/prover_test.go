@@ -63,6 +63,9 @@ func TestUnmarshalProofRejectsHostileCommitmentCount(t *testing.T) {
 	// primitive for any endpoint that decodes untrusted proofs. It must be
 	// rejected before ReadFrom is ever called.
 	raw := make([]byte, proofCommitmentCountOffset+4)
+	raw[0] = 0xc0
+	raw[g1Len] = 0xc0
+	raw[g1Len+g2Len] = 0xc0
 	binary.BigEndian.PutUint32(raw[proofCommitmentCountOffset:], 0xFFFFFFFF)
 	if _, err := UnmarshalProof(base64.StdEncoding.EncodeToString(raw)); err == nil ||
 		!strings.Contains(err.Error(), "commitments") {
@@ -84,10 +87,29 @@ func TestUnmarshalProofRejectsHostileCommitmentCount(t *testing.T) {
 
 	// Declared count is in range but the body length does not match it.
 	mismatch := make([]byte, proofCommitmentCountOffset+4)
+	mismatch[0] = 0xc0
+	mismatch[g1Len] = 0xc0
+	mismatch[g1Len+g2Len] = 0xc0
 	binary.BigEndian.PutUint32(mismatch[proofCommitmentCountOffset:], 1)
 	if _, err := UnmarshalProof(base64.StdEncoding.EncodeToString(mismatch)); err == nil ||
 		!strings.Contains(err.Error(), "want") {
 		t.Fatalf("expected length-mismatch rejection, got %v", err)
+	}
+}
+
+func TestUnmarshalProofRejectsShiftedCommitmentCount(t *testing.T) {
+	// Ar and Bs are compressed infinity, while Krs is uncompressed infinity.
+	// The old fixed-offset preflight read zero halfway through Krs, then gnark
+	// reached the actual count after the 96-byte Krs and allocated from it.
+	raw := make([]byte, proofCommitmentCountOffset+4+g1Len)
+	raw[0] = 0xc0
+	raw[g1Len] = 0xc0
+	raw[g1Len+g2Len] = 0x40
+	binary.BigEndian.PutUint32(raw[len(raw)-4:], maxProofCommitments+1)
+
+	if _, err := UnmarshalProof(base64.StdEncoding.EncodeToString(raw)); err == nil ||
+		!strings.Contains(err.Error(), "Krs must use canonical compressed encoding") {
+		t.Fatalf("expected non-canonical Krs rejection, got %v", err)
 	}
 }
 

@@ -158,7 +158,9 @@ func ValidatePKIndex(idx *PKIndex) error {
 		if sec.Len%int64(sec.ElemSize) != 0 {
 			return fmt.Errorf("section %q length %d is not divisible by elem_size %d", name, sec.Len, sec.ElemSize)
 		}
-		if sec.Offset+sec.Len > idx.FileSize {
+		// Subtraction keeps a hostile offset+length pair from wrapping int64
+		// negative and passing the file boundary check.
+		if sec.Len > idx.FileSize || sec.Offset > idx.FileSize-sec.Len {
 			return fmt.Errorf("section %q exceeds file size", name)
 		}
 	}
@@ -188,12 +190,19 @@ func ValidatePKIndexAllocations(idx *PKIndex) error {
 	// two infinity bitmaps of NbWires bytes each, then the 4-byte commitment
 	// count. Everything must fit inside FileSize.
 	const infHeaderLen = 3 * 8
-	infOff := g2b.Offset + g2b.Len
-	if idx.NbWires > math.MaxInt64/2 {
+	const countLen = 4
+	if idx.NbWires > math.MaxInt64 {
 		return fmt.Errorf("nb_wires %d is implausibly large", idx.NbWires)
 	}
-	bitmapEnd := infOff + infHeaderLen + 2*int64(idx.NbWires)
-	if bitmapEnd+4 > idx.FileSize {
+	if g2b.Len > idx.FileSize || g2b.Offset > idx.FileSize-g2b.Len {
+		return fmt.Errorf("G2B section exceeds file_size %d", idx.FileSize)
+	}
+	infOff := g2b.Offset + g2b.Len
+	if infOff > idx.FileSize || idx.FileSize-infOff < infHeaderLen+countLen {
+		return fmt.Errorf("infinity metadata does not fit within file_size %d", idx.FileSize)
+	}
+	bitmapBytes := idx.FileSize - infOff - infHeaderLen - countLen
+	if idx.NbWires > uint64(bitmapBytes/2) {
 		return fmt.Errorf("nb_wires %d does not fit within file_size %d", idx.NbWires, idx.FileSize)
 	}
 	if idx.NbInfinityA > idx.NbWires || idx.NbInfinityB > idx.NbWires {

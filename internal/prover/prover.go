@@ -75,6 +75,22 @@ const (
 	maxEncodedProofBytes = 4096
 )
 
+func requireCompressedPoint(raw []byte, offset int, name string) error {
+	if offset < 0 || offset >= len(raw) {
+		return fmt.Errorf("proof is too short for %s", name)
+	}
+	// gnark accepts compressed and uncompressed encodings. The fixed offsets
+	// below are safe only for the canonical compressed representation emitted
+	// by MarshalProof. Accept the two compressed sign encodings and compressed
+	// infinity; reject every uncompressed or reserved metadata mask.
+	switch raw[offset] & 0xe0 {
+	case 0x80, 0xa0, 0xc0:
+		return nil
+	default:
+		return fmt.Errorf("proof %s must use canonical compressed encoding", name)
+	}
+}
+
 type OwnershipBundle struct {
 	Dir          string
 	Manifest     *artifact.KeyManifest
@@ -453,6 +469,15 @@ func UnmarshalProof(encoded string) (groth16.Proof, error) {
 	if len(raw) < proofCommitmentCountOffset+4 {
 		return nil, fmt.Errorf("proof is %d bytes, too short to be well-formed", len(raw))
 	}
+	if err := requireCompressedPoint(raw, 0, "Ar"); err != nil {
+		return nil, err
+	}
+	if err := requireCompressedPoint(raw, g1Len, "Bs"); err != nil {
+		return nil, err
+	}
+	if err := requireCompressedPoint(raw, g1Len+g2Len, "Krs"); err != nil {
+		return nil, err
+	}
 	nbCommitments := binary.BigEndian.Uint32(raw[proofCommitmentCountOffset : proofCommitmentCountOffset+4])
 	if nbCommitments > maxProofCommitments {
 		return nil, fmt.Errorf("proof declares %d commitments, exceeds maximum %d", nbCommitments, maxProofCommitments)
@@ -462,6 +487,16 @@ func UnmarshalProof(encoded string) (groth16.Proof, error) {
 	wantLen := proofCommitmentCountOffset + 4 + int(nbCommitments)*g1Len + g1Len
 	if len(raw) != wantLen {
 		return nil, fmt.Errorf("proof is %d bytes, want %d for %d commitments", len(raw), wantLen, nbCommitments)
+	}
+	pointOffset := proofCommitmentCountOffset + 4
+	for i := uint32(0); i < nbCommitments; i++ {
+		if err := requireCompressedPoint(raw, pointOffset, fmt.Sprintf("commitment[%d]", i)); err != nil {
+			return nil, err
+		}
+		pointOffset += g1Len
+	}
+	if err := requireCompressedPoint(raw, pointOffset, "commitment proof"); err != nil {
+		return nil, err
 	}
 	proof := groth16.NewProof(curve)
 	if _, err := proof.ReadFrom(bytes.NewReader(raw)); err != nil {

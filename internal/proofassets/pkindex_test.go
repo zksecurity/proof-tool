@@ -44,6 +44,7 @@ func TestValidatePKIndexAllocations(t *testing.T) {
 	}{
 		{"huge commitment count", func(i *PKIndex) { i.NbCommitmentKeys = 0xFFFFFFFF }, "nb_commitment_keys"},
 		{"nbWires overflow", func(i *PKIndex) { i.NbWires = math.MaxUint64 }, "implausibly large"},
+		{"nbWires arithmetic boundary", func(i *PKIndex) { i.NbWires = math.MaxInt64 / 2 }, "does not fit"},
 		{"nbWires exceeds file", func(i *PKIndex) { i.NbWires = 1 << 40 }, "does not fit"},
 		{"infinity exceeds wires", func(i *PKIndex) { i.NbInfinityA = 5 }, "exceeds nb_wires"},
 		{"missing basis section", func(i *PKIndex) {
@@ -62,5 +63,15 @@ func TestValidatePKIndexAllocations(t *testing.T) {
 				t.Fatalf("want error containing %q, got %v", tc.wantSub, err)
 			}
 		})
+	}
+}
+
+func TestValidatePKIndexRejectsSectionEndOverflow(t *testing.T) {
+	idx := validAllocIndex()
+	section := idx.Sections["G2B"]
+	section.Offset = math.MaxInt64 - section.Len + 1
+	idx.Sections["G2B"] = section
+	if err := ValidatePKIndex(idx); err == nil || !strings.Contains(err.Error(), "exceeds file size") {
+		t.Fatalf("expected overflowing section rejection, got %v", err)
 	}
 }

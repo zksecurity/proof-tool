@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -1078,9 +1079,19 @@ func zstdMaxMemory(maxDecoded int64) uint64 {
 	return uint64(maxDecoded)
 }
 
-// safeCCSReadFrom decodes a constraint system, converting a decoder panic
-// (e.g. make([]byte, totalLen) on a hostile length prefix) into an error so a
-// malformed object cannot abort the wasm module.
+func boundedCompressedWire(r io.Reader, size int64) (io.Reader, error) {
+	if r == nil {
+		return nil, fmt.Errorf("compressed ccs reader is required")
+	}
+	if size <= 0 || size == math.MaxInt64 {
+		return nil, fmt.Errorf("compressed ccs size %d cannot be bounded", size)
+	}
+	return io.LimitReader(r, size+1), nil
+}
+
+// safeCCSReadFrom converts ordinary decoder panics into errors. Allocation
+// safety does not rely on recover: PreflightConstraintSystemReader rejects the
+// declared payload length before gnark can allocate from it.
 func safeCCSReadFrom(ccs constraint.ConstraintSystem, r io.Reader) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -1182,7 +1193,14 @@ func fetchCCS(rawURL string, compressed *proofassets.CompressedAssetPin, maxDeco
 		if err != nil {
 			return nil, prover.FileDigest{}, fmt.Errorf("create blake2b digest: %w", err)
 		}
-		wire = &countingReader{r: io.TeeReader(body, io.MultiWriter(wireSHA, wireBlake))}
+		// The signed compressed size is known before transport. Read at most one
+		// byte beyond it so an oversized or endless response fails without being
+		// drained to EOF first.
+		boundedWire, err := boundedCompressedWire(body, compressed.Size)
+		if err != nil {
+			return nil, prover.FileDigest{}, err
+		}
+		wire = &countingReader{r: io.TeeReader(boundedWire, io.MultiWriter(wireSHA, wireBlake))}
 		// Bound the decoder's window memory. klauspost's default is 64 GiB, so
 		// without this a tiny frame declaring a huge window is itself a memory
 		// bomb, independent of how much output we read.
@@ -1196,11 +1214,9 @@ func fetchCCS(rawURL string, compressed *proofassets.CompressedAssetPin, maxDeco
 		decoded = body
 	}
 	// Cap the decoded byte count at the pinned size (plus one, to detect
-	// overrun). gnark's CS decoder trusts an 8-byte length prefix and does
-	// make([]byte, totalLen) before reading; the limit stops an inflate bomb
-	// or a corrupt object from streaming unbounded bytes, and the recover
-	// boundary below turns an oversized make into an error instead of aborting
-	// the wasm module.
+	// overrun). Preflight the fixed gnark header below as well: LimitReader caps
+	// transport, but gnark allocates from its declared length before reading the
+	// payload.
 	if maxDecoded < 1 {
 		maxDecoded = maxCCSDecodedBytes
 	}
@@ -1210,7 +1226,11 @@ func fetchCCS(rawURL string, compressed *proofassets.CompressedAssetPin, maxDeco
 	ccs := groth16.NewCS(ecc.BLS12_381)
 	decodeStarted := time.Now()
 	bodyBefore, hashBefore := body.duration, hashes.duration
-	if err := safeCCSReadFrom(ccs, reader); err != nil {
+	ccsReader, err := prover.PreflightConstraintSystemReader(reader, maxDecoded)
+	if err == nil {
+		err = safeCCSReadFrom(ccs, ccsReader)
+	}
+	if err != nil {
 		err = fmt.Errorf("read constraint system: %w", err)
 		if compressed != nil {
 			// A truncated frame or mid-body reset on the compressed object is
