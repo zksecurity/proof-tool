@@ -1,0 +1,120 @@
+name: MPC ceremony release validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mpc-ceremony-release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  # Update this only after reviewing the Relay change and rerunning this gate.
+  RELAY_COMMIT: c0ccd19f884d6cb355372be95dd159405c3bf368
+
+jobs:
+  rehearsal-reproducibility:
+    name: Reproducible unsigned rehearsal
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Verify release inputs
+        shell: bash
+        run: |
+          test "$(go env GOVERSION)" = go1.26.5
+          test "$(go env GOHOSTOS)" = linux
+          test "$(go env GOHOSTARCH)" = amd64
+          test "$(sed -n 's/^module //p' go.mod)" = proof-tool
+
+      - name: Bootstrap patched vendor tree
+        run: bash scripts/bootstrap-vendor.sh
+
+      - name: Build two unsigned rehearsals
+        shell: bash
+        run: |
+          mkdir "$RUNNER_TEMP/mpc-rehearsal-a-parent"
+          mkdir "$RUNNER_TEMP/mpc-rehearsal-b-parent"
+          scripts/build-mpc-ceremony-release.sh \
+            --mode rehearsal \
+            --out-dir "$RUNNER_TEMP/mpc-rehearsal-a-parent/release"
+          scripts/build-mpc-ceremony-release.sh \
+            --mode rehearsal \
+            --out-dir "$RUNNER_TEMP/mpc-rehearsal-b-parent/release"
+
+      - name: Verify byte-for-byte reproducibility
+        shell: bash
+        run: |
+          scripts/verify-mpc-ceremony-reproducible.sh \
+            --mode rehearsal \
+            --expected-commit "$GITHUB_SHA" \
+            --expected-tag none \
+            --tag-signer-fingerprint none \
+            --trusted-build-public-key-file none \
+            "$RUNNER_TEMP/mpc-rehearsal-a-parent/release" \
+            "$RUNNER_TEMP/mpc-rehearsal-b-parent/release"
+
+      - name: Confirm rehearsal packages are unsigned
+        shell: bash
+        run: |
+          for release in \
+            "$RUNNER_TEMP/mpc-rehearsal-a-parent/release" \
+            "$RUNNER_TEMP/mpc-rehearsal-b-parent/release"
+          do
+            test "$(<"$release/build-mode.txt")" = rehearsal
+            test "$(<"$release/signed-tag.txt")" = none
+            test "$(<"$release/signed-tag-status.txt")" = not-required-for-rehearsal
+            test ! -e "$release/build-package-manifest.sig"
+            test ! -e "$release/build-package-manifest-public-key.hex"
+          done
+
+  relay-compatibility:
+    name: Relay CLI compatibility (pinned commit)
+    needs: rehearsal-reproducibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out proof-tool
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: proof-tool
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out pinned Relay
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zksecurity/relay
+          ref: ${{ env.RELAY_COMMIT }}
+          path: relay
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: proof-tool/go.mod
+          cache: false
+
+      - name: Exercise the proof-tool CLI boundary
+        shell: bash
+        run: |
+          test "$(git -C relay rev-parse HEAD)" = "$RELAY_COMMIT"
+          cd relay
+          RELAY_PROOF_TOOL_DIR="$GITHUB_WORKSPACE/proof-tool" \
+            go test ./cmd/relay \
+              -run '^TestProofToolCompatibility$' \
+              -count=1 \
+              -v
