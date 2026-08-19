@@ -239,8 +239,8 @@ func identifyCLICommandArguments(args []string) map[int]struct{} {
 
 command:
 	topLevel := map[string]struct{}{
-		"audit": {}, "decision": {}, "finalize": {}, "help": {}, "init": {}, "inspect": {},
-		"ops": {}, "phase1": {}, "phase2": {}, "release": {},
+		"audit": {}, "decision": {}, "finalize": {}, "help": {}, "init": {},
+		"inspect": {}, "ops": {}, "phase1": {}, "phase2": {}, "release": {},
 	}
 	if _, ok := topLevel[args[index]]; !ok {
 		return safe
@@ -257,8 +257,14 @@ command:
 			"contribute": {}, "help": {}, "init": {}, "verify": {},
 		},
 		"decision": {"help": {}, "prepare": {}, "sign": {}, "verify": {}},
-		"ops":      {"export-signing": {}, "help": {}, "import-signature": {}, "verify": {}},
-		"release":  {"help": {}, "sign": {}, "verify": {}},
+		"inspect": {
+			"chain": {}, "definition": {}, "enrollment": {}, "help": {}, "participant": {},
+		},
+		"ops": {
+			"export-signing": {}, "help": {}, "import-signature": {},
+			"prepare-mirror-receipt": {}, "prepare-public-witness-receipt": {}, "verify": {},
+		},
+		"release": {"help": {}, "sign": {}, "verify": {}},
 	}
 	allowed, hasSubcommands := subcommands[args[index]]
 	if hasSubcommands && index+1 < len(args) {

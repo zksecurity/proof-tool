@@ -62,6 +62,9 @@ func parseInvocation(args []string) (Invocation, error) {
 		invocation.Command, invocation.Options = CommandInit, options
 		return invocation, wrapCommandError(err, "init")
 	case "inspect":
+		if len(rest) > 1 && !strings.HasPrefix(rest[1], "-") {
+			return parseInspectSubcommand(invocation, rest[1:])
+		}
 		options, err := parseInspect(rest[1:])
 		invocation.Command, invocation.Options = CommandInspect, options
 		return invocation, wrapCommandError(err, "inspect")
@@ -86,6 +89,126 @@ func parseInvocation(args []string) (Invocation, error) {
 			message: fmt.Sprintf("unknown command %q", rest[0]),
 		}
 	}
+}
+
+func parseInspectSubcommand(invocation Invocation, args []string) (Invocation, error) {
+	if len(args) == 0 {
+		return Invocation{}, &usageError{message: "missing inspect command", topic: []string{"inspect"}}
+	}
+	if args[0] == "help" {
+		return Invocation{}, &helpRequest{topic: append([]string{"inspect"}, args[1:]...)}
+	}
+	switch args[0] {
+	case "definition":
+		options, err := parseInspectDefinition(args[1:])
+		invocation.Command, invocation.Options = CommandInspectDefinition, options
+		return invocation, wrapCommandError(err, "inspect", "definition")
+	case "chain":
+		options, err := parseInspectChain(args[1:])
+		invocation.Command, invocation.Options = CommandInspectChain, options
+		return invocation, wrapCommandError(err, "inspect", "chain")
+	case "participant":
+		options, err := parseInspectParticipant(args[1:])
+		invocation.Command, invocation.Options = CommandInspectParticipant, options
+		return invocation, wrapCommandError(err, "inspect", "participant")
+	case "enrollment":
+		options, err := parseInspectEnrollment(args[1:])
+		invocation.Command, invocation.Options = CommandInspectEnrollment, options
+		return invocation, wrapCommandError(err, "inspect", "enrollment")
+	default:
+		return Invocation{}, &usageError{
+			message: fmt.Sprintf("unknown inspect command %q", args[0]),
+			topic:   []string{"inspect"},
+		}
+	}
+}
+
+func parseInspectParticipant(args []string) (InspectParticipantOptions, error) {
+	var options InspectParticipantOptions
+	fs := commandFlagSet("inspect participant")
+	addCeremonyTrustFlags(
+		fs,
+		&options.CeremonyPath,
+		&options.CeremonySignaturePath,
+		&options.CoordinatorPublicKeyFile,
+	)
+	fs.StringVar(&options.ParticipantSigningKey, "participant-signing-key", "", "existing participant Ed25519 private key")
+	if err := parseFlags(fs, args); err != nil {
+		return options, err
+	}
+	return options, requireValues(
+		pathValue("--ceremony", options.CeremonyPath),
+		pathValue("--ceremony-signature", options.CeremonySignaturePath),
+		pathValue("--coordinator-public-key-file", options.CoordinatorPublicKeyFile),
+		pathValue("--participant-signing-key", options.ParticipantSigningKey),
+	)
+}
+
+func parseInspectEnrollment(args []string) (InspectEnrollmentOptions, error) {
+	var options InspectEnrollmentOptions
+	fs := commandFlagSet("inspect enrollment")
+	addCeremonyTrustFlags(
+		fs,
+		&options.CeremonyPath,
+		&options.CeremonySignaturePath,
+		&options.CoordinatorPublicKeyFile,
+	)
+	fs.StringVar(&options.EnrollmentPath, "enrollment", "", "canonical operational enrollment record")
+	fs.StringVar(&options.EnrollmentSignaturePath, "enrollment-signature", "", "detached proof-of-possession signature")
+	if err := parseFlags(fs, args); err != nil {
+		return options, err
+	}
+	return options, requireValues(
+		pathValue("--ceremony", options.CeremonyPath),
+		pathValue("--ceremony-signature", options.CeremonySignaturePath),
+		pathValue("--coordinator-public-key-file", options.CoordinatorPublicKeyFile),
+		pathValue("--enrollment", options.EnrollmentPath),
+		pathValue("--enrollment-signature", options.EnrollmentSignaturePath),
+	)
+}
+
+func parseInspectDefinition(args []string) (InspectDefinitionOptions, error) {
+	var options InspectDefinitionOptions
+	fs := commandFlagSet("inspect definition")
+	addCeremonyTrustFlags(
+		fs,
+		&options.CeremonyPath,
+		&options.CeremonySignaturePath,
+		&options.CoordinatorPublicKeyFile,
+	)
+	if err := parseFlags(fs, args); err != nil {
+		return options, err
+	}
+	return options, requireValues(
+		pathValue("--ceremony", options.CeremonyPath),
+		pathValue("--ceremony-signature", options.CeremonySignaturePath),
+		pathValue("--coordinator-public-key-file", options.CoordinatorPublicKeyFile),
+	)
+}
+
+func parseInspectChain(args []string) (InspectChainOptions, error) {
+	var options InspectChainOptions
+	fs := commandFlagSet("inspect chain")
+	addCeremonyTrustFlags(
+		fs,
+		&options.CeremonyPath,
+		&options.CeremonySignaturePath,
+		&options.CoordinatorPublicKeyFile,
+	)
+	fs.StringVar(&options.TranscriptRoot, "transcript-root", "", "local transcript root")
+	fs.StringVar(&options.ChainPath, "chain", "", "explicit accepted chain JSON path")
+	fs.StringVar(&options.ChainSignaturePath, "chain-signature", "", "detached accepted chain signature path")
+	if err := parseFlags(fs, args); err != nil {
+		return options, err
+	}
+	return options, requireValues(
+		pathValue("--ceremony", options.CeremonyPath),
+		pathValue("--ceremony-signature", options.CeremonySignaturePath),
+		pathValue("--coordinator-public-key-file", options.CoordinatorPublicKeyFile),
+		pathValue("--transcript-root", options.TranscriptRoot),
+		pathValue("--chain", options.ChainPath),
+		pathValue("--chain-signature", options.ChainSignaturePath),
+	)
 }
 
 func parseDecision(invocation Invocation, args []string) (Invocation, error) {
@@ -216,6 +339,14 @@ func parseOps(invocation Invocation, args []string) (Invocation, error) {
 		return Invocation{}, &helpRequest{topic: append([]string{"ops"}, args[1:]...)}
 	}
 	switch args[0] {
+	case "prepare-public-witness-receipt":
+		options, err := parseOpsPreparePublicWitnessReceipt(args[1:])
+		invocation.Command, invocation.Options = CommandOpsPreparePublicWitnessReceipt, options
+		return invocation, wrapCommandError(err, "ops", "prepare-public-witness-receipt")
+	case "prepare-mirror-receipt":
+		options, err := parseOpsPrepareMirrorReceipt(args[1:])
+		invocation.Command, invocation.Options = CommandOpsPrepareMirrorReceipt, options
+		return invocation, wrapCommandError(err, "ops", "prepare-mirror-receipt")
 	case "export-signing":
 		options, err := parseOpsExportSigning(args[1:])
 		invocation.Command, invocation.Options = CommandOpsExportSigning, options
@@ -234,6 +365,64 @@ func parseOps(invocation Invocation, args []string) (Invocation, error) {
 			topic:   []string{"ops"},
 		}
 	}
+}
+
+func parseOpsPreparePublicWitnessReceipt(args []string) (OpsPreparePublicWitnessReceiptOptions, error) {
+	var options OpsPreparePublicWitnessReceiptOptions
+	fs := commandFlagSet("ops prepare-public-witness-receipt")
+	addCeremonyTrustFlags(fs, &options.CeremonyPath, &options.CeremonySignaturePath, &options.CoordinatorPublicKeyFile)
+	fs.StringVar(&options.TranscriptRoot, "transcript-root", "", "local root containing the signed closure")
+	fs.StringVar(&options.ClosurePath, "closure", "", "exact coordinator-signed closure record")
+	fs.StringVar(&options.ClosureSignaturePath, "closure-signature", "", "detached coordinator signature for the closure")
+	fs.StringVar(&options.WitnessEnrollmentPath, "witness-enrollment", "", "canonical public-witness proof-of-possession enrollment")
+	fs.StringVar(&options.WitnessEnrollmentSignaturePath, "witness-enrollment-signature", "", "detached witness enrollment signature")
+	fs.StringVar(&options.PublicationLocation, "publication-location", "", "human-observed publication URI; only its SHA-256 is recorded")
+	fs.StringVar(&options.ObservedAt, "observed-at", "", "human-claimed observation time in RFC3339 UTC")
+	fs.StringVar(&options.OutDir, "out-dir", "", "fresh directory for canonical receipt and signing request")
+	if err := parseFlags(fs, args); err != nil {
+		return options, err
+	}
+	return options, requireValues(
+		pathValue("--ceremony", options.CeremonyPath),
+		pathValue("--ceremony-signature", options.CeremonySignaturePath),
+		pathValue("--coordinator-public-key-file", options.CoordinatorPublicKeyFile),
+		pathValue("--transcript-root", options.TranscriptRoot),
+		pathValue("--closure", options.ClosurePath),
+		pathValue("--closure-signature", options.ClosureSignaturePath),
+		pathValue("--witness-enrollment", options.WitnessEnrollmentPath),
+		pathValue("--witness-enrollment-signature", options.WitnessEnrollmentSignaturePath),
+		value("--publication-location", options.PublicationLocation),
+		value("--observed-at", options.ObservedAt),
+		pathValue("--out-dir", options.OutDir),
+	)
+}
+
+func parseOpsPrepareMirrorReceipt(args []string) (OpsPrepareMirrorReceiptOptions, error) {
+	var options OpsPrepareMirrorReceiptOptions
+	fs := commandFlagSet("ops prepare-mirror-receipt")
+	fs.StringVar(&options.DraftPath, "draft", "", "human-reviewable mirror receipt draft from relay")
+	addCeremonyTrustFlags(fs, &options.CeremonyPath, &options.CeremonySignaturePath, &options.CoordinatorPublicKeyFile)
+	fs.StringVar(&options.TranscriptRoot, "transcript-root", "", "local root containing the accepted chain prefix")
+	fs.StringVar(&options.ChainPath, "chain", "", "exact coordinator-signed accepted chain prefix")
+	fs.StringVar(&options.ChainSignaturePath, "chain-signature", "", "detached coordinator signature for the chain prefix")
+	fs.StringVar(&options.MirrorEnrollmentPath, "mirror-enrollment", "", "canonical mirror-operator proof-of-possession enrollment")
+	fs.StringVar(&options.MirrorEnrollmentSignaturePath, "mirror-enrollment-signature", "", "detached mirror enrollment signature")
+	fs.StringVar(&options.OutDir, "out-dir", "", "fresh directory for canonical receipt and signing request")
+	if err := parseFlags(fs, args); err != nil {
+		return options, err
+	}
+	return options, requireValues(
+		pathValue("--draft", options.DraftPath),
+		pathValue("--ceremony", options.CeremonyPath),
+		pathValue("--ceremony-signature", options.CeremonySignaturePath),
+		pathValue("--coordinator-public-key-file", options.CoordinatorPublicKeyFile),
+		pathValue("--transcript-root", options.TranscriptRoot),
+		pathValue("--chain", options.ChainPath),
+		pathValue("--chain-signature", options.ChainSignaturePath),
+		pathValue("--mirror-enrollment", options.MirrorEnrollmentPath),
+		pathValue("--mirror-enrollment-signature", options.MirrorEnrollmentSignaturePath),
+		pathValue("--out-dir", options.OutDir),
+	)
 }
 
 func parseOpsExportSigning(args []string) (OpsExportSigningOptions, error) {

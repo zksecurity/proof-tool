@@ -335,6 +335,41 @@ func TestParseInvocationAcceptsRequiredCommandSurface(t *testing.T) {
 			command: CommandDecisionVerify,
 		},
 		{
+			name: "ops prepare public witness receipt",
+			args: joinArgs(
+				[]string{"ops", "prepare-public-witness-receipt"},
+				ceremonyTrust,
+				[]string{
+					"--transcript-root", "transcript",
+					"--closure", "transcript/phase1/closure/record.json",
+					"--closure-signature", "transcript/phase1/closure/record.sig",
+					"--witness-enrollment", "ops/witness-enrollment.json",
+					"--witness-enrollment-signature", "ops/witness-enrollment.sig",
+					"--publication-location", "https://witness.example/phase1/closure",
+					"--observed-at", "2026-08-18T12:00:00Z",
+					"--out-dir", "ops/witness-export",
+				},
+			),
+			command: CommandOpsPreparePublicWitnessReceipt,
+		},
+		{
+			name: "ops prepare mirror receipt",
+			args: joinArgs(
+				[]string{"ops", "prepare-mirror-receipt"},
+				ceremonyTrust,
+				[]string{
+					"--draft", "ops/mirror-draft.json",
+					"--transcript-root", "transcript",
+					"--chain", "transcript/phase1/chain-0001.json",
+					"--chain-signature", "transcript/phase1/chain-0001.sig",
+					"--mirror-enrollment", "ops/mirror-enrollment.json",
+					"--mirror-enrollment-signature", "ops/mirror-enrollment.sig",
+					"--out-dir", "ops/mirror-export",
+				},
+			),
+			command: CommandOpsPrepareMirrorReceipt,
+		},
+		{
 			name: "ops export signing",
 			args: joinArgs(
 				[]string{"ops", "export-signing"},
@@ -377,6 +412,45 @@ func TestParseInvocationAcceptsRequiredCommandSurface(t *testing.T) {
 			),
 			command: CommandOpsVerify,
 		},
+		{
+			name:    "inspect definition",
+			args:    joinArgs([]string{"inspect", "definition"}, ceremonyTrust),
+			command: CommandInspectDefinition,
+		},
+		{
+			name: "inspect chain",
+			args: joinArgs(
+				[]string{"inspect", "chain"},
+				ceremonyTrust,
+				[]string{
+					"--transcript-root", "transcript",
+					"--chain", "transcript/phase1/chain-0001.json",
+					"--chain-signature", "transcript/phase1/chain-0001.sig",
+				},
+			),
+			command: CommandInspectChain,
+		},
+		{
+			name: "inspect participant",
+			args: joinArgs(
+				[]string{"inspect", "participant"},
+				ceremonyTrust,
+				[]string{"--participant-signing-key", "keys/participant-01.private.hex"},
+			),
+			command: CommandInspectParticipant,
+		},
+		{
+			name: "inspect enrollment",
+			args: joinArgs(
+				[]string{"inspect", "enrollment"},
+				ceremonyTrust,
+				[]string{
+					"--enrollment", "ops/witness-enrollment.json",
+					"--enrollment-signature", "ops/witness-enrollment.sig",
+				},
+			),
+			command: CommandInspectEnrollment,
+		},
 	}
 
 	for _, test := range tests {
@@ -408,6 +482,63 @@ func TestParseInvocationRejectsMissingExplicitPaths(t *testing.T) {
 		if !strings.Contains(err.Error(), expected) {
 			t.Errorf("error %q does not mention %s", err, expected)
 		}
+	}
+}
+
+func TestBrokerlessCommandsRequireSecurityCriticalInputs(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "participant key",
+			args: []string{
+				"inspect", "participant",
+				"--ceremony", "ceremony.json",
+				"--ceremony-signature", "ceremony.sig",
+				"--coordinator-public-key-file", "coordinator.pub",
+			},
+			want: "--participant-signing-key",
+		},
+		{
+			name: "enrollment signature",
+			args: []string{
+				"inspect", "enrollment",
+				"--ceremony", "ceremony.json",
+				"--ceremony-signature", "ceremony.sig",
+				"--coordinator-public-key-file", "coordinator.pub",
+				"--enrollment", "witness.json",
+			},
+			want: "--enrollment-signature",
+		},
+		{
+			name: "witness observation",
+			args: []string{
+				"ops", "prepare-public-witness-receipt",
+				"--ceremony", "ceremony.json",
+				"--ceremony-signature", "ceremony.sig",
+				"--coordinator-public-key-file", "coordinator.pub",
+				"--transcript-root", "transcript",
+				"--closure", "closure.json",
+				"--closure-signature", "closure.sig",
+				"--witness-enrollment", "witness.json",
+				"--witness-enrollment-signature", "witness.sig",
+				"--publication-location", "https://witness.example/closure",
+				"--out-dir", "output",
+			},
+			want: "--observed-at",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := parseInvocation(test.args)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want missing %s", err, test.want)
+			}
+		})
 	}
 }
 
@@ -790,6 +921,49 @@ func TestRunCLIErrorOutputRedactsCallerControlledValues(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestDiagnosticRedactionRecognizesInspectionAndReceiptCommands(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name         string
+		args         []string
+		commandIndex int
+		valueIndex   int
+	}{
+		{
+			name:         "participant inspection",
+			args:         []string{"--format=json", "inspect", "participant", "--participant-signing-key", "secret.key"},
+			commandIndex: 1,
+			valueIndex:   4,
+		},
+		{
+			name:         "enrollment inspection",
+			args:         []string{"inspect", "enrollment", "--enrollment", "enrollment.json"},
+			commandIndex: 0,
+			valueIndex:   3,
+		},
+		{
+			name:         "public witness receipt",
+			args:         []string{"ops", "prepare-public-witness-receipt", "--publication-location", "https://private.example/closure"},
+			commandIndex: 0,
+			valueIndex:   3,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			safe := identifyCLICommandArguments(test.args)
+			if _, ok := safe[test.commandIndex]; !ok {
+				t.Fatal("top-level command is not recognized as diagnostic-safe")
+			}
+			if _, ok := safe[test.commandIndex+1]; !ok {
+				t.Fatal("subcommand is not recognized as diagnostic-safe")
+			}
+			if _, ok := safe[test.valueIndex]; ok {
+				t.Fatal("caller-controlled flag value is incorrectly diagnostic-safe")
+			}
+		})
 	}
 }
 

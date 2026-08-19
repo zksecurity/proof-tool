@@ -18,6 +18,161 @@ import (
 
 const maxOperationalRecordBytes = 16 << 20
 
+func executeOpsPreparePublicWitnessReceipt(options OpsPreparePublicWitnessReceiptOptions) (CommandResult, error) {
+	trusted, err := mpcceremony.LoadSignedDefinition(mpcceremony.TrustPaths{
+		DefinitionPath:           options.CeremonyPath,
+		DefinitionSignaturePath:  options.CeremonySignaturePath,
+		CoordinatorPublicKeyPath: options.CoordinatorPublicKeyFile,
+	})
+	if err != nil {
+		return CommandResult{}, err
+	}
+	closure, closureName, err := mpcceremony.LoadSignedCloseExact(
+		trusted,
+		options.TranscriptRoot,
+		options.ClosurePath,
+		options.ClosureSignaturePath,
+	)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	enrollmentBytes, err := readRegularOperationalFile(options.WitnessEnrollmentPath, maxOperationalRecordBytes)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	enrollmentSignatureBytes, err := readRegularOperationalFile(options.WitnessEnrollmentSignaturePath, 4096)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	definitionBytes, err := canonicalDefinition(trusted)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	enrollment, err := mpcceremony.VerifyEnrollmentProofOfPossession(
+		trusted.Definition,
+		definitionBytes,
+		enrollmentBytes,
+		enrollmentSignatureBytes,
+	)
+	if err != nil {
+		return CommandResult{}, fmt.Errorf("witness enrollment proof of possession: %w", err)
+	}
+	_, canonical, err := mpcceremony.PreparePublicWitnessReceipt(
+		trusted.Definition,
+		closure.Record,
+		closure.RecordBytes,
+		enrollment,
+		closureName,
+		options.PublicationLocation,
+		options.ObservedAt,
+	)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	request, err := mpcceremony.NewOperationalSigningRequest(mpcceremony.RecordPublicWitness, canonical)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	requestBytes, err := mpcceremony.MarshalCanonical(request)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	canonicalPath, requestPath, err := writeOperationalSigningExport(options.OutDir, canonical, requestBytes)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	return CommandResult{
+		CeremonyID: trusted.Definition.CeremonyID,
+		Phase:      string(closure.Record.Phase),
+		Summary:    "validated human-claimed publication observation and exported canonical public-witness receipt for offline signing",
+		Outputs: map[string]string{
+			"canonical":       canonicalPath,
+			"signing_request": requestPath,
+		},
+	}, nil
+}
+
+func executeOpsPrepareMirrorReceipt(options OpsPrepareMirrorReceiptOptions) (CommandResult, error) {
+	trusted, err := mpcceremony.LoadSignedDefinition(mpcceremony.TrustPaths{
+		DefinitionPath:           options.CeremonyPath,
+		DefinitionSignaturePath:  options.CeremonySignaturePath,
+		CoordinatorPublicKeyPath: options.CoordinatorPublicKeyFile,
+	})
+	if err != nil {
+		return CommandResult{}, err
+	}
+	chain, chainPrefix, err := mpcceremony.LoadSignedChainExact(trusted, mpcceremony.PhaseTranscriptPaths{
+		RootDir:            options.TranscriptRoot,
+		ChainPath:          options.ChainPath,
+		ChainSignaturePath: options.ChainSignaturePath,
+	})
+	if err != nil {
+		return CommandResult{}, err
+	}
+	draftBytes, err := readRegularOperationalFile(options.DraftPath, maxOperationalRecordBytes)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	draft, err := mpcceremony.ParseMirrorReceiptDraft(draftBytes)
+	if err != nil {
+		return CommandResult{}, fmt.Errorf("mirror receipt draft: %w", err)
+	}
+	enrollmentBytes, err := readRegularOperationalFile(options.MirrorEnrollmentPath, maxOperationalRecordBytes)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	enrollmentSignatureBytes, err := readRegularOperationalFile(options.MirrorEnrollmentSignaturePath, 4096)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	definitionBytes, err := canonicalDefinition(trusted)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	enrollment, err := mpcceremony.VerifyEnrollmentProofOfPossession(
+		trusted.Definition,
+		definitionBytes,
+		enrollmentBytes,
+		enrollmentSignatureBytes,
+	)
+	if err != nil {
+		return CommandResult{}, fmt.Errorf("mirror enrollment proof of possession: %w", err)
+	}
+	_, canonical, err := mpcceremony.PrepareImmutableMirrorReceipt(
+		trusted.Definition,
+		chain,
+		chainPrefix,
+		draft,
+		enrollment,
+	)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	request, err := mpcceremony.NewOperationalSigningRequest(mpcceremony.RecordMirrorReceipt, canonical)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	requestBytes, err := mpcceremony.MarshalCanonical(request)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	canonicalPath, requestPath, err := writeOperationalSigningExport(options.OutDir, canonical, requestBytes)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	return CommandResult{
+		CeremonyID: trusted.Definition.CeremonyID,
+		Phase:      string(chain.Phase),
+		Sequence:   int(draft.Index),
+		Summary:    "authenticated relay draft and exported exact canonical mirror receipt bytes for offline signing",
+		Outputs: map[string]string{
+			"draft":           options.DraftPath,
+			"canonical":       canonicalPath,
+			"signing_request": requestPath,
+		},
+	}, nil
+}
+
 func executeOpsExportSigning(options OpsExportSigningOptions) (result CommandResult, err error) {
 	recordType := mpcceremony.OperationalRecordType(options.RecordType)
 	canonical, record, trusted, err := loadBoundOperationalRecord(
@@ -46,30 +201,10 @@ func executeOpsExportSigning(options OpsExportSigningOptions) (result CommandRes
 		return CommandResult{}, err
 	}
 
-	if err := os.Mkdir(options.OutDir, 0o700); err != nil {
-		return CommandResult{}, fmt.Errorf("create fresh signing export directory: %w", err)
-	}
-	complete := false
-	defer func() {
-		if complete {
-			return
-		}
-		_ = os.Remove(filepath.Join(options.OutDir, "canonical.json"))
-		_ = os.Remove(filepath.Join(options.OutDir, "signing-request.json"))
-		_ = os.Remove(options.OutDir)
-	}()
-	canonicalPath := filepath.Join(options.OutDir, "canonical.json")
-	requestPath := filepath.Join(options.OutDir, "signing-request.json")
-	if err := writeFreshOperationalFile(canonicalPath, canonical, 0o600); err != nil {
+	canonicalPath, requestPath, err := writeOperationalSigningExport(options.OutDir, canonical, requestBytes)
+	if err != nil {
 		return CommandResult{}, err
 	}
-	if err := writeFreshOperationalFile(requestPath, requestBytes, 0o600); err != nil {
-		return CommandResult{}, err
-	}
-	if err := syncDirectory(options.OutDir); err != nil {
-		return CommandResult{}, err
-	}
-	complete = true
 	return CommandResult{
 		CeremonyID: trusted.Definition.CeremonyID,
 		Summary:    "exported exact canonical operational record bytes and digest for offline signing",
@@ -78,6 +213,34 @@ func executeOpsExportSigning(options OpsExportSigningOptions) (result CommandRes
 			"signing_request": requestPath,
 		},
 	}, nil
+}
+
+func writeOperationalSigningExport(outDir string, canonical, request []byte) (canonicalPath, requestPath string, err error) {
+	if err := os.Mkdir(outDir, 0o700); err != nil {
+		return "", "", fmt.Errorf("create fresh signing export directory: %w", err)
+	}
+	complete := false
+	defer func() {
+		if complete {
+			return
+		}
+		_ = os.Remove(filepath.Join(outDir, "canonical.json"))
+		_ = os.Remove(filepath.Join(outDir, "signing-request.json"))
+		_ = os.Remove(outDir)
+	}()
+	canonicalPath = filepath.Join(outDir, "canonical.json")
+	requestPath = filepath.Join(outDir, "signing-request.json")
+	if err := writeFreshOperationalFile(canonicalPath, canonical, 0o600); err != nil {
+		return "", "", err
+	}
+	if err := writeFreshOperationalFile(requestPath, request, 0o600); err != nil {
+		return "", "", err
+	}
+	if err := syncDirectory(outDir); err != nil {
+		return "", "", err
+	}
+	complete = true
+	return canonicalPath, requestPath, nil
 }
 
 func executeOpsImportSignature(options OpsImportSignatureOptions) (CommandResult, error) {

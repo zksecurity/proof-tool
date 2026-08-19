@@ -708,25 +708,11 @@ func verifyEnrollmentEvidence(
 		if err != nil {
 			return nil, nil, fmt.Errorf("enrollment %d signature: %w", index, err)
 		}
-		var record EnrollmentRecord
-		if err := UnmarshalCanonical(recordBytes, &record); err != nil {
-			return nil, nil, fmt.Errorf("enrollment %d: %w", index, err)
-		}
-		signer, err := VerifyOperationalRecordBinding(definition, definitionBytes, &record)
+		record, err := VerifyEnrollmentProofOfPossession(definition, definitionBytes, recordBytes, signatureBytes)
 		if err != nil {
-			return nil, nil, fmt.Errorf("enrollment %d binding: %w", index, err)
-		}
-		publicKey, err := identityPublicKey(signer)
-		if err != nil {
-			return nil, nil, err
-		}
-		var signature DetachedSignature
-		if err := UnmarshalCanonical(signatureBytes, &signature); err != nil {
-			return nil, nil, err
-		}
-		if err := VerifyExact(recordBytes, signature, signer.KeyID, publicKey); err != nil {
 			return nil, nil, fmt.Errorf("enrollment %d proof of possession: %w", index, err)
 		}
+		signer := record.Identity
 		if _, err := verifyArtifactBytes(root, record.IndependenceDisclosure, 1<<20); err != nil {
 			return nil, nil, fmt.Errorf("enrollment %d independence disclosure: %w", index, err)
 		}
@@ -1042,14 +1028,10 @@ func verifyAcceptedHeadEvidence(
 
 		mirrorIDs := make(map[string]struct{}, len(evidence.MirrorReceipts))
 		mirrorKeys := make(map[string]struct{}, len(evidence.MirrorReceipts))
-		expectedMirrorFiles := append([]ArtifactRef(nil), expectedReturnFiles...)
-		expectedMirrorFiles = append(
-			expectedMirrorFiles,
-			record.Verification,
-			evidence.AcceptedChainPrefix.Record,
-			evidence.AcceptedChainPrefix.Signature,
-		)
-		slices.SortFunc(expectedMirrorFiles, compareArtifactRefName)
+		expectedMirrorFiles, err := MirrorReceiptFiles(record, evidence.AcceptedChainPrefix)
+		if err != nil {
+			return nil, fmt.Errorf("accepted head %d mirror files: %w", index+1, err)
+		}
 		for mirrorIndex, pair := range evidence.MirrorReceipts {
 			mirrorAny, mirrorRefs, err := verifyOperationalPair(
 				definition,
