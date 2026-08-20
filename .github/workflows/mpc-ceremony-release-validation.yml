@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    # Nightly full production-sized compatibility run (02:17 UTC).
+    - cron: '17 2 * * *'
 
 permissions:
   contents: read
@@ -125,7 +128,7 @@ jobs:
     name: Relay CLI compatibility (pinned commit)
     needs: rehearsal-reproducibility
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 35
     steps:
       - name: Check out proof-tool
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -151,17 +154,108 @@ jobs:
         working-directory: proof-tool
         run: bash scripts/bootstrap-vendor.sh
 
-      - name: Exercise the full proof-tool CLI boundary
+      - name: Exercise the fast proof-tool CLI boundary
         shell: bash
         run: |
           test "$(git -C relay rev-parse HEAD)" = "$RELAY_COMMIT"
           cd relay
-          # The production-sized contribution alone takes about 22 minutes on
-          # ubuntu-latest; leave time for candidate verification as well.
+          # Fast layer only: tiny-circuit CLI/format compatibility. The
+          # production-sized cryptographic workflow runs in the
+          # relay-full-compatibility job below when crypto-relevant paths
+          # change, nightly, or on manual dispatch.
+          RELAY_PROOF_TOOL_DIR="$GITHUB_WORKSPACE/proof-tool" \
+            go test ./cmd/relay \
+              -run '^TestProofToolCompatibility$' \
+              -count=1 \
+              -timeout 30m \
+              -v
+
+  detect-crypto-changes:
+    name: Detect crypto-relevant changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      crypto: ${{ steps.diff.outputs.crypto }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Compare changed paths against the crypto surface
+        id: diff
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = schedule ] || [ "$EVENT_NAME" = workflow_dispatch ]; then
+            echo "crypto=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$EVENT_NAME" = pull_request ]; then
+            git fetch -q origin "$BASE_REF"
+            range="$(git merge-base "origin/$BASE_REF" HEAD)..HEAD"
+          elif git cat-file -e "$PUSH_BEFORE" 2>/dev/null; then
+            range="$PUSH_BEFORE..$GITHUB_SHA"
+          else
+            # Unknown base (e.g. force push): fail open into the full gate.
+            echo "crypto=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only "$range")
+          printf 'changed files:\n%s\n' "$changed"
+          if printf '%s\n' "$changed" | grep -qE '^(experiments/wasm-prover/patches/|scripts/bootstrap-vendor\.sh|scripts/check-vendor-drift\.sh|internal/mpcceremony/|internal/circuit/|cmd/mpc-ceremony/|go\.(mod|sum)$|\.github/workflows/mpc-ceremony-release-validation\.yml$)'; then
+            echo "crypto=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "crypto=false" >>"$GITHUB_OUTPUT"
+          fi
+
+  relay-full-compatibility:
+    name: Relay production-sized compatibility (patched crypto gate)
+    needs: [rehearsal-reproducibility, detect-crypto-changes]
+    if: needs.detect-crypto-changes.outputs.crypto == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - name: Check out proof-tool
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: proof-tool
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out pinned Relay
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zksecurity/relay
+          ref: ${{ env.RELAY_COMMIT }}
+          path: relay
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: proof-tool/go.mod
+          cache: false
+
+      - name: Bootstrap patched proof-tool vendor tree
+        working-directory: proof-tool
+        run: bash scripts/bootstrap-vendor.sh
+
+      - name: Exercise the production-sized cryptographic workflow
+        shell: bash
+        run: |
+          test "$(git -C relay rev-parse HEAD)" = "$RELAY_COMMIT"
+          cd relay
+          # Production-sized init + contribute + attest + verify measured at
+          # roughly 55-60 minutes total on ubuntu-latest (contribution alone
+          # about 22 minutes); budget with margin for runner variance.
           RELAY_PROOF_TOOL_DIR="$GITHUB_WORKSPACE/proof-tool" \
           RELAY_PROOF_TOOL_FULL=1 \
             go test ./cmd/relay \
               -run '^TestProofToolCompatibility$' \
               -count=1 \
-              -timeout 55m \
+              -timeout 95m \
               -v
