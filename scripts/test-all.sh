@@ -74,7 +74,7 @@ else
   # multi / destination round-trip integration tests (positive + tamper
   # cases). This is the strongest local evidence that proof generation works.
   run_step "go test (full, incl. real ownership Groth16 round-trips)" \
-    env PROOF_TOOL_RUN_FULL_PROOF=1 go test ./...
+    env PROOF_TOOL_RUN_FULL_PROOF=1 go test -timeout 55m ./...
 fi
 
 run_step "wasm prover builds" env GOOS=js GOARCH=wasm go build -o /dev/null ./cmd/wasm-prover

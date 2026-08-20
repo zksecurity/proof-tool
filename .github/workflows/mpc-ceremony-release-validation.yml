@@ -15,7 +15,7 @@ concurrency:
 
 env:
   # Update this only after reviewing the Relay change and rerunning this gate.
-  RELAY_COMMIT: f4e8a560e2cdae49618b76ef655bfed76bb65e26
+  RELAY_COMMIT: 0e631b319199254512ca753ed6f2d6c650fe3383
 
 jobs:
   rehearsal-reproducibility:
@@ -125,7 +125,7 @@ jobs:
     name: Relay CLI compatibility (pinned commit)
     needs: rehearsal-reproducibility
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - name: Check out proof-tool
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -147,13 +147,19 @@ jobs:
           go-version-file: proof-tool/go.mod
           cache: false
 
-      - name: Exercise the proof-tool CLI boundary
+      - name: Bootstrap patched proof-tool vendor tree
+        working-directory: proof-tool
+        run: bash scripts/bootstrap-vendor.sh
+
+      - name: Exercise the full proof-tool CLI boundary
         shell: bash
         run: |
           test "$(git -C relay rev-parse HEAD)" = "$RELAY_COMMIT"
           cd relay
           RELAY_PROOF_TOOL_DIR="$GITHUB_WORKSPACE/proof-tool" \
+          RELAY_PROOF_TOOL_FULL=1 \
             go test ./cmd/relay \
               -run '^TestProofToolCompatibility$' \
               -count=1 \
+              -timeout 30m \
               -v

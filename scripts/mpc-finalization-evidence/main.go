@@ -11,8 +11,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/consensys/gnark/logger"
 
 	"proof-tool/internal/circuit/ownership"
 	"proof-tool/internal/circuit/ownershipdest"
@@ -43,10 +46,17 @@ const (
 var goldenPath = ownership.Path{Account: 0, Role: 0, Index: 0}
 
 func main() {
+	// gnark defaults its global logger to stdout. Keep stdout exclusively for
+	// the helper's single JSON result so the ceremony runner can parse it.
+	configureLibraryLogging(os.Stderr)
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
+}
+
+func configureLibraryLogging(stderr io.Writer) {
+	logger.SetOutput(stderr)
 }
 
 func run() error {
