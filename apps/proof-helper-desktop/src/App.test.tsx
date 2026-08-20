@@ -170,7 +170,11 @@ describe("Proof Helper desktop app", () => {
     fireEvent.change(screen.getByLabelText("Bundle source"), { target: { value: "/tmp/source-bundle" } });
     fireEvent.change(screen.getByLabelText("Manifest public key"), { target: { value: "ab".repeat(32) } });
     fireEvent.change(screen.getByLabelText("Signature key id"), { target: { value: "test-signer" } });
-    fireEvent.click(screen.getByRole("button", { name: /install local proof assets/i }));
+    // The one-shot auto-install sets busy="install", which disables this button.
+    // Without waiting, the click is dropped and activateKeyBundle is never called.
+    const install = screen.getByRole("button", { name: /install local proof assets/i });
+    await waitFor(() => expect(install).toBeEnabled());
+    fireEvent.click(install);
 
     await waitFor(() => expect(api.activateKeyBundle).toHaveBeenCalledOnce());
     expect(api.activateKeyBundle).toHaveBeenCalledWith({
@@ -191,7 +195,9 @@ describe("Proof Helper desktop app", () => {
     await screen.findByRole("heading", { name: "Proof assets need setup" });
     fireEvent.change(screen.getByLabelText("Bundle source"), { target: { value: "/tmp/source-bundle" } });
     fireEvent.change(screen.getByLabelText("Manifest public key"), { target: { value: "cd".repeat(32) } });
-    fireEvent.click(screen.getByRole("button", { name: /install local proof assets/i }));
+    const install = screen.getByRole("button", { name: /install local proof assets/i });
+    await waitFor(() => expect(install).toBeEnabled());
+    fireEvent.click(install);
 
     const cancel = await screen.findAllByRole("button", { name: /cancel install/i });
     fireEvent.click(cancel[0]);
