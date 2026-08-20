@@ -247,10 +247,10 @@ func verifyPlainIdentity(dir, mode, commit, tag, fingerprint string) error {
 
 func verifyToolchainChecksums(path string) error {
 	const expected = "" +
-		"8da5fd321795754b994c64e3eb8a5a14ff47bd285559a7e876f3c79abafc67f9  go\n" +
-		"10c67b9de41c1e546b9bf416ceef410e5e3dd87a76d129b08b74a9570db9c463  compile\n" +
-		"e58a36e6550a32ed7175cd6e2a1824dc66c034d1e3539ebeac8af719a9150d5d  link\n" +
-		"0c9a07447aba3ed1df7a0a3e85f6e003d9bf312d2936dfc4b79e3d81e8ca7636  asm\n"
+		"29e6e0b8be61beb1489ceae62b304343566de8a1dc700af74bde7aeb9c80ad45  go\n" +
+		"73da54c06c0702ae7c8cff309dd3958980af7ae0307cf319d7d0cb2bbd3fafd2  compile\n" +
+		"048670775edfd89c6551149c197816dacdcc12c518b29ff1c533751b2dc4b976  link\n" +
+		"769ac2d73d09b7cc5479acdeb9f168c1772743420ffca2d9e990a9b0348d2836  asm\n"
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
