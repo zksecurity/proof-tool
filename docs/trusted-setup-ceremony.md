@@ -4,11 +4,18 @@ This repository has two deliberately separate Groth16 setup paths:
 
 - `proof-tool setup-ceremony` is a reproducible, signed, single-actor local
   setup.
-- `cmd/mpc-ceremony` is the two-phase multi-party workflow whose production
-  process is documented in
-  [`mpc-ceremony-runbook.md`](mpc-ceremony-runbook.md).
+- `cmd/mpc-ceremony` is the two-phase multi-party engine. Relay's
+  [coordinator runbook](https://github.com/zksecurity/relay/blob/main/COORDINATOR_RUNBOOK.md)
+  and [role runbook](https://github.com/zksecurity/relay/blob/main/ROLE_RUNBOOK.md)
+  document the distributed transport and operator workflow.
 
 The commands, transcripts, and trust claims are not interchangeable.
+
+The `mpc-ceremony` binary is also released independently of transport tools.
+Its reproducibility and CLI checks do not fetch or pin a Relay commit. A
+coordinated ceremony kit selects independently verified releases, tests the
+exact binaries together, and records their hashes as described in
+[`mpc-ceremony-release.md`](mpc-ceremony-release.md).
 
 ## Single-Actor Local Setup
 
@@ -60,11 +67,13 @@ ordered contributions in both phases, uses separate future public beacons for
 Phase 1 and Phase 2, and supports full independent transcript replay. Software
 verification alone is still insufficient: participant independence, host
 controls, entropy quality, erasure, public archival, and independent audits are
-operational requirements. See the full
-[`MPC ceremony operator, contributor, and auditor runbook`](mpc-ceremony-runbook.md).
-Its current Mainnet decision is **NO-GO**; see
-[`mpc-production-readiness.md`](mpc-production-readiness.md) before using any
-ceremony binary or artifact.
+operational requirements. See Relay's
+[coordinator runbook](https://github.com/zksecurity/relay/blob/main/COORDINATOR_RUNBOOK.md)
+and [role runbook](https://github.com/zksecurity/relay/blob/main/ROLE_RUNBOOK.md)
+for the deployed workflow. Relay's bundled rehearsal is test-only and does not
+constitute production approval; each production ceremony requires an explicit,
+independently reviewed go/no-go record before any ceremony binary or artifact
+is used.
 
 ## Toxic Waste Handling
 

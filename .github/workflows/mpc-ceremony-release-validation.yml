@@ -13,10 +13,6 @@ concurrency:
   group: mpc-ceremony-release-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
-env:
-  # Update this only after reviewing the Relay change and rerunning this gate.
-  RELAY_COMMIT: 0e631b319199254512ca753ed6f2d6c650fe3383
-
 jobs:
   rehearsal-reproducibility:
     name: Reproducible unsigned rehearsal
@@ -120,46 +116,3 @@ jobs:
             test ! -e "$release/build-package-manifest.sig"
             test ! -e "$release/build-package-manifest-public-key.hex"
           done
-
-  relay-compatibility:
-    name: Relay CLI compatibility (pinned commit)
-    needs: rehearsal-reproducibility
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    steps:
-      - name: Check out proof-tool
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          path: proof-tool
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Check out pinned Relay
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: zksecurity/relay
-          ref: ${{ env.RELAY_COMMIT }}
-          path: relay
-          persist-credentials: false
-
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: proof-tool/go.mod
-          cache: false
-
-      - name: Bootstrap patched proof-tool vendor tree
-        working-directory: proof-tool
-        run: bash scripts/bootstrap-vendor.sh
-
-      - name: Exercise the full proof-tool CLI boundary
-        shell: bash
-        run: |
-          test "$(git -C relay rev-parse HEAD)" = "$RELAY_COMMIT"
-          cd relay
-          RELAY_PROOF_TOOL_DIR="$GITHUB_WORKSPACE/proof-tool" \
-          RELAY_PROOF_TOOL_FULL=1 \
-            go test ./cmd/relay \
-              -run '^TestProofToolCompatibility$' \
-              -count=1 \
-              -timeout 30m \
-              -v

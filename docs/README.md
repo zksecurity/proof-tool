@@ -25,19 +25,15 @@ that foundation.
 - [`mpc-ceremony-parallel-optimizations.md`](mpc-ceremony-parallel-optimizations.md):
   gnark Phase 1/Phase 2 threading changes, safety invariants, benchmarks, and
   the initial exact K=21 comparison result.
-- [`mpc-ceremony-runbook.md`](mpc-ceremony-runbook.md): production operator,
-  contributor, auditor, beacon, archival, replay, and release gates for the
-  dedicated two-phase BLS12-381 MPC ceremony.
-- [`mpc-production-readiness.md`](mpc-production-readiness.md): the formal
-  mainnet go/no-go matrix, current **NO-GO**, blocking rehearsal incident, and
-  required evidence package for that ceremony.
-- [`mpc-security-review.md`](mpc-security-review.md): pinned dependency
-  advisory dispositions, reviewed defenses, and independent review gates.
-- [`mpc-external-audit-package.md`](mpc-external-audit-package.md): frozen
-  review scope, required independent tests, and auditor deliverables.
-- [`mpc-production-go-no-go-template.md`](mpc-production-go-no-go-template.md):
-  exact mainnet ceremony, external, coherence, and accountable-signature
-  acceptance record.
+- [`mpc-ceremony-release.md`](mpc-ceremony-release.md): independent
+  `mpc-ceremony` release gates and the downstream binary-pair compatibility
+  boundary.
+- Relay's
+  [coordinator runbook](https://github.com/zksecurity/relay/blob/main/COORDINATOR_RUNBOOK.md)
+  and [role runbook](https://github.com/zksecurity/relay/blob/main/ROLE_RUNBOOK.md):
+  participant, witness, mirror, auditor, beacon, archival, and release
+  operations. The bundled Relay rehearsal is test-only; a production ceremony
+  requires its own independently reviewed go/no-go record.
 - [`proof-assets-release-inventory.md`](proof-assets-release-inventory.md): the
   current release identity and coherence values.
 
@@ -77,11 +73,6 @@ that foundation.
 
 These remain plans because their external acceptance gates are still open:
 
-- [`production-readiness.md`](production-readiness.md): current Mainnet
-  readiness verdict, evidence boundary, scorecard, and release gates.
-- [`next-steps-to-mainnet.md`](next-steps-to-mainnet.md): status ledger for the
-  original readiness task IDs, distinguishing tracked, working-tree, external,
-  and open work.
 - [`circuit-proving-optimization-candidates.md`](circuit-proving-optimization-candidates.md):
   refreshed circuit/runtime optimization survey and current baselines.
 - [`manual-lace-claim-flow-qa-plan.md`](manual-lace-claim-flow-qa-plan.md):
