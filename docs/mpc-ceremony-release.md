@@ -26,8 +26,9 @@ complete verification package through proof-tool's release process.
 Compatibility with Relay is tested after both projects have released
 independently. The ceremony-kit process receives the exact approved Relay and
 `mpc-ceremony` repositories, tags, binaries, and SHA-256 hashes. It runs the
-binary-only tiny-rehearsal compatibility gate and records the tested hashes in
-the kit's `compatibility.json`.
+binary-only tiny-rehearsal compatibility gate, including a real phase 1
+contribution, erasure attestation, coordinator acceptance, and accepted-chain
+inspection, and records the tested hashes in the kit's `compatibility.json`.
 
 That downstream gate may reject a proposed pairing without invalidating either
 independent release. Updating Relay never requires changing proof-tool's CI,
