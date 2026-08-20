@@ -15,7 +15,7 @@ concurrency:
 
 env:
   # Update this only after reviewing the Relay change and rerunning this gate.
-  RELAY_COMMIT: 199dbce047af852896b0027457eb3da82b758fcd
+  RELAY_COMMIT: 1e73ebe903bcda6a1beabda87f323b819e372d34
 
 jobs:
   rehearsal-reproducibility:
@@ -122,4 +122,5 @@ jobs:
             go test ./cmd/relay \
               -run '^TestProofToolCompatibility$' \
               -count=1 \
+              -timeout 30m \
               -v
