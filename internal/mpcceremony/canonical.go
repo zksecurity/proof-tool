@@ -19,7 +19,9 @@ import "fmt"
 //
 // Update these values only when the reviewed circuit intentionally changes,
 // together with the vendor patches and the release review that approves the
-// new identity.
+// new identity. Production definition validation calls this function, so the
+// invariant is enforced when definitions are created or consumed rather than
+// only by the init command.
 const (
 	CanonicalDestinationV2SHA256      = "sha256:b5e629f47321048a6e2f85b3a839c1cf898454b69eef582f54e07d6d647074dc"
 	CanonicalDestinationV2Blake2b256  = "blake2b256:bf2243b3f4885357bbad0b6728582f56f0e00cd361e1e8af8a2d0dbe10a9f352"

@@ -4,11 +4,63 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestLoadSignedDefinitionRejectsAuthenticatedNoncanonicalProductionCircuit(t *testing.T) {
+	definition := adversarialDefinition(t)
+	definition.Circuit.Constraints = 1791413
+	definition.CeremonyID = ""
+	// Simulate a coordinator that signs a self-consistent but unapproved
+	// definition. canonicalHash is used directly because the public constructor
+	// correctly refuses to create this definition.
+	ceremonyID, err := canonicalHash("proof-tool/mpc-ceremony/root/v1", definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition.CeremonyID = ceremonyID
+	definitionBytes, err := json.Marshal(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateKey := adversarialPrivateKey(0x01)
+	signature, err := SignExact(definitionBytes, definition.Coordinator.KeyID, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signatureBytes, err := MarshalCanonical(signature)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	definitionPath := filepath.Join(dir, "ceremony.json")
+	signaturePath := filepath.Join(dir, "ceremony.sig")
+	publicKeyPath := filepath.Join(dir, "coordinator-public-key.hex")
+	if err := os.WriteFile(definitionPath, definitionBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(signaturePath, signatureBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	publicKey := privateKey.Public().(ed25519.PublicKey)
+	if err := os.WriteFile(publicKeyPath, []byte(hex.EncodeToString(publicKey)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = LoadSignedDefinition(TrustPaths{
+		DefinitionPath:           definitionPath,
+		DefinitionSignaturePath:  signaturePath,
+		CoordinatorPublicKeyPath: publicKeyPath,
+	})
+	if err == nil || !strings.Contains(err.Error(), "canonical") {
+		t.Fatalf("authenticated noncanonical production circuit error = %v", err)
+	}
+}
 
 func TestResolveArtifactPathRejectsSymlinkComponent(t *testing.T) {
 	root := t.TempDir()

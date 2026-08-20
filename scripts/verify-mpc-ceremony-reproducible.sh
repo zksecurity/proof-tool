@@ -160,8 +160,8 @@ ACTIVE_GOROOT=$(env -u GOROOT \
   go env GOROOT)
 GO_BIN="$ACTIVE_GOROOT/bin/go"
 if [[ ! -x "$GO_BIN" || -L "$GO_BIN" ||
-  "$(env -u GOROOT CGO_ENABLED=0 GOARCH=amd64 GOENV=off GOEXPERIMENT= GOFIPS140=off GOOS=linux GOAMD64=v1 GOTOOLCHAIN=local "$GO_BIN" env GOVERSION)" != "go1.26.5" ]]; then
-  echo "FAIL: semantic verification requires the approved Go 1.26.5 toolchain" >&2
+  "$(env -u GOROOT CGO_ENABLED=0 GOARCH=amd64 GOENV=off GOEXPERIMENT= GOFIPS140=off GOOS=linux GOAMD64=v1 GOTOOLCHAIN=local "$GO_BIN" env GOVERSION)" != "go1.26.6" ]]; then
+  echo "FAIL: semantic verification requires the approved Go 1.26.6 toolchain" >&2
   exit 1
 fi
 

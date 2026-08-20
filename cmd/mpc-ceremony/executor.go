@@ -127,9 +127,9 @@ func executeInit(options InitOptions) (CommandResult, error) {
 		return CommandResult{}, err
 	}
 	if options.Mode == mpcceremony.ModeProduction {
-		// A build made without the patched vendor tree compiles a slightly
-		// different circuit that would otherwise become the signed truth of
-		// the ceremony. Reject the fork before anything is signed.
+		// Fail before allocating and writing the large Phase 1 genesis. The same
+		// invariant is also enforced by CeremonyDefinition validation so no
+		// consumer can bypass it by creating or loading a definition elsewhere.
 		if err := mpcceremony.ValidateCanonicalDestinationV2(circuit.Binding); err != nil {
 			return CommandResult{}, err
 		}

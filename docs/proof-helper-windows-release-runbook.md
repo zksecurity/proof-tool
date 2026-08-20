@@ -108,8 +108,7 @@ Dispatch the workflow from a clean pushed commit:
 gh workflow run release-proof-helper.yml \
   --ref main \
   -f tag=proof-helper-desktop-v0.1.0-windows-preview.1 \
-  -f publish_release=false \
-  -f signed_release=false
+  -f publish_release=false
 ```
 
 Watch the run:
@@ -130,6 +129,11 @@ The workflow:
 5. Stages installers, `.sha256` files, and
    `proof-helper-windows-release-manifest.json`.
 6. Creates a draft prerelease unless `publish_release=true`.
+
+This workflow can only produce an unsigned preview. It does not accept a flag
+that marks artifacts as signed, because neither the workflow nor its staging
+script performs or verifies Authenticode signing. A future signed release path
+must set release metadata from successful signature verification.
 
 ## Local Windows Build
 
@@ -206,7 +210,7 @@ Check the manifest fields before testing:
 - `sidecar.sha256` is present.
 - `proof_assets_descriptor.download_configured` matches the intended release
   status.
-- `signed` matches the Authenticode status that was actually verified.
+- `signed` is `false`; this workflow only stages unsigned previews.
 
 ## Windows Validation
 

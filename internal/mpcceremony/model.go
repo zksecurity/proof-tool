@@ -43,7 +43,7 @@ const (
 	GnarkVersion            = "v0.15.0"
 	GnarkCryptoVersion      = "v0.20.1"
 	DrandVersion            = "v2.1.6"
-	ProductionGoVersion     = "go1.26.5"
+	ProductionGoVersion     = "go1.26.6"
 	ProductionGOOS          = "linux"
 	ProductionGOARCH        = "amd64"
 	ProductionGOAMD64       = "v1"

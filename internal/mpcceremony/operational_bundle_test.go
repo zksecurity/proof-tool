@@ -397,6 +397,11 @@ func newOperationalBundleFixture(t *testing.T) operationalBundleFixture {
 	round42Time, _ := QuicknetRoundTime(42)
 	definition.Mode = ModeRehearsal
 	definition.CreatedAt = round42Time.Add(-30 * time.Hour).Format(time.RFC3339)
+	// Keep this downstream evidence fixture small. Canonical production circuit
+	// identity is covered by definition_test.go; rehearsal mode may bind these
+	// synthetic R1CS bytes so the exact release-tree checks can exercise real
+	// files without embedding the 129 MB production constraint system.
+	definition.Circuit.R1CS.Digest = NewDigest([]byte("r1cs"))
 	definition.Circuit.Constraints = 1_789_750
 	definition.Circuit.DomainSize = 1 << 21
 	definition.Phase1Policy.Minimum = 1

@@ -178,6 +178,11 @@ func (d CeremonyDefinition) validate(requireID bool) error {
 	if err := d.Circuit.Validate(); err != nil {
 		return fmt.Errorf("circuit: %w", err)
 	}
+	if d.Mode == ModeProduction {
+		if err := ValidateCanonicalDestinationV2(d.Circuit); err != nil {
+			return fmt.Errorf("circuit: %w", err)
+		}
+	}
 	if err := d.Software.Validate(); err != nil {
 		return fmt.Errorf("software: %w", err)
 	}

@@ -1,6 +1,40 @@
 package mpcceremony
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestProductionDefinitionRequiresCanonicalDestinationCircuit(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*CircuitBinding)
+	}{
+		{
+			name: "unvendored constraint count",
+			mutate: func(binding *CircuitBinding) {
+				binding.Constraints = 1791413
+			},
+		},
+		{
+			name: "different R1CS digest",
+			mutate: func(binding *CircuitBinding) {
+				binding.R1CS.Digest.SHA256 = "sha256:" + strings.Repeat("0", 64)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			definition := adversarialDefinition(t)
+			definition.CeremonyID = ""
+			test.mutate(&definition.Circuit)
+			if _, err := FinalizeCeremonyDefinition(definition); err == nil {
+				t.Fatal("production definition with noncanonical destination circuit unexpectedly accepted")
+			}
+		})
+	}
+}
 
 func TestProductionDefinitionRequiresMultipleParticipantsInBothPhases(t *testing.T) {
 	valid := adversarialDefinition(t)
