@@ -126,6 +126,14 @@ func executeInit(options InitOptions) (CommandResult, error) {
 	if err != nil {
 		return CommandResult{}, err
 	}
+	if options.Mode == mpcceremony.ModeProduction {
+		// A build made without the patched vendor tree compiles a slightly
+		// different circuit that would otherwise become the signed truth of
+		// the ceremony. Reject the fork before anything is signed.
+		if err := mpcceremony.ValidateCanonicalDestinationV2(circuit.Binding); err != nil {
+			return CommandResult{}, err
+		}
+	}
 	result, err := mpcceremony.InitializeCeremonyFiles(mpcceremony.InitFilesOptions{
 		RootDir: options.OutDir,
 		Circuit: circuit,

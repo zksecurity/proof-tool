@@ -34,10 +34,22 @@ The first result from the exact K=21 comparison rehearsal is:
 | Exact K=21 stage | Previous run | Optimized run | Speedup |
 |---|---:|---:|---:|
 | Ceremony initialization | 12m16s | 1m34.76s | 7.8× |
+| Phase 1 contribution (16 vCPU) | 56m54s | 7m02s | 8.1× |
+| Phase 1 contribution (8 vCPU) | 56m54s | 8m01s | 7.1× |
+| Candidate verification (accept) | 50m27s | 5m46s | 8.7× |
 
 The optimized initialization averaged 954% CPU according to GNU `time`, which
 means it used about 9.54 CPU cores concurrently. It reached a peak resident set
 size of approximately 3.38 GiB.
+
+The contribution and verification rows were measured on 2026-08-20 during a
+Relay-driven production-mode first-head test at the canonical circuit
+(1,789,750 constraints): the 16-vCPU contribution ran on the same EPYC host
+class as the serial baselines, the 8-vCPU contribution ran on a separate role
+machine through `relay participate` (66m37s of CPU in 8m01s of wall clock),
+and verification ran through the coordinator accept path (67m00s of CPU in
+5m46s). The serial baselines are the corresponding stages of the completed
+single-host K=21 production-mode run measured before these patches.
 
 ## 1. Parallel Phase 1 Point Updates
 
