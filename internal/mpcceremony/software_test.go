@@ -267,7 +267,7 @@ func TestRunningSoftwareBindingRejectsUnverifiableBuilds(t *testing.T) {
 		{
 			name: "unapproved Go version",
 			mutate: func(info *debug.BuildInfo) {
-				info.GoVersion = "go1.26.6"
+				info.GoVersion = "go1.26.5"
 			},
 		},
 		{

@@ -12,18 +12,13 @@ on:
         required: true
         default: false
         type: boolean
-      signed_release:
-        description: Mark release notes as signed. Use only after Authenticode signatures are verified.
-        required: true
-        default: false
-        type: boolean
-
 permissions:
-  contents: write
+  contents: read
 
 env:
   PROOF_HELPER_APP_DIR: apps/proof-helper-desktop
   PROOF_HELPER_TAURI_DIR: apps/proof-helper-desktop/src-tauri
+  PROOF_HELPER_RELEASE_TAG: ${{ inputs.tag }}
   WINDOWS_TARGET: x86_64-pc-windows-msvc
   WINDOWS_SIDECAR: proof-tool-x86_64-pc-windows-msvc.exe
   # Production origin the desktop helper pairs and opens by default.
@@ -37,25 +32,32 @@ jobs:
     name: Release checks
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Refuse reserved portable-helper tag
         shell: bash
         run: |
-          if [[ "${{ inputs.tag }}" == "proof-helper-v0.1.0" ]]; then
+          if [[ "$PROOF_HELPER_RELEASE_TAG" == "proof-helper-v0.1.0" ]]; then
             echo "::error::proof-helper-v0.1.0 is reserved for portable fixture-helper bundles. Use a new desktop tag."
             exit 1
           fi
+          if [[ ! "$PROOF_HELPER_RELEASE_TAG" =~ ^proof-helper-desktop-v[0-9A-Za-z][0-9A-Za-z._-]*$ ]] ||
+            ! git check-ref-format "refs/tags/$PROOF_HELPER_RELEASE_TAG"; then
+            echo "::error::tag must be a valid proof-helper-desktop-v... Git tag"
+            exit 1
+          fi
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
           version: 10.18.3
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: pnpm
@@ -64,7 +66,7 @@ jobs:
             apps/ownership-proof-web/pnpm-lock.yaml
             apps/proof-helper-desktop/pnpm-lock.yaml
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
 
       - name: Linux Tauri system dependencies
         run: |
@@ -123,23 +125,25 @@ jobs:
     needs: checks
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
           version: 10.18.3
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: pnpm
           cache-dependency-path: apps/proof-helper-desktop/pnpm-lock.yaml
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           targets: x86_64-pc-windows-msvc
 
@@ -173,11 +177,9 @@ jobs:
       - name: Stage Windows release artifacts
         working-directory: apps/proof-helper-desktop
         shell: bash
-        env:
-          PROOF_HELPER_WINDOWS_SIGNED: ${{ inputs.signed_release && '1' || '0' }}
         run: |
           pnpm release:stage-windows -- \
-            --tag "${{ inputs.tag }}" \
+            --tag "$PROOF_HELPER_RELEASE_TAG" \
             --bundle-dir "src-tauri/target/x86_64-pc-windows-msvc/release/bundle" \
             --sidecar "src-tauri/binaries/proof-tool-x86_64-pc-windows-msvc.exe" \
             --out-dir "../../dist/proof-helper-windows-x64"
@@ -186,22 +188,18 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist/proof-helper-windows-x64
-          signing_status="Unsigned preview"
-          if [[ "${{ inputs.signed_release }}" == "true" ]]; then
-            signing_status="Signed release"
-          fi
           {
-            echo "Proof Helper Windows ${{ inputs.tag }}"
+            echo "Proof Helper Windows $PROOF_HELPER_RELEASE_TAG"
             echo
             echo "- Target: x86_64-pc-windows-msvc"
-            echo "- Signing status: ${signing_status}"
+            echo "- Signing status: Unsigned preview"
             echo "- Proof-assets descriptor: proof-assets-ownership-destination-v2-preprod-9fac96b-g3a"
             echo "- Proof-assets download route: public HTTPS (GitHub release asset), size and hashes pinned in the app descriptor"
             echo
             echo "Do not describe this as a general Windows end-user release until Authenticode signatures, a public proof-assets download route, and local Windows release-build validation are complete."
           } > dist/proof-helper-windows-x64/release-notes.md
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: proof-helper-windows-x64
           path: dist/proof-helper-windows-x64/*
@@ -210,17 +208,19 @@ jobs:
     name: Draft GitHub release
     needs: build-windows
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: proof-helper-windows-x64
           path: release-artifacts
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
-          tag_name: ${{ inputs.tag }}
-          name: Proof Helper Windows ${{ inputs.tag }}
+          tag_name: ${{ env.PROOF_HELPER_RELEASE_TAG }}
+          name: Proof Helper Windows ${{ env.PROOF_HELPER_RELEASE_TAG }}
           draft: ${{ inputs.publish_release != true }}
           prerelease: true
           body_path: release-artifacts/release-notes.md

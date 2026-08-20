@@ -100,7 +100,10 @@ const manifest = {
   package_version: packageJson.version,
   tauri_config_version: tauriConfig.version,
   cargo_version: cargoVersion,
-  signed: process.env.PROOF_HELPER_WINDOWS_SIGNED === "1",
+  // Staging does not Authenticode-sign or verify artifacts. A future signed
+  // release path must derive this field from signature verification, never
+  // from operator input.
+  signed: false,
   sidecar: {
     name: path.basename(sidecarPath),
     target: TARGET,

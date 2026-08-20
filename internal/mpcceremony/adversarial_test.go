@@ -206,16 +206,23 @@ func adversarialDefinition(t *testing.T) CeremonyDefinition {
 		CreatedAt:       "2026-07-23T12:00:00Z",
 		SessionNonceHex: strings.Repeat("5a", 32),
 		Circuit: CircuitBinding{
-			KeyVersion:        KeyVersionDestinationV2,
-			CircuitID:         CircuitIDDestinationV2,
-			Curve:             CurveBLS12381,
-			Backend:           BackendGroth16,
-			R1CS:              ArtifactRef{Name: "ownership-destination.ccs", Digest: NewDigest([]byte("r1cs"))},
-			Constraints:       7,
+			KeyVersion: KeyVersionDestinationV2,
+			CircuitID:  CircuitIDDestinationV2,
+			Curve:      CurveBLS12381,
+			Backend:    BackendGroth16,
+			R1CS: ArtifactRef{
+				Name: "ownership-destination.ccs",
+				Digest: Digest{
+					SHA256:     CanonicalDestinationV2SHA256,
+					Blake2b256: CanonicalDestinationV2Blake2b256,
+					Size:       CanonicalDestinationV2Size,
+				},
+			},
+			Constraints:       CanonicalDestinationV2Constraints,
 			InternalVariables: 3,
 			SecretVariables:   2,
 			PublicVariables:   1,
-			DomainSize:        8,
+			DomainSize:        1 << 21,
 			Phase2Shape: Phase2Shape{
 				Commitments:     1,
 				PKK:             1,
@@ -419,7 +426,7 @@ func TestCeremonyDefinitionRejectsMetadataDrift(t *testing.T) {
 		}},
 		{name: "dirty source", mutate: func(d *CeremonyDefinition) { d.Software.SourceDirty = true }},
 		{name: "wrong Go version", mutate: func(d *CeremonyDefinition) {
-			d.Software.GoVersion = "go1.26.6"
+			d.Software.GoVersion = "go1.26.5"
 		}},
 		{name: "wrong target OS", mutate: func(d *CeremonyDefinition) {
 			d.Software.GoOS = "darwin"

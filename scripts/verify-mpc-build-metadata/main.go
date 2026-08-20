@@ -32,7 +32,7 @@ import (
 )
 
 const (
-	productionGoVersion = "go1.26.5"
+	productionGoVersion = "go1.26.6"
 	expectedBuildFlags  = "-mod=vendor\x00-trimpath\x00-buildvcs=true\x00-ldflags=-buildid="
 )
 
@@ -256,7 +256,7 @@ func verifyToolchainChecksums(path string) error {
 		return err
 	}
 	if string(data) != expected {
-		return errors.New("toolchain-checksums.sha256 does not identify the approved Go 1.26.5 linux/amd64 toolchain")
+		return errors.New("toolchain-checksums.sha256 does not identify the approved Go 1.26.6 linux/amd64 toolchain")
 	}
 	return nil
 }
