@@ -17,6 +17,8 @@ func TestParticipantCLIHelpHasExplicitSafeFlagAllowlist(t *testing.T) {
 	topics := [][]string{
 		nil,
 		{"init"},
+		{"rehearsal"},
+		{"rehearsal", "init"},
 		{"phase1"},
 		{"phase1", "contribute"},
 		{"phase1", "attest-erasure"},

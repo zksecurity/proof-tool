@@ -31,6 +31,8 @@ func (workflowExecutor) Execute(ctx context.Context, invocation Invocation) (Com
 	switch invocation.Command {
 	case CommandInit:
 		return executeInit(invocation.Options.(InitOptions))
+	case CommandRehearsalInit:
+		return executeRehearsalInit(invocation.Options.(RehearsalInitOptions))
 	case CommandInspect:
 		return executeInspect(invocation.Options.(InspectOptions))
 	case CommandPhase1Contribute:
@@ -120,7 +122,7 @@ func executeInit(options InitOptions) (CommandResult, error) {
 	if err != nil {
 		return CommandResult{}, err
 	}
-	circuit, err := mpcceremony.CompileDestinationV2()
+	circuit, err := mpcceremony.CompileForKeyVersion(options.KeyVersion)
 	if err != nil {
 		return CommandResult{}, err
 	}
@@ -454,7 +456,7 @@ func executeFinalize(options FinalizeOptions) (CommandResult, error) {
 	if err != nil {
 		return CommandResult{}, err
 	}
-	circuit, err := mpcceremony.CompileDestinationV2()
+	circuit, err := compileCircuitForCeremony(trust)
 	if err != nil {
 		return CommandResult{}, err
 	}
@@ -503,7 +505,7 @@ func executePrepareFinalization(options PrepareFinalizationOptions) (CommandResu
 	if err != nil {
 		return CommandResult{}, err
 	}
-	circuit, err := mpcceremony.CompileDestinationV2()
+	circuit, err := compileCircuitForCeremony(trust)
 	if err != nil {
 		return CommandResult{}, err
 	}
@@ -548,7 +550,7 @@ func executeAudit(options AuditOptions) (CommandResult, error) {
 	if err != nil {
 		return CommandResult{}, err
 	}
-	circuit, err := mpcceremony.CompileDestinationV2()
+	circuit, err := compileCircuitForCeremony(trust)
 	if err != nil {
 		return CommandResult{}, err
 	}
@@ -897,4 +899,18 @@ func executeInspect(options InspectOptions) (CommandResult, error) {
 		),
 		Outputs: outputs,
 	}, nil
+}
+
+// compileCircuitForCeremony compiles the circuit the signed definition names.
+//
+// The key version comes from the definition rather than a flag, so an operator
+// cannot select a different circuit than the ceremony was created with. An
+// unknown or mismatched version fails in CompileForKeyVersion, and the compiled
+// binding is compared against the definition again before anything is accepted.
+func compileCircuitForCeremony(trust mpcceremony.TrustPaths) (*mpcceremony.CompiledCircuit, error) {
+	trusted, err := mpcceremony.LoadSignedDefinition(trust)
+	if err != nil {
+		return nil, err
+	}
+	return mpcceremony.CompileForKeyVersion(trusted.Definition.Circuit.KeyVersion)
 }

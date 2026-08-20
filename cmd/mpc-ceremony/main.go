@@ -240,7 +240,8 @@ func identifyCLICommandArguments(args []string) map[int]struct{} {
 command:
 	topLevel := map[string]struct{}{
 		"audit": {}, "decision": {}, "finalize": {}, "help": {}, "init": {},
-		"inspect": {}, "ops": {}, "phase1": {}, "phase2": {}, "release": {},
+		"inspect": {}, "ops": {}, "phase1": {}, "phase2": {}, "rehearsal": {},
+		"release": {},
 	}
 	if _, ok := topLevel[args[index]]; !ok {
 		return safe
@@ -264,7 +265,8 @@ command:
 			"export-signing": {}, "help": {}, "import-signature": {},
 			"prepare-mirror-receipt": {}, "prepare-public-witness-receipt": {}, "verify": {},
 		},
-		"release": {"help": {}, "sign": {}, "verify": {}},
+		"release":   {"help": {}, "sign": {}, "verify": {}},
+		"rehearsal": {"help": {}, "init": {}},
 	}
 	allowed, hasSubcommands := subcommands[args[index]]
 	if hasSubcommands && index+1 < len(args) {

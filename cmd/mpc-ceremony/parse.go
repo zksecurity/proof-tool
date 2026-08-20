@@ -16,6 +16,12 @@ import (
 
 const supportedKeyVersion = "ownership-destination-v2"
 
+// rehearsalKeyVersion selects the tiny circuit used to exercise the ceremony at
+// a small domain. It is accepted here only alongside --mode rehearsal; the
+// signed definition enforces the same rule independently, so this check is
+// convenience rather than the control.
+const rehearsalKeyVersion = "rehearsal-tiny-v1"
+
 type helpRequest struct {
 	topic []string
 }
@@ -61,6 +67,8 @@ func parseInvocation(args []string) (Invocation, error) {
 		options, err := parseInit(rest[1:])
 		invocation.Command, invocation.Options = CommandInit, options
 		return invocation, wrapCommandError(err, "init")
+	case "rehearsal":
+		return parseRehearsal(invocation, rest[1:])
 	case "inspect":
 		if len(rest) > 1 && !strings.HasPrefix(rest[1], "-") {
 			return parseInspectSubcommand(invocation, rest[1:])
@@ -89,6 +97,40 @@ func parseInvocation(args []string) (Invocation, error) {
 			message: fmt.Sprintf("unknown command %q", rest[0]),
 		}
 	}
+}
+
+func parseRehearsal(invocation Invocation, args []string) (Invocation, error) {
+	if len(args) == 0 {
+		return Invocation{}, &usageError{message: "missing rehearsal command", topic: []string{"rehearsal"}}
+	}
+	if args[0] == "help" {
+		return Invocation{}, &helpRequest{topic: append([]string{"rehearsal"}, args[1:]...)}
+	}
+	switch args[0] {
+	case "init":
+		options, err := parseRehearsalInit(args[1:])
+		invocation.Command, invocation.Options = CommandRehearsalInit, options
+		return invocation, wrapCommandError(err, "rehearsal", "init")
+	default:
+		return Invocation{}, &usageError{
+			message: fmt.Sprintf("unknown rehearsal command %q", args[0]),
+			topic:   []string{"rehearsal"},
+		}
+	}
+}
+
+func parseRehearsalInit(args []string) (RehearsalInitOptions, error) {
+	var options RehearsalInitOptions
+	fs := commandFlagSet("rehearsal init")
+	fs.StringVar(&options.CreatedAt, "created-at", "", "ceremony creation timestamp in RFC3339")
+	fs.StringVar(&options.OutDir, "out-dir", "", "fresh rehearsal work directory")
+	if err := parseFlags(fs, args); err != nil {
+		return options, err
+	}
+	return options, requireValues(
+		value("--created-at", options.CreatedAt),
+		pathValue("--out-dir", options.OutDir),
+	)
 }
 
 func parseInspectSubcommand(invocation Invocation, args []string) (Invocation, error) {
@@ -605,7 +647,7 @@ func parseInit(args []string) (InitOptions, error) {
 	fs := commandFlagSet("init")
 	fs.StringVar(&options.SessionNonceHex, "session-nonce-hex", "", "optional 32-byte session nonce as hex; generated securely when omitted")
 	fs.StringVar(&options.CreatedAt, "created-at", "", "ceremony creation timestamp in RFC3339")
-	fs.StringVar(&options.KeyVersion, "key-version", "", "repository key version (ownership-destination-v2 only)")
+	fs.StringVar(&options.KeyVersion, "key-version", "", "repository key version (ownership-destination-v2, or rehearsal-tiny-v1 with --mode rehearsal)")
 	fs.StringVar(&options.ParticipantsPath, "participants", "", "participant roster JSON path")
 	fs.StringVar(&options.PolicyPath, "policy", "", "ceremony policy JSON path")
 	fs.StringVar(&options.CoordinatorKeyID, "coordinator-key-id", "", "coordinator signing key identifier")
@@ -618,8 +660,16 @@ func parseInit(args []string) (InitOptions, error) {
 	if options.Mode != "rehearsal" && options.Mode != "production" {
 		return options, errors.New("--mode must be rehearsal or production")
 	}
-	if options.KeyVersion != "" && options.KeyVersion != supportedKeyVersion {
-		return options, fmt.Errorf("--key-version must be %q", supportedKeyVersion)
+	switch options.KeyVersion {
+	case "", supportedKeyVersion:
+	case rehearsalKeyVersion:
+		if options.Mode != "rehearsal" {
+			return options, fmt.Errorf(
+				"--key-version %q requires --mode rehearsal", rehearsalKeyVersion)
+		}
+	default:
+		return options, fmt.Errorf(
+			"--key-version must be %q or %q", supportedKeyVersion, rehearsalKeyVersion)
 	}
 	if options.SessionNonceHex != "" {
 		raw, err := hex.DecodeString(options.SessionNonceHex)

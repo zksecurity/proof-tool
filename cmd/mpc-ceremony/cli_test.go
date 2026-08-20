@@ -951,6 +951,12 @@ func TestDiagnosticRedactionRecognizesInspectionAndReceiptCommands(t *testing.T)
 			commandIndex: 0,
 			valueIndex:   3,
 		},
+		{
+			name:         "rehearsal initializer",
+			args:         []string{"rehearsal", "init", "--out-dir", "private-rehearsal"},
+			commandIndex: 0,
+			valueIndex:   3,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			safe := identifyCLICommandArguments(test.args)

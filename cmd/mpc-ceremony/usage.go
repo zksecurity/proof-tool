@@ -23,11 +23,14 @@ const rootHelp = `Usage:
   mpc-ceremony [--format human|json] [--quiet] <command> [flags]
 
 Offline, append-only orchestration for this repository's BLS12-381 Groth16
-multi-party setup. The binary accepts setup artifacts and signing keys only.
-It performs no network access and never selects a mutable "latest" artifact.
+multi-party setup. Production commands accept operator-supplied artifacts and
+signing keys only; the explicitly rehearsal-only initializer creates same-host
+test identities. The binary performs no network access and never selects a
+mutable "latest" artifact.
 
 Commands:
   init                 Bind a ceremony to the compiled repository circuit
+  rehearsal init       Create and initialize a three-party tiny rehearsal
   inspect              Report chain state and next scheduled contribution
   phase1 contribute    Verify the full phase 1 chain and contribute
   phase1 attest-erasure Sign a participant destruction attestation
@@ -105,6 +108,19 @@ second path list.
 `
 
 var commandHelp = map[string]string{
+	"rehearsal": `Usage:
+  mpc-ceremony rehearsal init --created-at RFC3339 --out-dir FRESH_DIR
+
+Rehearsal commands create same-host test identities and must never be used as
+production enrollment evidence.
+`,
+	"rehearsal init": `Usage:
+  mpc-ceremony rehearsal init --created-at RFC3339 --out-dir FRESH_DIR
+
+Creates fresh same-host identities and canonical configuration for exactly
+three participants, then initializes a signed rehearsal-tiny-v1 ceremony. The
+output is a functional test fixture, not production or independence evidence.
+`,
 	"inspect": inspectHelp + `
 Authenticated record projections are also available as subcommands:
   mpc-ceremony inspect <definition|chain|participant|enrollment> [flags]
