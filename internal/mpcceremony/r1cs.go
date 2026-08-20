@@ -15,6 +15,11 @@ import (
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/constraint"
 	bls12381cs "github.com/consensys/gnark/constraint/bls12-381"
+	"github.com/consensys/gnark/frontend"
+	r1csbuilder "github.com/consensys/gnark/frontend/cs/r1cs"
+
+	"proof-tool/internal/circuit/rehearsal"
+
 	"golang.org/x/crypto/blake2b"
 
 	"proof-tool/internal/keyprofile"
@@ -114,7 +119,11 @@ func ReadR1CSFile(path string, expected CircuitBinding) (*CompiledCircuit, error
 	); err != nil {
 		return nil, fmt.Errorf("decode frozen R1CS %q: %w", path, err)
 	}
-	compiled, err := bindDestinationV2R1CS(native)
+	// Bind using the identity the signed definition names, not a fixed one.
+	// The result is compared against that same expected binding immediately
+	// below, so this cannot be used to accept a circuit the definition did not
+	// ask for: it only decides which rules the file is checked against.
+	compiled, err := bindForKeyVersion(native, expected.KeyVersion)
 	if err != nil {
 		return nil, fmt.Errorf("validate frozen R1CS %q: %w", path, err)
 	}
@@ -157,6 +166,24 @@ func WriteR1CSFileNoReplace(path string, circuit *CompiledCircuit) (Digest, erro
 }
 
 func bindDestinationV2R1CS(compiled constraint.ConstraintSystem) (*CompiledCircuit, error) {
+	return bindR1CS(compiled, KeyVersionDestinationV2, CircuitIDDestinationV2, destinationV2CommitmentCount)
+}
+
+// bindR1CS derives the circuit binding for a compiled constraint system.
+//
+// Identity and expected commitment count are parameters rather than constants
+// because the ceremony supports a second, deliberately tiny circuit for
+// rehearsals. Every other rule here is unchanged and applies to both: the
+// scalar field, the domain, the variable counts and the exact serialized
+// digest are checked identically, so a rehearsal transcript is as internally
+// consistent as a production one. What separates them is which key version a
+// definition may name, which CeremonyDefinition decides using the mode.
+func bindR1CS(
+	compiled constraint.ConstraintSystem,
+	keyVersion string,
+	circuitID string,
+	wantCommitments int,
+) (*CompiledCircuit, error) {
 	if compiled == nil {
 		return nil, errors.New("constraint system is required")
 	}
@@ -190,11 +217,12 @@ func bindDestinationV2R1CS(compiled constraint.ConstraintSystem) (*CompiledCircu
 	if err != nil {
 		return nil, err
 	}
-	if len(commitments) != destinationV2CommitmentCount {
+	if len(commitments) != wantCommitments {
 		return nil, fmt.Errorf(
-			"destination-v2 constraint system has %d commitments, want %d",
+			"%s constraint system has %d commitments, want %d",
+			keyVersion,
 			len(commitments),
-			destinationV2CommitmentCount,
+			wantCommitments,
 		)
 	}
 
@@ -207,8 +235,8 @@ func bindDestinationV2R1CS(compiled constraint.ConstraintSystem) (*CompiledCircu
 		return nil, err
 	}
 	binding := CircuitBinding{
-		KeyVersion:        KeyVersionDestinationV2,
-		CircuitID:         CircuitIDDestinationV2,
+		KeyVersion:        keyVersion,
+		CircuitID:         circuitID,
 		Curve:             CurveBLS12381,
 		Backend:           BackendGroth16,
 		R1CS:              ArtifactRef{Name: prover.DestinationConstraintSystemFile, Digest: digest},
@@ -220,7 +248,7 @@ func bindDestinationV2R1CS(compiled constraint.ConstraintSystem) (*CompiledCircu
 		Phase2Shape:       phase2Shape,
 	}
 	if err := binding.Validate(); err != nil {
-		return nil, fmt.Errorf("derived destination-v2 circuit binding: %w", err)
+		return nil, fmt.Errorf("derived %s circuit binding: %w", keyVersion, err)
 	}
 	return &CompiledCircuit{R1CS: native, Binding: binding, validated: true}, nil
 }
@@ -445,4 +473,68 @@ func equalPhase2Shape(left, right Phase2Shape) bool {
 		}
 	}
 	return true
+}
+
+// rehearsalCommitmentCount is the number of Groth16 commitments the rehearsal
+// circuit produces. It matches destination-v2 deliberately: finalization
+// exports a Cardano verifying key whose BSB22 encoding assumes exactly one
+// commitment, so a circuit with a different count cannot be finalized and the
+// later ceremony stages would be untestable.
+const rehearsalCommitmentCount = destinationV2CommitmentCount
+
+// CompileForKeyVersion compiles the circuit a ceremony definition names.
+//
+// This is the one place that maps a key version to a circuit, and it is
+// deliberately a closed set rather than a lookup that could be extended by a
+// definition. An unknown key version is an error, not a request.
+//
+// Selecting the rehearsal circuit here does not make a rehearsal ceremony
+// acceptable in production: CeremonyDefinition.validate rejects any key version
+// other than destination-v2 when mode is production, and the K21 rehearsal gate
+// in the production decision continues to require domain 2^21.
+func CompileForKeyVersion(keyVersion string) (*CompiledCircuit, error) {
+	switch keyVersion {
+	case KeyVersionDestinationV2:
+		return CompileDestinationV2()
+	case KeyVersionRehearsal:
+		return compileRehearsal()
+	default:
+		return nil, fmt.Errorf(
+			"unknown key_version %q: want %q or %q",
+			keyVersion, KeyVersionDestinationV2, KeyVersionRehearsal,
+		)
+	}
+}
+
+func compileRehearsal() (*CompiledCircuit, error) {
+	compiled, err := frontend.Compile(
+		ecc.BLS12_381.ScalarField(),
+		r1csbuilder.NewBuilder,
+		&rehearsal.Circuit{},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("compile rehearsal circuit: %w", err)
+	}
+	return bindR1CS(compiled, KeyVersionRehearsal, CircuitIDRehearsal, rehearsalCommitmentCount)
+}
+
+// bindForKeyVersion applies the binding rules for a named circuit.
+//
+// Both circuits carry exactly one Groth16 commitment, and every other rule -
+// scalar field, domain, variable counts, exact serialized digest - is applied
+// identically. That is what makes a rehearsal transcript internally consistent
+// in the same way a production one is; the circuits differ in what they prove
+// and in the domain they need, not in how they are bound.
+func bindForKeyVersion(compiled constraint.ConstraintSystem, keyVersion string) (*CompiledCircuit, error) {
+	switch keyVersion {
+	case KeyVersionDestinationV2:
+		return bindR1CS(compiled, KeyVersionDestinationV2, CircuitIDDestinationV2, destinationV2CommitmentCount)
+	case KeyVersionRehearsal:
+		return bindR1CS(compiled, KeyVersionRehearsal, CircuitIDRehearsal, rehearsalCommitmentCount)
+	default:
+		return nil, fmt.Errorf(
+			"unknown key_version %q: want %q or %q",
+			keyVersion, KeyVersionDestinationV2, KeyVersionRehearsal,
+		)
+	}
 }

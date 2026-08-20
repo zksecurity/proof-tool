@@ -33,6 +33,11 @@ const (
 
 	KeyVersionDestinationV2 = "ownership-destination-v2"
 	CircuitIDDestinationV2  = "root-ownership-destination-v2/bls12-381/groth16"
+	// KeyVersionRehearsal names the tiny circuit used to exercise the ceremony
+	// machinery at a small domain. It is accepted only when mode is rehearsal;
+	// see CeremonyDefinition.validate.
+	KeyVersionRehearsal     = "rehearsal-tiny-v1"
+	CircuitIDRehearsal      = "rehearsal-tiny-v1/bls12-381/groth16"
 	CurveBLS12381           = "BLS12-381"
 	BackendGroth16          = "groth16"
 	GnarkVersion            = "v0.15.0"
@@ -220,11 +225,23 @@ type CircuitBinding struct {
 }
 
 func (b CircuitBinding) Validate() error {
-	if b.KeyVersion != KeyVersionDestinationV2 {
-		return fmt.Errorf("key_version %q, want %q", b.KeyVersion, KeyVersionDestinationV2)
-	}
-	if b.CircuitID != CircuitIDDestinationV2 {
-		return fmt.Errorf("circuit_id %q, want %q", b.CircuitID, CircuitIDDestinationV2)
+	// Key version and circuit id are checked as a pair, not independently. A
+	// definition naming one circuit's version with another's id would otherwise
+	// pass both checks separately while describing nothing that exists.
+	//
+	// This is membership in a closed set rather than equality with a single
+	// constant, which is a weaker check than it replaced. What restores the
+	// strength is that a production definition may only name destination-v2;
+	// CeremonyDefinition.validate enforces that, and it is the only place that
+	// knows the mode.
+	switch {
+	case b.KeyVersion == KeyVersionDestinationV2 && b.CircuitID == CircuitIDDestinationV2:
+	case b.KeyVersion == KeyVersionRehearsal && b.CircuitID == CircuitIDRehearsal:
+	default:
+		return fmt.Errorf(
+			"key_version %q with circuit_id %q is not a known circuit",
+			b.KeyVersion, b.CircuitID,
+		)
 	}
 	if b.Curve != CurveBLS12381 {
 		return fmt.Errorf("curve %q, want %q", b.Curve, CurveBLS12381)

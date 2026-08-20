@@ -16,6 +16,7 @@ type Command string
 
 const (
 	CommandInit                           Command = "init"
+	CommandRehearsalInit                  Command = "rehearsal init"
 	CommandInspect                        Command = "inspect"
 	CommandPhase1Contribute               Command = "phase1 contribute"
 	CommandPhase1Erasure                  Command = "phase1 attest-erasure"
@@ -69,6 +70,11 @@ type InitOptions struct {
 	CoordinatorSigningKey string
 	OutDir                string
 	Mode                  string
+}
+
+type RehearsalInitOptions struct {
+	CreatedAt string
+	OutDir    string
 }
 
 type ContributeOptions struct {

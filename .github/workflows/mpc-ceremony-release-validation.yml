@@ -15,7 +15,7 @@ concurrency:
 
 env:
   # Update this only after reviewing the Relay change and rerunning this gate.
-  RELAY_COMMIT: 1e73ebe903bcda6a1beabda87f323b819e372d34
+  RELAY_COMMIT: 0e631b319199254512ca753ed6f2d6c650fe3383
 
 jobs:
   rehearsal-reproducibility:
@@ -67,6 +67,45 @@ jobs:
             --trusted-build-public-key-file none \
             "$RUNNER_TEMP/mpc-rehearsal-a-parent/release" \
             "$RUNNER_TEMP/mpc-rehearsal-b-parent/release"
+
+      - name: Exercise download-only tiny rehearsal initialization
+        shell: bash
+        run: |
+          set -euo pipefail
+          ceremony_binary="$RUNNER_TEMP/mpc-rehearsal-a-parent/release/mpc-ceremony"
+          rehearsal_root="$RUNNER_TEMP/downloadable-tiny-rehearsal"
+          "$ceremony_binary" rehearsal init \
+            --created-at 2026-08-20T06:00:00Z \
+            --out-dir "$rehearsal_root"
+          "$ceremony_binary" --format json inspect definition \
+            --ceremony "$rehearsal_root/public/ceremony.json" \
+            --ceremony-signature "$rehearsal_root/public/ceremony.sig" \
+            --coordinator-public-key-file \
+              "$rehearsal_root/public/coordinator-public-key.hex" \
+            >"$RUNNER_TEMP/downloadable-tiny-definition.json"
+          python3 - "$RUNNER_TEMP/downloadable-tiny-definition.json" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], "rb") as handle:
+              result = json.load(handle)
+          inspection = result["definition_inspection"]
+          assert result["ok"] is True
+          assert inspection["mode"] == "rehearsal"
+          assert inspection["phase1_participants"] == [
+              "participant-01", "participant-02", "participant-03"
+          ]
+          PY
+          test -f "$rehearsal_root/config/environment.json"
+          test -f "$rehearsal_root/keys/coordinator.ed25519.private.hex"
+          test "$(stat -c %a "$rehearsal_root/keys/coordinator.ed25519.private.hex")" = 600
+          if "$ceremony_binary" rehearsal init \
+            --created-at 2026-08-20T06:00:01Z \
+            --out-dir "$rehearsal_root"; then
+            echo "rehearsal initializer overwrote an existing root" >&2
+            exit 1
+          fi
+          test -f "$rehearsal_root/public/ceremony.json"
 
       - name: Confirm rehearsal packages are unsigned
         shell: bash
