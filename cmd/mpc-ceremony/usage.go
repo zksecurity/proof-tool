@@ -326,9 +326,10 @@ Records the distinct Phase 2 post-closure beacon evidence used by finalize.
     --out-dir FRESH_DIR
 ` + replayFlagsHelp + `
 
-Independently compiles this repository's destination-v2 R1CS, replays both
-phases, and publishes a coordinator-signed preliminary native PK/VK tree. It
-is not a candidate and cannot be audited or released.
+Independently compiles the circuit named by the signed ceremony definition
+(ownership-destination-v2 in production, rehearsal-tiny-v1 in a rehearsal),
+replays both phases, and publishes a coordinator-signed preliminary native
+PK/VK tree. It is not a candidate and cannot be audited or released.
 `,
 	"finalize complete": `Usage:
   mpc-ceremony finalize complete --ceremony FILE --ceremony-signature FILE \
