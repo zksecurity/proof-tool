@@ -78,6 +78,12 @@ jobs:
       - name: Test
         run: go test -timeout 15m ./...
 
+      - name: Race-sensitive MPC parallel paths
+        run: |
+          go test -race -count=1 \
+            github.com/consensys/gnark/backend/groth16/bls12-381/mpcsetup
+          go test -race -count=1 ./internal/mpcceremony
+
       - name: WASM prover builds
         run: |
           GOOS=js GOARCH=wasm go build -o /dev/null ./cmd/wasm-prover
