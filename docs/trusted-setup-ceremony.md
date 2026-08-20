@@ -10,6 +10,12 @@ This repository has two deliberately separate Groth16 setup paths:
 
 The commands, transcripts, and trust claims are not interchangeable.
 
+The `mpc-ceremony` binary is also released independently of transport tools.
+Its reproducibility and CLI checks do not fetch or pin a Relay commit. A
+coordinated ceremony kit selects independently verified releases, tests the
+exact binaries together, and records their hashes as described in
+[`mpc-ceremony-release.md`](mpc-ceremony-release.md).
+
 ## Single-Actor Local Setup
 
 Run the local path with:
