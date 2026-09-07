@@ -181,14 +181,15 @@ func Generate(outDir string, participantCount int, beaconWitnessLead uint32) (er
 		},
 	}
 	environment := mpcceremony.ContributionEnvironment{
-		OS:                           runtime.GOOS,
-		Architecture:                 runtime.GOARCH,
-		EntropySource:                "operating-system-csprng",
-		SwapDisabled:                 true,
-		CrashDumpsDisabled:           true,
-		TelemetryDisabled:            true,
-		EphemeralEnvironment:         true,
-		EphemeralDestructionRequired: true,
+		OS:                            runtime.GOOS,
+		Architecture:                  runtime.GOARCH,
+		EntropySource:                 "operating-system-csprng",
+		ContributorSwapDisabled:       true,
+		ContributorCrashDumpsDisabled: true,
+		ContributorTelemetryDisabled:  true,
+		EphemeralEnvironment:          true,
+		EphemeralCleanupRequired:      true,
+		HostRemnantsNotExcluded:       true,
 	}
 	for name, value := range map[string]any{
 		"participants.json": enrollment,

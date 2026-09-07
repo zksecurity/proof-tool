@@ -306,14 +306,15 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		}, nil
 	}
 	environment := mpcceremony.ContributionEnvironment{
-		OS:                           "linux",
-		Architecture:                 "amd64",
-		EntropySource:                "operating-system-csprng",
-		SwapDisabled:                 true,
-		CrashDumpsDisabled:           true,
-		TelemetryDisabled:            true,
-		EphemeralEnvironment:         true,
-		EphemeralDestructionRequired: true,
+		OS:                            "linux",
+		Architecture:                  "amd64",
+		EntropySource:                 "operating-system-csprng",
+		ContributorSwapDisabled:       true,
+		ContributorCrashDumpsDisabled: true,
+		ContributorTelemetryDisabled:  true,
+		EphemeralEnvironment:          true,
+		EphemeralCleanupRequired:      true,
+		HostRemnantsNotExcluded:       true,
 	}
 	participantKeyPaths := []string{participant1KeyPath, participant2KeyPath}
 	contributeAndAccept := func(

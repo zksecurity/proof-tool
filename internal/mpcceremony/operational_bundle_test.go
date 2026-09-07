@@ -43,15 +43,6 @@ func TestVerifyOperationalEvidenceBundleEndToEndAndNegatives(t *testing.T) {
 		t.Fatalf("complete operational bundle rejected: %v", err)
 	}
 
-	t.Run("legacy v1 bundle without host-wipe policy", func(t *testing.T) {
-		f := newOperationalBundleFixture(t)
-		f.bundle.Schema = OperationalEvidenceBundleSchemaV1
-		resignBundle(t, &f)
-		if err := verify(f); err != nil {
-			t.Fatalf("legacy operational bundle rejected: %v", err)
-		}
-	})
-
 	t.Run("missing enrollment", func(t *testing.T) {
 		f := newOperationalBundleFixture(t)
 		f.bundle.Enrollments = f.bundle.Enrollments[1:]
@@ -591,14 +582,15 @@ func buildOperationalPhaseFixture(
 		GnarkCryptoVersion:   GnarkCryptoVersion,
 		DrandVersion:         DrandVersion,
 		Environment: ContributionEnvironment{
-			OS:                           "linux",
-			Architecture:                 "amd64",
-			EntropySource:                "operating-system-csprng",
-			SwapDisabled:                 true,
-			CrashDumpsDisabled:           true,
-			TelemetryDisabled:            true,
-			EphemeralEnvironment:         true,
-			EphemeralDestructionRequired: true,
+			OS:                            "linux",
+			Architecture:                  "amd64",
+			EntropySource:                 "operating-system-csprng",
+			ContributorSwapDisabled:       true,
+			ContributorCrashDumpsDisabled: true,
+			ContributorTelemetryDisabled:  true,
+			EphemeralEnvironment:          true,
+			EphemeralCleanupRequired:      true,
+			HostRemnantsNotExcluded:       true,
 		},
 		ContributedAt: roundTime.Add(-27 * time.Hour).Format(time.RFC3339),
 	})
@@ -610,18 +602,19 @@ func buildOperationalPhaseFixture(
 		definition.Roster[0].Identity.KeyID, adversarialPrivateKey(0x11),
 	)
 	erasure, err := NewErasureAttestation(ErasureAttestation{
-		CeremonyID:                definition.CeremonyID,
-		Phase:                     phase,
-		PhaseID:                   phaseID,
-		Index:                     1,
-		ParticipantID:             definition.Roster[0].Identity.ID,
-		ParticipantKeyID:          definition.Roster[0].Identity.KeyID,
-		ContributionAttestationID: attestation.AttestationID,
-		OutputPayload:             outputPayload,
-		DestroyedAt:               roundTime.Add(-26*time.Hour - 30*time.Minute).Format(time.RFC3339),
-		ProcessTerminated:         true,
-		EphemeralStorageDestroyed: true,
-		NoBackupRetained:          true,
+		CeremonyID:                  definition.CeremonyID,
+		Phase:                       phase,
+		PhaseID:                     phaseID,
+		Index:                       1,
+		ParticipantID:               definition.Roster[0].Identity.ID,
+		ParticipantKeyID:            definition.Roster[0].Identity.KeyID,
+		ContributionAttestationID:   attestation.AttestationID,
+		OutputPayload:               outputPayload,
+		DestroyedAt:                 roundTime.Add(-26*time.Hour - 30*time.Minute).Format(time.RFC3339),
+		ProcessTerminated:           true,
+		EphemeralEnvironmentRemoved: true,
+		NoDeliberateCopiesConfirmed: true,
+		HostRemnantsNotExcluded:     true,
 	})
 	if err != nil {
 		t.Fatal(err)

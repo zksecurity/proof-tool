@@ -346,20 +346,6 @@ func TestParseInvocationAcceptsRequiredCommandSurface(t *testing.T) {
 			command: CommandDecisionVerify,
 		},
 		{
-			name: "ops attest host wipe",
-			args: joinArgs(
-				[]string{"ops", "attest-host-wipe"},
-				ceremonyTrust,
-				[]string{
-					"--participant-id", "participant-01",
-					"--participant-signing-key", "private/participant-01.key",
-					"--wiped-at", "2026-09-04T12:00:00Z",
-					"--out-dir", "ops/host-wipe",
-				},
-			),
-			command: CommandOpsAttestHostWipe,
-		},
-		{
 			name: "ops prepare public witness receipt",
 			args: joinArgs(
 				[]string{"ops", "prepare-public-witness-receipt"},

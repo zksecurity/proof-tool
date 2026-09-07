@@ -18,33 +18,6 @@ import (
 
 const maxOperationalRecordBytes = 16 << 20
 
-func executeOpsAttestHostWipe(options HostWipeOptions) (CommandResult, error) {
-	result, err := mpcceremony.CreateHostWipeAttestationFiles(
-		mpcceremony.CreateHostWipeAttestationFilesOptions{
-			Trust: mpcceremony.TrustPaths{
-				DefinitionPath:           options.CeremonyPath,
-				DefinitionSignaturePath:  options.CeremonySignaturePath,
-				CoordinatorPublicKeyPath: options.CoordinatorPublicKeyFile,
-			},
-			ParticipantID:             options.ParticipantID,
-			ParticipantPrivateKeyPath: options.ParticipantSigningKey,
-			WipedAt:                   options.WipedAt,
-			OutDir:                    options.OutDir,
-		},
-	)
-	if err != nil {
-		return CommandResult{}, err
-	}
-	return CommandResult{
-		CeremonyID: result.Attestation.CeremonyID,
-		Summary:    "created participant-signed post-wipe macOS host attestation",
-		Outputs: map[string]string{
-			"host_wipe":           result.AttestationPath,
-			"host_wipe_signature": result.SignaturePath,
-		},
-	}, nil
-}
-
 func executeOpsPreparePublicWitnessReceipt(options OpsPreparePublicWitnessReceiptOptions) (CommandResult, error) {
 	trusted, err := mpcceremony.LoadSignedDefinition(mpcceremony.TrustPaths{
 		DefinitionPath:           options.CeremonyPath,

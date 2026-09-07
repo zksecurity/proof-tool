@@ -145,10 +145,7 @@ func inspectDefinition(definition mpcceremony.CeremonyDefinition) DefinitionInsp
 		Mode:               definition.Mode,
 		Phase1Participants: append([]string(nil), definition.Phase1Policy.Participants...),
 		Phase2Participants: append([]string(nil), definition.Phase2Policy.Participants...),
-		HostWipeParticipants: append(
-			[]string(nil), definition.HostWipeParticipants...,
-		),
-		R1CS: definition.Circuit.R1CS,
+		R1CS:               definition.Circuit.R1CS,
 	}
 }
 

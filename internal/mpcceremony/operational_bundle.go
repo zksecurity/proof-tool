@@ -10,8 +10,7 @@ import (
 )
 
 const (
-	OperationalEvidenceBundleSchemaV1 = "proof-tool-mpc-operational-evidence-bundle-v1"
-	OperationalEvidenceBundleSchema   = "proof-tool-mpc-operational-evidence-bundle-v2"
+	OperationalEvidenceBundleSchema = "proof-tool-mpc-operational-evidence-bundle-v2"
 )
 
 type SignedArtifactRefs struct {
@@ -141,7 +140,6 @@ type OperationalEvidenceBundle struct {
 	CeremonyID        string                   `json:"ceremony_id"`
 	Enrollments       []SignedArtifactRefs     `json:"enrollments"`
 	GovernanceRecords []SignedArtifactRefs     `json:"governance_records"`
-	HostWipes         []SignedArtifactRefs     `json:"host_wipes,omitempty"`
 	Phase1            PhaseOperationalEvidence `json:"phase1"`
 	Phase2            PhaseOperationalEvidence `json:"phase2"`
 	CoordinatorID     string                   `json:"coordinator_id"`
@@ -150,7 +148,7 @@ type OperationalEvidenceBundle struct {
 }
 
 func (b OperationalEvidenceBundle) Validate() error {
-	if b.Schema != OperationalEvidenceBundleSchemaV1 && b.Schema != OperationalEvidenceBundleSchema {
+	if b.Schema != OperationalEvidenceBundleSchema {
 		return fmt.Errorf("operational evidence schema %q is unsupported", b.Schema)
 	}
 	if err := validateHashID("ceremony_id", b.CeremonyID); err != nil {
@@ -168,17 +166,6 @@ func (b OperationalEvidenceBundle) Validate() error {
 	}
 	if len(b.GovernanceRecords) > 0 {
 		if err := validateSignedArtifactSet("governance_records", b.GovernanceRecords); err != nil {
-			return err
-		}
-	}
-	if b.Schema == OperationalEvidenceBundleSchemaV1 && len(b.HostWipes) != 0 {
-		return errors.New("operational evidence v1 must not contain host wipes")
-	}
-	if len(b.HostWipes) > MaxParticipants {
-		return fmt.Errorf("host_wipes exceeds maximum %d", MaxParticipants)
-	}
-	if len(b.HostWipes) > 0 {
-		if err := validateSignedArtifactSet("host_wipes", b.HostWipes); err != nil {
 			return err
 		}
 	}
@@ -254,8 +241,8 @@ type VerifiedOperationalEvidence struct {
 
 // VerifyOperationalEvidenceBundle fail-closes across the signed bundle,
 // authenticated close records, witness signatures/quorum/timing, every raw
-// relay response, the pinned drand verification policy, and every post-wipe
-// Mac attestation required by the signed ceremony definition.
+// relay response, the pinned drand verification policy, and contribution-bound
+// signed cleanup claims. These claims do not establish physical erasure.
 func VerifyOperationalEvidenceBundle(options VerifyOperationalEvidenceOptions) (VerifiedOperationalEvidence, error) {
 	if err := options.Definition.Validate(); err != nil {
 		return VerifiedOperationalEvidence{}, err
@@ -326,10 +313,6 @@ func VerifyOperationalEvidenceBundle(options VerifyOperationalEvidenceOptions) (
 	if err != nil {
 		return VerifiedOperationalEvidence{}, fmt.Errorf("phase2 operational evidence: %w", err)
 	}
-	hostWipeRefs, err := verifyHostWipeEvidence(options.Definition, options.EvidenceRoot, bundle)
-	if err != nil {
-		return VerifiedOperationalEvidence{}, fmt.Errorf("host-wipe evidence: %w", err)
-	}
 	latest, err := latestOperationalTimestamp(options.EvidenceRoot, bundle)
 	if err != nil {
 		return VerifiedOperationalEvidence{}, err
@@ -345,7 +328,6 @@ func VerifyOperationalEvidenceBundle(options VerifyOperationalEvidenceOptions) (
 	all := append(enrollmentRefs, governanceRefs...)
 	all = append(all, phase1Refs...)
 	all = append(all, phase2Refs...)
-	all = append(all, hostWipeRefs...)
 	slices.SortFunc(all, func(a, b ArtifactRef) int {
 		if a.Name < b.Name {
 			return -1
@@ -405,17 +387,6 @@ func latestOperationalTimestamp(root string, bundle OperationalEvidenceBundle) (
 			return time.Time{}, err
 		}
 		advance(record.RecordedAt)
-	}
-	for _, pair := range bundle.HostWipes {
-		raw, err := verifyArtifactBytes(root, pair.Record, maxSignedRecordBytes)
-		if err != nil {
-			return time.Time{}, err
-		}
-		var record HostWipeAttestation
-		if err := UnmarshalCanonical(raw, &record); err != nil {
-			return time.Time{}, err
-		}
-		advance(record.WipedAt)
 	}
 	for _, phase := range []PhaseOperationalEvidence{bundle.Phase1, bundle.Phase2} {
 		chainBytes, err := verifyArtifactBytes(root, phase.AcceptedChain.Record, maxSignedRecordBytes)
@@ -501,83 +472,6 @@ func latestOperationalTimestamp(root string, bundle OperationalEvidenceBundle) (
 		return time.Time{}, errors.New("operational evidence has no timestamp")
 	}
 	return latest, nil
-}
-
-func verifyHostWipeEvidence(
-	definition CeremonyDefinition,
-	root string,
-	bundle OperationalEvidenceBundle,
-) ([]ArtifactRef, error) {
-	required := definition.HostWipeParticipants
-	if len(bundle.HostWipes) != len(required) {
-		return nil, fmt.Errorf("got %d host-wipe attestations, want exactly %d", len(bundle.HostWipes), len(required))
-	}
-	if len(required) == 0 {
-		return nil, nil
-	}
-	latestContribution := make(map[string]time.Time, len(required))
-	for _, phase := range []PhaseOperationalEvidence{bundle.Phase1, bundle.Phase2} {
-		chainBytes, err := verifyArtifactBytes(root, phase.AcceptedChain.Record, maxSignedRecordBytes)
-		if err != nil {
-			return nil, err
-		}
-		var chain Chain
-		if err := UnmarshalCanonical(chainBytes, &chain); err != nil {
-			return nil, err
-		}
-		for _, record := range chain.Records {
-			if !slices.Contains(required, record.ParticipantID) {
-				continue
-			}
-			attestationBytes, err := verifyArtifactBytes(root, record.Attestation, maxSignedRecordBytes)
-			if err != nil {
-				return nil, err
-			}
-			var attestation ContributionAttestation
-			if err := UnmarshalCanonical(attestationBytes, &attestation); err != nil {
-				return nil, err
-			}
-			contributed, _ := time.Parse(time.RFC3339Nano, attestation.ContributedAt)
-			if contributed.After(latestContribution[record.ParticipantID]) {
-				latestContribution[record.ParticipantID] = contributed
-			}
-		}
-	}
-	seen := make(map[string]struct{}, len(required))
-	refs := make([]ArtifactRef, 0, len(bundle.HostWipes)*2)
-	for index, pair := range bundle.HostWipes {
-		recordBytes, err := verifyArtifactBytes(root, pair.Record, maxSignedRecordBytes)
-		if err != nil {
-			return nil, fmt.Errorf("host wipe %d record: %w", index, err)
-		}
-		signatureBytes, err := verifyArtifactBytes(root, pair.Signature, maxSignedRecordBytes)
-		if err != nil {
-			return nil, fmt.Errorf("host wipe %d signature: %w", index, err)
-		}
-		record, err := VerifyHostWipeAttestation(definition, recordBytes, signatureBytes)
-		if err != nil {
-			return nil, fmt.Errorf("host wipe %d: %w", index, err)
-		}
-		if _, duplicate := seen[record.ParticipantID]; duplicate {
-			return nil, fmt.Errorf("host wipe for participant %q is duplicated", record.ParticipantID)
-		}
-		contributed, ok := latestContribution[record.ParticipantID]
-		if !ok {
-			return nil, fmt.Errorf("host-wipe participant %q has no accepted contribution", record.ParticipantID)
-		}
-		wiped, _ := time.Parse(time.RFC3339Nano, record.WipedAt)
-		if !wiped.After(contributed) {
-			return nil, fmt.Errorf("host wipe for participant %q does not postdate their final contribution", record.ParticipantID)
-		}
-		seen[record.ParticipantID] = struct{}{}
-		refs = append(refs, pair.Record, pair.Signature)
-	}
-	for _, participantID := range required {
-		if _, ok := seen[participantID]; !ok {
-			return nil, fmt.Errorf("required host wipe for participant %q is missing", participantID)
-		}
-	}
-	return refs, nil
 }
 
 func verifyPhaseOperationalEvidence(

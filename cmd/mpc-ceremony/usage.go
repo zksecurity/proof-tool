@@ -35,14 +35,14 @@ Commands:
   rehearsal init       Create and initialize a three-party tiny rehearsal
   inspect              Report chain state and next scheduled contribution
   phase1 contribute    Verify the full phase 1 chain and contribute
-  phase1 attest-erasure Sign a participant destruction attestation
+  phase1 attest-erasure Sign a participant cleanup claim (not physical erasure)
   phase1 verify        Verify and append one candidate contribution
   phase1 close         Close the accepted phase 1 chain
   phase1 beacon        Record signed post-closure beacon evidence
   phase1 seal          Apply an offline post-closure beacon
   phase2 init          Initialize circuit-specific phase 2
   phase2 contribute    Verify the full phase 2 chain and contribute
-  phase2 attest-erasure Sign a participant destruction attestation
+  phase2 attest-erasure Sign a participant cleanup claim (not physical erasure)
   phase2 verify        Verify and append one candidate contribution
   phase2 close         Close the accepted phase 2 chain
   phase2 beacon        Record signed post-closure beacon evidence
@@ -58,7 +58,6 @@ Commands:
   inspect chain        Authenticate and describe an accepted chain
   inspect participant  Match an existing key to the participant roster
   inspect enrollment   Authenticate an operational enrollment
-  ops attest-host-wipe  Sign a post-wipe macOS host attestation
   ops prepare-public-witness-receipt  Prepare witnessed closure bytes
   ops prepare-mirror-receipt  Authenticate a relay draft for offline signing
   ops export-signing   Export canonical operational bytes for offline signing
@@ -203,9 +202,7 @@ definition. The authoritative ceremony ID is derived from canonical content,
 including a 32-byte session nonce securely generated when omitted. Production
 mode requires exact clean source builds. The running binary is always allowed;
 each repeated --allowed-binary adds one authenticated binary for another
-platform to the signed definition. For production Mac contributors, the
-participants file contains a sorted host_wipe_participants list. Those
-identities must later submit signed post-wipe evidence before release.
+platform to the signed definition.
 `,
 	"phase1": `Usage:
   mpc-ceremony phase1 <contribute|attest-erasure|verify|close|beacon|seal> [flags]
@@ -232,6 +229,9 @@ randomness. The input chain is never modified.
 Writes erasure.json and its participant signature into the candidate directory
 without replacing existing files. This is an operational attestation, not
 technical or cryptographic proof that contribution randomness was erased.
+Sign only after the contributor process has terminated, its ephemeral
+environment was removed, and the participant confirmed no deliberate copies.
+Host/VM remnants are explicitly not excluded by this statement.
 `,
 	"phase1 verify": `Usage:
   mpc-ceremony phase1 verify --ceremony FILE --ceremony-signature FILE \
@@ -305,7 +305,8 @@ Phase 2 is bound to the exact compiled R1CS and verified phase 1 seal.
     --participant-id ID --participant-signing-key KEY \
     --candidate-dir DIR --destroyed-at RFC3339
 
-Signs the participant's Phase 2 environment-destruction attestation. The
+Signs the participant's Phase 2 logical-cleanup attestation. Host/VM remnants
+are explicitly not excluded; confirm cleanup precautions before signing. The
 statement is auditable evidence, not proof that secret randomness was erased.
 `,
 	"phase2 verify": `Usage:
@@ -461,24 +462,11 @@ coherence, and fail-closes GO unless all gates PASS and all four roles signed.
 Evidence URIs are content bindings only; the command performs no network fetch.
 `,
 	"ops": `Usage:
-  mpc-ceremony ops <attest-host-wipe|prepare-public-witness-receipt|prepare-mirror-receipt|export-signing|import-signature|verify> [flags]
+  mpc-ceremony ops <prepare-public-witness-receipt|prepare-mirror-receipt|export-signing|import-signature|verify> [flags]
 
 Operational records cover proof-of-possession enrollment, transfers and
 receipts, immutable mirrors, pre-beacon public witnesses, multi-operator relay
 evidence, governance events, and the release-bound operational evidence bundle.
-`,
-	"ops attest-host-wipe": `Usage:
-  mpc-ceremony ops attest-host-wipe --ceremony FILE \
-    --ceremony-signature FILE --coordinator-public-key-file KEY \
-    --participant-id ID --participant-signing-key KEY \
-    --wiped-at RFC3339 --out-dir DIR
-
-Run this only after the Mac used for a production contribution has undergone
-a supported whole-device erase and clean macOS reinstall. Do not restore old
-Docker Desktop data, snapshots, backups, or contribution copies. The signed
-record is an authenticated honest-participant claim, not physical proof of
-erasure. Release verification rejects a required record that does not postdate
-the participant's final contribution.
 `,
 	"ops prepare-public-witness-receipt": `Usage:
   mpc-ceremony ops prepare-public-witness-receipt \

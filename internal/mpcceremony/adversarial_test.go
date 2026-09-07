@@ -130,14 +130,15 @@ func adversarialAttestation(t *testing.T) ContributionAttestation {
 		GnarkCryptoVersion:   GnarkCryptoVersion,
 		DrandVersion:         DrandVersion,
 		Environment: ContributionEnvironment{
-			OS:                           "linux",
-			Architecture:                 "amd64",
-			EntropySource:                "operating-system-csprng",
-			SwapDisabled:                 true,
-			CrashDumpsDisabled:           true,
-			TelemetryDisabled:            true,
-			EphemeralEnvironment:         true,
-			EphemeralDestructionRequired: true,
+			OS:                            "linux",
+			Architecture:                  "amd64",
+			EntropySource:                 "operating-system-csprng",
+			ContributorSwapDisabled:       true,
+			ContributorCrashDumpsDisabled: true,
+			ContributorTelemetryDisabled:  true,
+			EphemeralEnvironment:          true,
+			EphemeralCleanupRequired:      true,
+			HostRemnantsNotExcluded:       true,
 		},
 		ContributedAt: "2026-07-23T12:00:00Z",
 	})
@@ -169,18 +170,19 @@ func adversarialErasure(
 ) ErasureAttestation {
 	t.Helper()
 	erasure, err := NewErasureAttestation(ErasureAttestation{
-		CeremonyID:                contribution.CeremonyID,
-		Phase:                     contribution.Phase,
-		PhaseID:                   contribution.PhaseID,
-		Index:                     contribution.Index,
-		ParticipantID:             contribution.ParticipantID,
-		ParticipantKeyID:          contribution.ParticipantKeyID,
-		ContributionAttestationID: contribution.AttestationID,
-		OutputPayload:             contribution.OutputPayload,
-		DestroyedAt:               destroyedAt,
-		ProcessTerminated:         true,
-		EphemeralStorageDestroyed: true,
-		NoBackupRetained:          true,
+		CeremonyID:                  contribution.CeremonyID,
+		Phase:                       contribution.Phase,
+		PhaseID:                     contribution.PhaseID,
+		Index:                       contribution.Index,
+		ParticipantID:               contribution.ParticipantID,
+		ParticipantKeyID:            contribution.ParticipantKeyID,
+		ContributionAttestationID:   contribution.AttestationID,
+		OutputPayload:               contribution.OutputPayload,
+		DestroyedAt:                 destroyedAt,
+		ProcessTerminated:           true,
+		EphemeralEnvironmentRemoved: true,
+		NoDeliberateCopiesConfirmed: true,
+		HostRemnantsNotExcluded:     true,
 	})
 	if err != nil {
 		t.Fatalf("create erasure attestation: %v", err)
@@ -795,14 +797,15 @@ func TestAcceptanceRecordMustExactlyBindAttestation(t *testing.T) {
 		GnarkCryptoVersion:   definition.Software.GnarkCryptoVersion,
 		DrandVersion:         definition.Software.DrandVersion,
 		Environment: ContributionEnvironment{
-			OS:                           "linux",
-			Architecture:                 "amd64",
-			EntropySource:                "operating-system-csprng",
-			SwapDisabled:                 true,
-			CrashDumpsDisabled:           true,
-			TelemetryDisabled:            true,
-			EphemeralEnvironment:         true,
-			EphemeralDestructionRequired: true,
+			OS:                            "linux",
+			Architecture:                  "amd64",
+			EntropySource:                 "operating-system-csprng",
+			ContributorSwapDisabled:       true,
+			ContributorCrashDumpsDisabled: true,
+			ContributorTelemetryDisabled:  true,
+			EphemeralEnvironment:          true,
+			EphemeralCleanupRequired:      true,
+			HostRemnantsNotExcluded:       true,
 		},
 		ContributedAt: "2026-07-23T12:01:00Z",
 	})
@@ -1024,7 +1027,7 @@ func TestErasureAttestationRequiresExactPostContributionDestruction(t *testing.T
 	}
 
 	incomplete := erasure
-	incomplete.NoBackupRetained = false
+	incomplete.NoDeliberateCopiesConfirmed = false
 	if _, err := NewErasureAttestation(incomplete); err == nil {
 		t.Fatal("erasure with a retained backup unexpectedly accepted")
 	}

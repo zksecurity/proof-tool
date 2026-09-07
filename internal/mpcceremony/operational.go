@@ -35,13 +35,12 @@ const (
 	RecordMirrorReceipt  OperationalRecordType = "mirror-receipt"
 	RecordEvidenceBundle OperationalRecordType = "evidence-bundle"
 	RecordGovernance     OperationalRecordType = "governance"
-	RecordHostWipe       OperationalRecordType = "host-wipe"
 )
 
 func (t OperationalRecordType) Validate() error {
 	switch t {
 	case RecordEnrollment, RecordHandoff, RecordReceipt, RecordPublicWitness,
-		RecordBeaconEvidence, RecordMirrorReceipt, RecordEvidenceBundle, RecordGovernance, RecordHostWipe:
+		RecordBeaconEvidence, RecordMirrorReceipt, RecordEvidenceBundle, RecordGovernance:
 		return nil
 	default:
 		return fmt.Errorf("unsupported operational record type %q", t)
@@ -644,8 +643,6 @@ func ParseOperationalRecord(recordType OperationalRecordType, canonical []byte) 
 		destination = &OperationalEvidenceBundle{}
 	case RecordGovernance:
 		destination = &GovernanceRecord{}
-	case RecordHostWipe:
-		destination = &HostWipeAttestation{}
 	default:
 		return nil, fmt.Errorf("unsupported operational record type %q", recordType)
 	}
@@ -748,14 +745,6 @@ func VerifyOperationalRecordBinding(
 		ceremonyID, signerID, signerKeyID = r.CeremonyID, r.CoordinatorID, r.CoordinatorKeyID
 	case *GovernanceRecord:
 		ceremonyID, signerID, signerKeyID = r.CeremonyID, r.SignerID, r.SignerKeyID
-	case *HostWipeAttestation:
-		ceremonyID, signerID, signerKeyID = r.CeremonyID, r.ParticipantID, r.ParticipantKeyID
-		if err := r.Validate(); err != nil {
-			return Identity{}, err
-		}
-		if !slices.Contains(definition.HostWipeParticipants, r.ParticipantID) {
-			return Identity{}, errors.New("host-wipe participant is not required by the signed ceremony")
-		}
 	default:
 		return Identity{}, fmt.Errorf("unsupported operational record %T", record)
 	}

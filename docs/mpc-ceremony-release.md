@@ -39,13 +39,13 @@ versions, compiler/build policies, dirty states, or multiple binaries for one
 platform. The signed definition records the full exact-digest allowlist;
 legacy v1 definitions remain one-binary ceremonies.
 
-The same v2 definition may freeze a sorted production Mac wipe policy through
-the participant input's `host_wipe_participants` field. The operational
-evidence bundle schema v2 carries the corresponding signed host-wipe records.
-Release signing recursively verifies that every required record belongs to the
-rostered participant and postdates that participant's final contribution, so
-accepted contributions can remain provisional without allowing premature
-parameter release.
+Contribution and cleanup attestations use schema v2 with contributor-scoped
+controls and explicit acknowledgement of unexcluded host/VM remnants. Whole-
+machine wipe policies and separate wipe records are removed, without legacy
+support. Release signing still recursively verifies signed cleanup records,
+contribution binding, timing, audits, witnesses, mirrors, and beacon evidence.
+Use matching new Relay/proof-tool binaries and regenerate environment inputs;
+old attestation schemas and removed wipe fields are rejected.
 
 ## Coordinated distribution
 

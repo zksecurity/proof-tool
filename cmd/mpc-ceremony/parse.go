@@ -432,10 +432,6 @@ func parseOps(invocation Invocation, args []string) (Invocation, error) {
 		return Invocation{}, &helpRequest{topic: append([]string{"ops"}, args[1:]...)}
 	}
 	switch args[0] {
-	case "attest-host-wipe":
-		options, err := parseHostWipe(args[1:])
-		invocation.Command, invocation.Options = CommandOpsAttestHostWipe, options
-		return invocation, wrapCommandError(err, "ops", "attest-host-wipe")
 	case "prepare-public-witness-receipt":
 		options, err := parseOpsPreparePublicWitnessReceipt(args[1:])
 		invocation.Command, invocation.Options = CommandOpsPreparePublicWitnessReceipt, options
@@ -462,28 +458,6 @@ func parseOps(invocation Invocation, args []string) (Invocation, error) {
 			topic:   []string{"ops"},
 		}
 	}
-}
-
-func parseHostWipe(args []string) (HostWipeOptions, error) {
-	var options HostWipeOptions
-	fs := commandFlagSet("ops attest-host-wipe")
-	addCeremonyTrustFlags(fs, &options.CeremonyPath, &options.CeremonySignaturePath, &options.CoordinatorPublicKeyFile)
-	fs.StringVar(&options.ParticipantID, "participant-id", "", "participant identity from the signed host-wipe policy")
-	fs.StringVar(&options.ParticipantSigningKey, "participant-signing-key", "", "participant Ed25519 private key restored from separate storage")
-	fs.StringVar(&options.WipedAt, "wiped-at", "", "completion time of the whole-device wipe and clean reinstall in RFC3339 UTC")
-	fs.StringVar(&options.OutDir, "out-dir", "", "fresh directory for the signed host-wipe record")
-	if err := parseFlags(fs, args); err != nil {
-		return options, err
-	}
-	return options, requireValues(
-		pathValue("--ceremony", options.CeremonyPath),
-		pathValue("--ceremony-signature", options.CeremonySignaturePath),
-		pathValue("--coordinator-public-key-file", options.CoordinatorPublicKeyFile),
-		value("--participant-id", options.ParticipantID),
-		pathValue("--participant-signing-key", options.ParticipantSigningKey),
-		value("--wiped-at", options.WipedAt),
-		pathValue("--out-dir", options.OutDir),
-	)
 }
 
 func parseOpsPreparePublicWitnessReceipt(args []string) (OpsPreparePublicWitnessReceiptOptions, error) {
@@ -611,7 +585,7 @@ func parseOpsVerify(args []string) (OpsVerifyOptions, error) {
 }
 
 func addOpsRecordFlags(fs *flag.FlagSet, recordType, recordPath *string) {
-	fs.StringVar(recordType, "record-type", "", "enrollment, handoff, receipt, mirror-receipt, public-witness, beacon-evidence, evidence-bundle, governance, or host-wipe")
+	fs.StringVar(recordType, "record-type", "", "enrollment, handoff, receipt, mirror-receipt, public-witness, beacon-evidence, evidence-bundle, governance")
 	fs.StringVar(recordPath, "record", "", "canonical operational record JSON")
 }
 
@@ -860,7 +834,7 @@ func parseErasure(name string, args []string) (ErasureOptions, error) {
 	fs.StringVar(&options.ParticipantID, "participant-id", "", "participant identifier from the signed roster")
 	fs.StringVar(&options.ParticipantSigningKey, "participant-signing-key", "", "existing Ed25519 participant private key path")
 	fs.StringVar(&options.CandidateDir, "candidate-dir", "", "candidate contribution directory")
-	fs.StringVar(&options.DestroyedAt, "destroyed-at", "", "environment destruction timestamp in RFC3339")
+	fs.StringVar(&options.DestroyedAt, "destroyed-at", "", "contributor cleanup completion timestamp in RFC3339 (not physical erasure)")
 	if err := parseFlags(fs, args); err != nil {
 		return options, err
 	}

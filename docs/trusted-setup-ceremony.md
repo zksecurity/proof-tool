@@ -5,8 +5,8 @@ This repository has two deliberately separate Groth16 setup paths:
 - `proof-tool setup-ceremony` is a reproducible, signed, single-actor local
   setup.
 - `cmd/mpc-ceremony` is the two-phase multi-party engine. Relay's
-  [coordinator runbook](https://github.com/zksecurity/relay/blob/main/COORDINATOR_RUNBOOK.md)
-  and [role runbook](https://github.com/zksecurity/relay/blob/main/ROLE_RUNBOOK.md)
+  [coordinator runbook](https://github.com/zksecurity/relay/blob/main/docs/roles/coordinator.md)
+  and [role runbook](https://github.com/zksecurity/relay/blob/main/docs/README.md)
   document the distributed transport and operator workflow.
 
 The commands, transcripts, and trust claims are not interchangeable.
@@ -25,13 +25,10 @@ allowlist member, and every contribution attestation records the digest that
 actually ran. A v1 definition is intentionally interpreted as a singleton
 allowlist.
 
-For a production ceremony that permits macOS participants through Docker, the
-canonical participant input also freezes a sorted `host_wipe_participants`
-list into the v2 signed definition. Their contributions may be accepted before
-the whole Mac is erased, but final operational-evidence and release
-verification require a participant-signed post-wipe record that is later than
-that participant's final accepted contribution. This is authenticated
-honest-participant evidence, not physical proof that no earlier copy exists.
+Production Mac and Linux contributors use guided Docker cleanup and participant
+confirmation. Whole-machine wiping and separate post-wipe records are not
+required. This accepts residual host/VM memory and storage risk; container
+removal does not establish that no secret copy survived.
 
 ## Single-Actor Local Setup
 
@@ -84,8 +81,8 @@ Phase 1 and Phase 2, and supports full independent transcript replay. Software
 verification alone is still insufficient: participant independence, host
 controls, entropy quality, erasure, public archival, and independent audits are
 operational requirements. See Relay's
-[coordinator runbook](https://github.com/zksecurity/relay/blob/main/COORDINATOR_RUNBOOK.md)
-and [role runbook](https://github.com/zksecurity/relay/blob/main/ROLE_RUNBOOK.md)
+[coordinator runbook](https://github.com/zksecurity/relay/blob/main/docs/roles/coordinator.md)
+and [role runbook](https://github.com/zksecurity/relay/blob/main/docs/README.md)
 for the deployed workflow. Relay's bundled rehearsal is test-only and does not
 constitute production approval; each production ceremony requires an explicit,
 independently reviewed go/no-go record before any ceremony binary or artifact
@@ -107,10 +104,13 @@ independent contributor in each phase, but it does not cryptographically prove
 that a contributor erased its randomness. Every accepted participant must use
 and attest to the host controls in the MPC runbook.
 
-For a participant named by the signed production Mac wipe policy, the immediate
-container-erasure record permits contribution acceptance but is not the final
-host-level gate. After the participant's last contribution, the whole Mac is
-erased and cleanly reinstalled without restoring backups, snapshots, Docker
-Desktop state, or contribution copies. The participant then runs `mpc-ceremony
-ops attest-host-wipe` through Relay's guided flow. Release verification rejects
-a missing, duplicate, invalid, or too-early required record.
+The v2 contribution environment describes contributor-scoped swap, dump, and
+telemetry controls. Both the environment and signed cleanup record require
+`host_remnants_not_excluded: true`. The cleanup record authenticates process
+termination, logical ephemeral-environment removal, and the participant's
+confirmation of no deliberate retained copies. It is not secure physical
+erasure evidence. Relay checks Docker lifecycle facts; proof-tool verifies the
+signed claims and their binding to the contribution, output, and timestamp.
+Host/VM swap, backups, snapshots, or a compromised host may retain secrets even
+when honest participants follow every instruction. Dedicated controlled
+environments can reduce risk but cannot undo an earlier leak.

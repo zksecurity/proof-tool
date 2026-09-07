@@ -96,14 +96,15 @@ func TestReadRegularBoundedRejectsSymlinkLeaf(t *testing.T) {
 func TestCanonicalInitInputsRejectUnknownAndNonCanonicalJSON(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "environment.json")
 	valid := ContributionEnvironment{
-		OS:                           "linux",
-		Architecture:                 "amd64",
-		EntropySource:                "operating-system-csprng",
-		SwapDisabled:                 true,
-		CrashDumpsDisabled:           true,
-		TelemetryDisabled:            true,
-		EphemeralEnvironment:         true,
-		EphemeralDestructionRequired: true,
+		OS:                            "linux",
+		Architecture:                  "amd64",
+		EntropySource:                 "operating-system-csprng",
+		ContributorSwapDisabled:       true,
+		ContributorCrashDumpsDisabled: true,
+		ContributorTelemetryDisabled:  true,
+		EphemeralEnvironment:          true,
+		EphemeralCleanupRequired:      true,
+		HostRemnantsNotExcluded:       true,
 	}
 	data, err := MarshalCanonical(valid)
 	if err != nil {

@@ -131,15 +131,19 @@ func VerifySignedRecord(recordBytes, signatureBytes []byte, destination any, exp
 	return nil
 }
 
+// ContributionEnvironment describes controls within the contributor execution
+// environment, not the surrounding host or VM. These are signed operator claims.
+// HostRemnantsNotExcluded acknowledges that physical erasure is not established.
 type ContributionEnvironment struct {
-	OS                           string `json:"os"`
-	Architecture                 string `json:"architecture"`
-	EntropySource                string `json:"entropy_source"`
-	SwapDisabled                 bool   `json:"swap_disabled"`
-	CrashDumpsDisabled           bool   `json:"crash_dumps_disabled"`
-	TelemetryDisabled            bool   `json:"telemetry_disabled"`
-	EphemeralEnvironment         bool   `json:"ephemeral_environment"`
-	EphemeralDestructionRequired bool   `json:"ephemeral_destruction_required"`
+	OS                            string `json:"os"`
+	Architecture                  string `json:"architecture"`
+	EntropySource                 string `json:"entropy_source"`
+	ContributorSwapDisabled       bool   `json:"contributor_swap_disabled"`
+	ContributorCrashDumpsDisabled bool   `json:"contributor_crash_dumps_disabled"`
+	ContributorTelemetryDisabled  bool   `json:"contributor_telemetry_disabled"`
+	EphemeralEnvironment          bool   `json:"ephemeral_environment"`
+	EphemeralCleanupRequired      bool   `json:"ephemeral_cleanup_required"`
+	HostRemnantsNotExcluded       bool   `json:"host_remnants_not_excluded"`
 }
 
 func (e ContributionEnvironment) Validate() error {
@@ -150,28 +154,31 @@ func (e ContributionEnvironment) Validate() error {
 	if e.EntropySource != "operating-system-csprng" {
 		return fmt.Errorf("entropy_source %q, want operating-system-csprng", e.EntropySource)
 	}
-	if !e.SwapDisabled || !e.CrashDumpsDisabled || !e.TelemetryDisabled ||
-		!e.EphemeralEnvironment || !e.EphemeralDestructionRequired {
-		return errors.New("all production contribution environment controls and the post-contribution destruction plan must be attested")
+	if !e.ContributorSwapDisabled || !e.ContributorCrashDumpsDisabled || !e.ContributorTelemetryDisabled ||
+		!e.EphemeralEnvironment || !e.EphemeralCleanupRequired || !e.HostRemnantsNotExcluded {
+		return errors.New("contributor-scoped controls, cleanup plan, and unexcluded host/VM remnants must be acknowledged")
 	}
 	return nil
 }
 
+// ErasureAttestation records logical cleanup and participant precautions. It
+// does not prove zeroization, secure disk erasure, or the absence of host copies.
 type ErasureAttestation struct {
-	Schema                    string      `json:"schema"`
-	ErasureID                 string      `json:"erasure_id"`
-	CeremonyID                string      `json:"ceremony_id"`
-	Phase                     Phase       `json:"phase"`
-	PhaseID                   string      `json:"phase_id"`
-	Index                     uint8       `json:"index"`
-	ParticipantID             string      `json:"participant_id"`
-	ParticipantKeyID          string      `json:"participant_key_id"`
-	ContributionAttestationID string      `json:"contribution_attestation_id"`
-	OutputPayload             ArtifactRef `json:"output_payload"`
-	DestroyedAt               string      `json:"destroyed_at"`
-	ProcessTerminated         bool        `json:"process_terminated"`
-	EphemeralStorageDestroyed bool        `json:"ephemeral_storage_destroyed"`
-	NoBackupRetained          bool        `json:"no_backup_retained"`
+	Schema                      string      `json:"schema"`
+	ErasureID                   string      `json:"erasure_id"`
+	CeremonyID                  string      `json:"ceremony_id"`
+	Phase                       Phase       `json:"phase"`
+	PhaseID                     string      `json:"phase_id"`
+	Index                       uint8       `json:"index"`
+	ParticipantID               string      `json:"participant_id"`
+	ParticipantKeyID            string      `json:"participant_key_id"`
+	ContributionAttestationID   string      `json:"contribution_attestation_id"`
+	OutputPayload               ArtifactRef `json:"output_payload"`
+	DestroyedAt                 string      `json:"destroyed_at"`
+	ProcessTerminated           bool        `json:"process_terminated"`
+	EphemeralEnvironmentRemoved bool        `json:"ephemeral_environment_removed"`
+	NoDeliberateCopiesConfirmed bool        `json:"no_deliberate_copies_confirmed"`
+	HostRemnantsNotExcluded     bool        `json:"host_remnants_not_excluded"`
 }
 
 func NewErasureAttestation(attestation ErasureAttestation) (ErasureAttestation, error) {
@@ -193,7 +200,7 @@ func ComputeErasureAttestationID(attestation ErasureAttestation) (string, error)
 	if err := attestation.validate(false); err != nil {
 		return "", err
 	}
-	return canonicalHash("proof-tool/mpc-ceremony/erasure-attestation/v1", attestation)
+	return canonicalHash("proof-tool/mpc-ceremony/erasure-attestation/v2", attestation)
 }
 
 func (a ErasureAttestation) Validate() error {
@@ -248,8 +255,8 @@ func (a ErasureAttestation) validate(requireID bool) error {
 	if err := validateTimestamp("destroyed_at", a.DestroyedAt); err != nil {
 		return err
 	}
-	if !a.ProcessTerminated || !a.EphemeralStorageDestroyed || !a.NoBackupRetained {
-		return errors.New("erasure attestation requires process termination, ephemeral storage destruction, and no retained backup")
+	if !a.ProcessTerminated || !a.EphemeralEnvironmentRemoved || !a.NoDeliberateCopiesConfirmed || !a.HostRemnantsNotExcluded {
+		return errors.New("cleanup attestation requires process termination, ephemeral environment removal, no-deliberate-copy confirmation, and acknowledgement of unexcluded host/VM remnants")
 	}
 	return nil
 }
@@ -321,7 +328,7 @@ func ComputeContributionAttestationID(attestation ContributionAttestation) (stri
 	if err := attestation.validate(false); err != nil {
 		return "", err
 	}
-	return canonicalHash("proof-tool/mpc-ceremony/contribution-attestation/v1", attestation)
+	return canonicalHash("proof-tool/mpc-ceremony/contribution-attestation/v2", attestation)
 }
 
 func (a ContributionAttestation) Validate() error {

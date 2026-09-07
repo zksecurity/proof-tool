@@ -88,8 +88,7 @@ func TestInspectCommandsAuthenticateSignedDefinitionAndChain(t *testing.T) {
 			check: func(result CommandResult) bool {
 				return result.DefinitionInspection != nil &&
 					result.DefinitionInspection.CeremonyID == definition.CeremonyID &&
-					reflect.DeepEqual(result.DefinitionInspection.Phase1Participants, definition.Phase1Policy.Participants) &&
-					reflect.DeepEqual(result.DefinitionInspection.HostWipeParticipants, definition.HostWipeParticipants)
+					reflect.DeepEqual(result.DefinitionInspection.Phase1Participants, definition.Phase1Policy.Participants)
 			},
 		},
 		{
