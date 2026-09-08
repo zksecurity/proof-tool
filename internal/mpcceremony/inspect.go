@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // InspectDepthMetadata verifies signatures and structure only: the signed
@@ -58,6 +59,12 @@ type PhaseInspection struct {
 	// MissingArtifacts lists referenced artifacts that are absent or have the
 	// wrong size. Empty means every referenced artifact is present.
 	MissingArtifacts []string
+	// These times come only from the authenticated and validated close record.
+	CloseID                    string
+	ClosedAt                   string
+	BeaconRound                uint64
+	BeaconScheduledAt          string
+	WitnessObservationDeadline string
 }
 
 // InspectResult is the full read-only inspection report.
@@ -202,6 +209,17 @@ func inspectPhase(
 		return inspection, nil, err
 	}
 	inspection.Closed = closed
+	if closed {
+		roundTime, err := QuicknetRoundTime(closeRecord.BeaconRound)
+		if err != nil {
+			return inspection, nil, err
+		}
+		inspection.CloseID = closeRecord.CloseID
+		inspection.ClosedAt = closeRecord.ClosedAt
+		inspection.BeaconRound = closeRecord.BeaconRound
+		inspection.BeaconScheduledAt = roundTime.UTC().Format(time.RFC3339Nano)
+		inspection.WitnessObservationDeadline = roundTime.Add(-time.Duration(trusted.Definition.BeaconPolicy.MinimumWitnessLeadSeconds) * time.Second).UTC().Format(time.RFC3339Nano)
+	}
 
 	var beacon BeaconRecord
 	if closed {

@@ -87,6 +87,8 @@ func TestInspectCommandsAuthenticateSignedDefinitionAndChain(t *testing.T) {
 			command: CommandInspectDefinition,
 			check: func(result CommandResult) bool {
 				return result.DefinitionInspection != nil &&
+					result.DefinitionInspection.Journey != nil &&
+					len(result.DefinitionInspection.Journey.RequiredEnrollments) == 2+len(definition.Auditors)+len(definition.Roster) &&
 					result.DefinitionInspection.CeremonyID == definition.CeremonyID &&
 					reflect.DeepEqual(result.DefinitionInspection.Phase1Participants, definition.Phase1Policy.Participants)
 			},
@@ -128,6 +130,15 @@ func TestInspectCommandsAuthenticateSignedDefinitionAndChain(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := runCLI(context.Background(), tests[1].args, &stdout, &stderr, workflowExecutor{}); code == 0 {
 		t.Fatalf("tampered chain was accepted: stdout = %q", stdout.String())
+	}
+	writeDecisionTestFile(t, ceremonyPath, append(definitionBytes, '\n'), 0600)
+	stdout.Reset()
+	stderr.Reset()
+	if code := runCLI(context.Background(), tests[0].args, &stdout, &stderr, workflowExecutor{}); code == 0 {
+		t.Fatal("tampered definition emitted metadata")
+	}
+	if strings.Contains(stdout.String(), "required_enrollments") || strings.Contains(stdout.String(), "definition_inspection") {
+		t.Fatal("unauthenticated roster metadata leaked into a failed result")
 	}
 }
 

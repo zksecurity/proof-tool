@@ -69,6 +69,13 @@ Release proof-tool first, then update the downstream Relay proof-tool pins and
 retest that published pairing. Local development-image tests are not release
 provenance and must not be presented as verification of published assets.
 
+Read-only guided-journey metadata is included in JSON inspection results.
+`inspect definition` reports every required roster enrollment and labels observer
+minimums as operational-verifier rules, not extra fields of signed policy.
+`inspect` reports authenticated closure IDs, beacon times and the latest allowed
+witness observation time. This is local retained state, not proof of global
+freshness, actual observations, independent operators, or release authorization.
+
 Compatibility with Relay is tested after both projects have released
 independently. The ceremony-kit process receives the exact approved Relay and
 `mpc-ceremony` repositories, tags, binaries, and SHA-256 hashes. It runs the

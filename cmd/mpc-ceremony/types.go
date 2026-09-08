@@ -322,12 +322,13 @@ type InspectEnrollmentOptions struct {
 }
 
 type DefinitionInspection struct {
-	Schema             string                  `json:"schema"`
-	CeremonyID         string                  `json:"ceremony_id"`
-	Mode               string                  `json:"mode"`
-	Phase1Participants []string                `json:"phase1_participants"`
-	Phase2Participants []string                `json:"phase2_participants"`
-	R1CS               mpcceremony.ArtifactRef `json:"r1cs"`
+	Schema             string                       `json:"schema"`
+	CeremonyID         string                       `json:"ceremony_id"`
+	Mode               string                       `json:"mode"`
+	Phase1Participants []string                     `json:"phase1_participants"`
+	Phase2Participants []string                     `json:"phase2_participants"`
+	R1CS               mpcceremony.ArtifactRef      `json:"r1cs"`
+	Journey            *DefinitionJourneyInspection `json:"journey,omitempty"`
 }
 
 type ChainRecordInspection struct {
@@ -436,6 +437,7 @@ type CommandResult struct {
 	ChainInspection            *ChainInspection       `json:"chain_inspection,omitempty"`
 	ParticipantInspection      *ParticipantInspection `json:"participant_inspection,omitempty"`
 	EnrollmentInspection       *EnrollmentInspection  `json:"enrollment_inspection,omitempty"`
+	JourneyInspection          *JourneyInspection     `json:"journey_inspection,omitempty"`
 }
 
 type Executor interface {

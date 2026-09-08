@@ -920,7 +920,8 @@ func executeInspect(options InspectOptions) (CommandResult, error) {
 			"inspected ceremony at %s depth; inspection is read-only and authorizes nothing",
 			result.Depth,
 		),
-		Outputs: outputs,
+		Outputs:           outputs,
+		JourneyInspection: inspectJourney(result),
 	}, nil
 }
 
