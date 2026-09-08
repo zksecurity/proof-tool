@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -58,7 +59,7 @@ func TestPreparePublicWitnessReceiptAuthenticatesClosureEnrollmentAndOutput(t *t
 	writeDecisionTestFile(t, closurePath, closeBytes, 0o600)
 	writeDecisionTestFile(t, closureSignaturePath, closeSignature, 0o600)
 
-	witness, witnessBytes, witnessSignature, _ := commandSignedExternalEnrollment(
+	witness, witnessBytes, witnessSignature, witnessKey := commandSignedExternalEnrollment(
 		t,
 		definition,
 		mpcceremony.EnrollmentPublicWitness,
@@ -94,6 +95,15 @@ func TestPreparePublicWitnessReceiptAuthenticatesClosureEnrollmentAndOutput(t *t
 	canonical, err := os.ReadFile(result.Outputs["canonical"])
 	if err != nil {
 		t.Fatal(err)
+	}
+	keyPath := filepath.Join(root, "witness-key.hex")
+	writeDecisionTestFile(t, keyPath, []byte(hex.EncodeToString(witnessKey.Seed())), 0600)
+	signed, err := executeOpsSign(OpsSignOptions{OpsExportSigningOptions: OpsExportSigningOptions{RecordType: "public-witness", RecordPath: result.Outputs["canonical"], CeremonyPath: trust.CeremonyPath, CeremonySignaturePath: trust.CeremonySignaturePath, CoordinatorPublicKeyFile: trust.CoordinatorPublicKeyFile}, SigningKey: keyPath, OutPath: filepath.Join(root, "witness-signed.sig"), Reviewed: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if signed.Outputs["signature"] == "" {
+		t.Fatal("no verified witness signature")
 	}
 	if bytes.Contains(canonical, []byte(location)) {
 		t.Fatal("canonical receipt contains cleartext publication location")

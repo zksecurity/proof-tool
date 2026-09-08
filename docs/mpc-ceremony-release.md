@@ -56,6 +56,19 @@ mandatory. A tiny release cannot satisfy the production K=21 decision gate.
 
 ## Coordinated distribution
 
+Guided enrollment and receipt signing requires the commands `ops prepare-enrollment`
+and `ops sign`. The former derives the frozen ceremony/roster bindings; the latter
+accepts only enrollment, public-witness and mirror-receipt records, authenticates
+the definition, and checks the owner key. Enrollment signing also verifies the
+accompanying disclosure. Helpers can bind approval to displayed bytes with
+`--reviewed-sha256`. These are signed owner claims, not proof of independent
+people, publication observations, retained storage or physical erasure. Complete
+operational-bundle verification remains required before release.
+
+Release proof-tool first, then update the downstream Relay proof-tool pins and
+retest that published pairing. Local development-image tests are not release
+provenance and must not be presented as verification of published assets.
+
 Compatibility with Relay is tested after both projects have released
 independently. The ceremony-kit process receives the exact approved Relay and
 `mpc-ceremony` repositories, tags, binaries, and SHA-256 hashes. It runs the

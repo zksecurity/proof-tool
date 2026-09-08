@@ -436,6 +436,14 @@ func parseOps(invocation Invocation, args []string) (Invocation, error) {
 		options, err := parseOpsPreparePublicWitnessReceipt(args[1:])
 		invocation.Command, invocation.Options = CommandOpsPreparePublicWitnessReceipt, options
 		return invocation, wrapCommandError(err, "ops", "prepare-public-witness-receipt")
+	case "prepare-enrollment":
+		options, err := parseOpsPrepareEnrollment(args[1:])
+		invocation.Command, invocation.Options = CommandOpsPrepareEnrollment, options
+		return invocation, wrapCommandError(err, "ops", "prepare-enrollment")
+	case "sign":
+		options, err := parseOpsSign(args[1:])
+		invocation.Command, invocation.Options = CommandOpsSign, options
+		return invocation, wrapCommandError(err, "ops", "sign")
 	case "prepare-mirror-receipt":
 		options, err := parseOpsPrepareMirrorReceipt(args[1:])
 		invocation.Command, invocation.Options = CommandOpsPrepareMirrorReceipt, options

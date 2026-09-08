@@ -77,6 +77,10 @@ func (workflowExecutor) Execute(ctx context.Context, invocation Invocation) (Com
 		return executeOpsPrepareMirrorReceipt(invocation.Options.(OpsPrepareMirrorReceiptOptions))
 	case CommandOpsExportSigning:
 		return executeOpsExportSigning(invocation.Options.(OpsExportSigningOptions))
+	case CommandOpsPrepareEnrollment:
+		return executeOpsPrepareEnrollment(invocation.Options.(OpsPrepareEnrollmentOptions))
+	case CommandOpsSign:
+		return executeOpsSign(invocation.Options.(OpsSignOptions))
 	case CommandOpsImportSig:
 		return executeOpsImportSignature(invocation.Options.(OpsImportSignatureOptions))
 	case CommandOpsVerify:

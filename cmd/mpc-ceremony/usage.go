@@ -58,6 +58,8 @@ Commands:
   inspect chain        Authenticate and describe an accepted chain
   inspect participant  Match an existing key to the participant roster
   inspect enrollment   Authenticate an operational enrollment
+  ops prepare-enrollment  Derive your ceremony-bound public enrollment
+  ops sign             Sign your reviewed enrollment or observation offline
   ops prepare-public-witness-receipt  Prepare witnessed closure bytes
   ops prepare-mirror-receipt  Authenticate a relay draft for offline signing
   ops export-signing   Export canonical operational bytes for offline signing
@@ -496,6 +498,29 @@ Authenticates the exact accepted chain prefix and the mirror operator's signed
 proof-of-possession enrollment, recomputes every receipt file reference, and
 requires the relay draft to match. It then exports canonical.json and
 signing-request.json without reading a private signing key.
+`,
+	"ops prepare-enrollment": `Usage:
+  mpc-ceremony ops prepare-enrollment --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --identity PUBLIC_IDENTITY_JSON \
+    --role ROLE [--role-index N] --disclosure PUBLIC_TEXT_FILE \
+    --enrolled-at RFC3339 --out-dir FRESH_DIR
+
+Derives the canonical enrollment from the authenticated definition and the
+owner's public identity and disclosure. Internal role indices are derived;
+external witness/mirror indices are assigned through the coordination channel.
+No private key is read. Share the entire public export with the disclosure.
+`,
+	"ops sign": `Usage:
+  mpc-ceremony ops sign --record-type TYPE --record CANONICAL_FILE \
+    --ceremony FILE --ceremony-signature FILE --coordinator-public-key-file KEY \
+    --signing-key OWN_KEY_FILE --reviewed [--reviewed-sha256 HEX] --out FRESH_SIGNATURE_JSON
+
+Offline owner signing for enrollment, public-witness or mirror-receipt only.
+Authenticates the ceremony, canonical record and owner key. Review the exact
+record and associated disclosure/observations before --reviewed. This signs
+your claim; it does not independently observe publication or prove independence.
+Enrollment signing requires its matching disclosure tree beside the record.
+The optional reviewed hash binds signing to bytes previously shown by a helper.
 `,
 	"ops export-signing": `Usage:
   mpc-ceremony ops export-signing --record-type TYPE --record FILE \

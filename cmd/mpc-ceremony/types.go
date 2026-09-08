@@ -39,6 +39,8 @@ const (
 	CommandOpsPrepareMirrorReceipt        Command = "ops prepare-mirror-receipt"
 	CommandOpsPreparePublicWitnessReceipt Command = "ops prepare-public-witness-receipt"
 	CommandOpsExportSigning               Command = "ops export-signing"
+	CommandOpsPrepareEnrollment           Command = "ops prepare-enrollment"
+	CommandOpsSign                        Command = "ops sign"
 	CommandOpsImportSig                   Command = "ops import-signature"
 	CommandOpsVerify                      Command = "ops verify"
 	CommandDecisionPrepare                Command = "decision prepare"
