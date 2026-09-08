@@ -32,4 +32,7 @@ func TestForKeyVersion(t *testing.T) {
 	if _, err := ForKeyVersion("ownership-destination-v1"); err == nil || !strings.Contains(err.Error(), "unsupported key version") {
 		t.Fatalf("legacy key version err = %v", err)
 	}
+	if _, err := ForKeyVersion("rehearsal-tiny-v1"); err == nil {
+		t.Fatal("tiny rehearsal registered as a production key profile")
+	}
 }

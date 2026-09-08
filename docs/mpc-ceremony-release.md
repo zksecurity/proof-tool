@@ -47,6 +47,13 @@ contribution binding, timing, audits, witnesses, mirrors, and beacon evidence.
 Use matching new Relay/proof-tool binaries and regenerate environment inputs;
 old attestation schemas and removed wipe fields are rejected.
 
+Tiny rehearsals can complete final release signing and verification through
+`mpc-ceremony`. The tiny profile is selected only after authenticating a
+rehearsal-mode ceremony definition. Ordinary application key-bundle verification
+still rejects it; it is not registered as a production prover/verifier profile.
+Native file hashes, release signatures, audits and operational evidence remain
+mandatory. A tiny release cannot satisfy the production K=21 decision gate.
+
 ## Coordinated distribution
 
 Compatibility with Relay is tested after both projects have released

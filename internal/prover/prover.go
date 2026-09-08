@@ -27,6 +27,7 @@ import (
 	"proof-tool/internal/circuit/ownership"
 	"proof-tool/internal/circuit/ownershipdest"
 	"proof-tool/internal/circuit/ownershipmulti"
+	"proof-tool/internal/circuit/rehearsal"
 )
 
 var curve = ecc.BLS12_381
@@ -377,6 +378,16 @@ func InspectOwnershipBundle(dir string, requireProvingKey bool) BundleStatus {
 
 func InspectOwnershipDestinationBundle(dir string, requireProvingKey bool) BundleStatus {
 	return inspectBundle(dir, requireProvingKey, ownershipDestinationKeyConfig())
+}
+
+// InspectRehearsalBundle is only for ceremony rehearsal release verification.
+// It is deliberately absent from the production keyprofile registry and does
+// not provide a production prover/verifier loader for the trivial circuit.
+func InspectRehearsalBundle(dir string, requireProvingKey bool) BundleStatus {
+	if dir == "" {
+		return BundleStatus{State: "invalid", Error: "explicit rehearsal keys directory is required"}
+	}
+	return inspectBundle(dir, requireProvingKey, keyConfig{KeyVersion: rehearsal.KeyVersion, CircuitID: rehearsal.CircuitID})
 }
 
 func InspectOwnershipMultiBundle(dir string, requireProvingKey bool) BundleStatus {

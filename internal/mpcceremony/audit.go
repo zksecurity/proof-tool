@@ -534,7 +534,13 @@ func VerifyRelease(options VerifyReleaseOptions) (*VerifyReleaseResult, error) {
 	if err := requireIdentityKey(definition.ReleaseSigner, trustedKey); err != nil {
 		return nil, fmt.Errorf("trusted release public key: %w", err)
 	}
-	manifest, err := keybundle.Verify(keybundle.VerifyOptions{
+	verifyBundle := keybundle.Verify
+	// This choice comes only from the already authenticated, validated ceremony,
+	// never from the release manifest or a caller-controlled verification flag.
+	if definition.Mode == ModeRehearsal && definition.Circuit.KeyVersion == KeyVersionRehearsal {
+		verifyBundle = keybundle.VerifyRehearsal
+	}
+	manifest, err := verifyBundle(keybundle.VerifyOptions{
 		KeysDir:                options.KeysDir,
 		KeyVersion:             definition.Circuit.KeyVersion,
 		PublicKeyHex:           options.TrustedPublicKeyHex,

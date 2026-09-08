@@ -3,6 +3,7 @@ package keybundle
 import (
 	"crypto/ed25519"
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,6 +11,8 @@ import (
 	"testing"
 
 	"proof-tool/internal/artifact"
+	"proof-tool/internal/circuit/rehearsal"
+	"proof-tool/internal/prover"
 )
 
 func TestLoadExistingPrivateKeyDoesNotGenerate(t *testing.T) {
@@ -124,4 +127,115 @@ func TestRequireManifestMatchRejectsInspectedManifestMismatch(t *testing.T) {
 		!strings.Contains(err.Error(), "changed after signature verification") {
 		t.Fatalf("manifest mismatch error = %v", err)
 	}
+}
+
+// These fixtures exercise signature/profile/file-pin verification, not Groth16
+// deserialization. The ceremony lifecycle test supplies real generated keys.
+func rehearsalBundleFixture(t *testing.T) (VerifyOptions, func(func(*artifact.KeyManifest))) {
+	t.Helper()
+	dir := t.TempDir()
+	publicKey, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"ownership.pk", "ownership.vk"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("test file pins: "+name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pk, err := prover.DigestFile(filepath.Join(dir, "ownership.pk"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	vk, err := prover.DigestFile(filepath.Join(dir, "ownership.vk"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := artifact.KeyManifest{
+		Schema: artifact.ManifestSchema, KeyVersion: rehearsal.KeyVersion,
+		CircuitID: rehearsal.CircuitID, Curve: "BLS12-381", Backend: "groth16",
+		ProvingKeySHA256: pk.SHA256, ProvingKeyBlake2b256: pk.Blake2b256, ProvingKeySize: pk.Size,
+		VKHash: vk.Blake2b256, VerifyingKeySHA256: vk.SHA256, VerifyingKeySize: vk.Size,
+		SignatureKeyID: "test-rehearsal-signer",
+	}
+	writeSigned := func(change func(*artifact.KeyManifest)) {
+		t.Helper()
+		updated := manifest
+		if change != nil {
+			change(&updated)
+		}
+		raw, err := json.Marshal(updated)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, ManifestFile), raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		sig := hex.EncodeToString(ed25519.Sign(privateKey, raw))
+		if err := os.WriteFile(filepath.Join(dir, ManifestSignatureFile), []byte(sig), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeSigned(nil)
+	return VerifyOptions{
+		KeysDir: dir, KeyVersion: rehearsal.KeyVersion, PublicKeyHex: hex.EncodeToString(publicKey),
+		ExpectedSignatureKeyID: manifest.SignatureKeyID, RequireProvingKey: true,
+	}, writeSigned
+}
+
+func TestVerifyRehearsalDoesNotBroadenProductionProfiles(t *testing.T) {
+	opts, _ := rehearsalBundleFixture(t)
+	if _, err := VerifyRehearsal(opts); err != nil {
+		t.Fatalf("explicit rehearsal verification: %v", err)
+	}
+	if _, err := Verify(opts); err == nil || !strings.Contains(err.Error(), "unsupported key version") {
+		t.Fatalf("production verifier accepted rehearsal profile: %v", err)
+	}
+	opts.KeyVersion = ""
+	if _, err := Verify(opts); err == nil {
+		t.Fatal("production verifier inferred and accepted rehearsal profile")
+	}
+	if _, err := VerifyRehearsal(opts); err == nil {
+		t.Fatal("rehearsal verifier accepted an implicit profile")
+	}
+	opts.KeyVersion = "ownership-destination-v2"
+	if _, err := VerifyRehearsal(opts); err == nil {
+		t.Fatal("rehearsal verifier accepted a production profile")
+	}
+}
+
+func TestVerifyRehearsalRetainsSignatureAndFilePinChecks(t *testing.T) {
+	for _, name := range []string{"ownership.pk", "ownership.vk", ManifestSignatureFile} {
+		t.Run(name, func(t *testing.T) {
+			opts, _ := rehearsalBundleFixture(t)
+			if err := os.WriteFile(filepath.Join(opts.KeysDir, name), []byte("changed"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := VerifyRehearsal(opts); err == nil {
+				t.Fatal("changed file was accepted")
+			}
+		})
+	}
+	for name, change := range map[string]func(*artifact.KeyManifest){
+		"key version": func(m *artifact.KeyManifest) { m.KeyVersion = "ownership-destination-v2" },
+		"circuit":     func(m *artifact.KeyManifest) { m.CircuitID = "wrong-circuit" },
+		"curve":       func(m *artifact.KeyManifest) { m.Curve = "wrong-curve" },
+		"backend":     func(m *artifact.KeyManifest) { m.Backend = "wrong-backend" },
+		"signer ID":   func(m *artifact.KeyManifest) { m.SignatureKeyID = "wrong-signer" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			opts, writeSigned := rehearsalBundleFixture(t)
+			writeSigned(change)
+			if _, err := VerifyRehearsal(opts); err == nil {
+				t.Fatal("incorrect signed profile was accepted")
+			}
+		})
+	}
+	t.Run("trust anchor", func(t *testing.T) {
+		opts, _ := rehearsalBundleFixture(t)
+		opts.PublicKeyHex = ""
+		if _, err := VerifyRehearsal(opts); err == nil {
+			t.Fatal("missing trust anchor was accepted")
+		}
+	})
 }

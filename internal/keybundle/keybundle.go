@@ -16,7 +16,9 @@ import (
 	"strings"
 
 	"proof-tool/internal/artifact"
+	"proof-tool/internal/circuit/rehearsal"
 	"proof-tool/internal/keyprofile"
+	"proof-tool/internal/prover"
 	"proof-tool/internal/strictjson"
 )
 
@@ -43,6 +45,21 @@ type VerifyOptions struct {
 // Verify checks the supported circuit profile, native PK/VK file pins,
 // signature-key identity, and Ed25519 signature over the exact manifest bytes.
 func Verify(opts VerifyOptions) (*artifact.KeyManifest, error) {
+	return verify(opts, false)
+}
+
+// VerifyRehearsal verifies the exact tiny rehearsal profile, retaining all
+// signature and native-file pin checks. Only the ceremony verifier should call
+// it, after authenticating a rehearsal-mode definition. Production callers use
+// Verify, which continues to reject this key version even if its signature is valid.
+func VerifyRehearsal(opts VerifyOptions) (*artifact.KeyManifest, error) {
+	if opts.KeyVersion != rehearsal.KeyVersion {
+		return nil, errors.New("explicit tiny rehearsal key version is required")
+	}
+	return verify(opts, true)
+}
+
+func verify(opts VerifyOptions, tinyRehearsal bool) (*artifact.KeyManifest, error) {
 	if strings.TrimSpace(opts.PublicKeyHex) == "" {
 		return nil, errors.New("trusted manifest public key is required")
 	}
@@ -69,11 +86,16 @@ func Verify(opts VerifyOptions) (*artifact.KeyManifest, error) {
 	if strings.TrimSpace(keyVersion) == "" {
 		keyVersion = signedManifest.KeyVersion
 	}
-	profile, err := keyprofile.ForKeyVersion(keyVersion)
-	if err != nil {
-		return nil, err
+	var status prover.BundleStatus
+	if tinyRehearsal {
+		status = prover.InspectRehearsalBundle(opts.KeysDir, opts.RequireProvingKey)
+	} else {
+		profile, err := keyprofile.ForKeyVersion(keyVersion)
+		if err != nil {
+			return nil, err
+		}
+		status = profile.Inspect(opts.KeysDir, opts.RequireProvingKey)
 	}
-	status := profile.Inspect(opts.KeysDir, opts.RequireProvingKey)
 	if !status.Ready {
 		return nil, fmt.Errorf("key bundle is not ready: %s", status.Error)
 	}
