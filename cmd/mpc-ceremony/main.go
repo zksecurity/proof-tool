@@ -254,7 +254,7 @@ command:
 	topLevel := map[string]struct{}{
 		"audit": {}, "decision": {}, "finalize": {}, "help": {}, "init": {},
 		"inspect": {}, "ops": {}, "phase1": {}, "phase2": {}, "rehearsal": {},
-		"release": {},
+		"release": {}, "replay": {},
 	}
 	if _, ok := topLevel[args[index]]; !ok {
 		return safe
