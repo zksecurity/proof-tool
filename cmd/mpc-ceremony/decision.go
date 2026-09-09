@@ -118,6 +118,7 @@ func decisionCommandResult(
 		Decision:                   string(decision.Decision),
 		DecisionID:                 decision.DecisionID,
 		ReleaseID:                  decision.Release.ReleaseID,
+		ReleaseManifestSHA256:      decision.Release.Manifest.Artifact.Digest.SHA256,
 		CandidateID:                decision.Release.CandidateID,
 		SourceCommit:               decision.SourceRelease.SourceCommit,
 		SourceSignedTag:            decision.SourceRelease.SignedTag,

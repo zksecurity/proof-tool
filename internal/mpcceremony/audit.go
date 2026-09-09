@@ -88,9 +88,10 @@ type VerifyReleaseOptions struct {
 }
 
 type VerifyReleaseResult struct {
-	Manifest   *artifact.KeyManifest
-	Transcript FinalTranscript
-	Candidate  CandidateMetadata
+	ManifestSHA256 string
+	Manifest       *artifact.KeyManifest
+	Transcript     FinalTranscript
+	Candidate      CandidateMetadata
 }
 
 // Audit independently replays both phases from explicit immutable paths,
@@ -681,7 +682,11 @@ func VerifyRelease(options VerifyReleaseOptions) (*VerifyReleaseResult, error) {
 	); err != nil {
 		return nil, err
 	}
-	return &VerifyReleaseResult{Manifest: manifest, Transcript: transcript, Candidate: candidate}, nil
+	manifestRef, err := artifactRefForFile(keybundle.ManifestFile, filepath.Join(options.KeysDir, keybundle.ManifestFile))
+	if err != nil {
+		return nil, err
+	}
+	return &VerifyReleaseResult{Manifest: manifest, Transcript: transcript, Candidate: candidate, ManifestSHA256: manifestRef.Digest.SHA256}, nil
 }
 
 func verifyCandidate(

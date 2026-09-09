@@ -708,8 +708,9 @@ func executeReleaseVerify(options ReleaseVerifyOptions) (CommandResult, error) {
 		return CommandResult{}, err
 	}
 	return CommandResult{
-		CeremonyID: result.Transcript.CeremonyID,
-		Summary:    "verified the release signature, bundled audits, native keys, Cardano export, and ceremony coherence",
+		CeremonyID:            result.Transcript.CeremonyID,
+		ReleaseManifestSHA256: result.ManifestSHA256,
+		Summary:               "verified the release signature, bundled audits, native keys, Cardano export, and ceremony coherence",
 		Outputs: map[string]string{
 			"keys_dir": options.KeysDir,
 		},

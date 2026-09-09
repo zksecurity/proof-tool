@@ -418,6 +418,7 @@ type ReplayOptions struct {
 }
 
 type CommandResult struct {
+	ReleaseManifestSHA256      string                 `json:"release_manifest_sha256,omitempty"`
 	Schema                     string                 `json:"schema"`
 	OK                         bool                   `json:"ok"`
 	Command                    Command                `json:"command"`
