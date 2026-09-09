@@ -78,7 +78,7 @@ func executeOpsPrepareBundle(o OpsPrepareBundleOptions) (CommandResult, error) {
 
 // Only this export may reuse an evidence directory. Other signing exports keep
 // their fresh-directory contract. Root-relative operations prevent path escape.
-func writeEvidenceBundleExport(evidenceRoot, outDir string, canonical, request []byte) (string, string, error) {
+func writeEvidenceBundleExport(evidenceRoot, outDir string, canonical, request []byte) (bundlePath, requestPath string, err error) {
 	rootAbs, err := filepath.Abs(evidenceRoot)
 	if err != nil {
 		return "", "", err
@@ -94,7 +94,7 @@ func writeEvidenceBundleExport(evidenceRoot, outDir string, canonical, request [
 	if err != nil {
 		return "", "", err
 	}
-	defer root.Close()
+	defer func() { err = errors.Join(err, root.Close()) }()
 	if err := root.Mkdir("operational", 0700); err != nil && !os.IsExist(err) {
 		return "", "", err
 	}
@@ -106,7 +106,7 @@ func writeEvidenceBundleExport(evidenceRoot, outDir string, canonical, request [
 	if err != nil {
 		return "", "", err
 	}
-	defer dir.Close()
+	defer func() { err = errors.Join(err, dir.Close()) }()
 	for _, name := range []string{"evidence-bundle.json", "evidence-bundle.sig", "signing-request.json"} {
 		if _, err := dir.Lstat(name); !os.IsNotExist(err) {
 			return "", "", fmt.Errorf("bundle output %s already exists or cannot be inspected; preserve and inspect it before retrying", name)
