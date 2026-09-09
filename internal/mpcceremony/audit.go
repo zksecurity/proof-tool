@@ -135,27 +135,7 @@ func Audit(options AuditOptions) (*AuditResult, error) {
 	if !options.AuditedAt.After(candidateTime) {
 		return nil, errors.New("audited_at must strictly postdate candidate finalization")
 	}
-	phase2Seal, err := loadCandidatePhase2Seal(replay.definition, candidate, options.CandidateDir)
-	if err != nil {
-		return nil, err
-	}
-	if err := ValidateSeal(replay.phase2Close, replay.phase2Beacon, phase2Seal); err != nil {
-		return nil, fmt.Errorf("candidate phase2 seal: %w", err)
-	}
-	replay.phase2Seal = phase2Seal
-	replayed, err := replayAll(options.Circuit, replay, options.Replay)
-	if err != nil {
-		return nil, err
-	}
-	if err := compareCandidateToReplay(
-		options.Circuit,
-		replay,
-		replayed.pk,
-		replayed.vk,
-		candidate,
-		options.CandidateDir,
-		options.AuditedAt,
-	); err != nil {
+	if err := verifyCandidateReplay(options.Circuit, &replay, options.Replay, candidate, options.CandidateDir); err != nil {
 		return nil, err
 	}
 	replayRoot, err := replayRootSHA256(candidate)
@@ -195,6 +175,49 @@ func Audit(options AuditOptions) (*AuditResult, error) {
 		return nil, err
 	}
 	return &AuditResult{Record: record, RecordPath: options.OutPath, SignaturePath: options.SignatureOutPath}, nil
+}
+
+// ReplayCandidate verifies the complete candidate without an enrolled identity,
+// a private key, or writing an audit assertion. The supplied circuit must be
+// independently compiled by the trusted caller, as with Audit.
+func ReplayCandidate(paths ReplayPaths, circuit *CompiledCircuit, candidateDir string) (string, error) {
+	if circuit == nil || circuit.R1CS == nil {
+		return "", errors.New("independently compiled circuit is required")
+	}
+	replay, err := loadReplay(paths)
+	if err != nil {
+		return "", err
+	}
+	if err := VerifyRunningSoftwareForMode(replay.definition.Software, replay.definition.Mode); err != nil {
+		return "", err
+	}
+	if err := ValidateCircuitBinding(circuit, replay.definition.Circuit); err != nil {
+		return "", err
+	}
+	candidate, _, err := verifyCandidate(replay.definition, replay.definitionRef, candidateDir)
+	if err != nil {
+		return "", err
+	}
+	if err := verifyCandidateReplay(circuit, &replay, paths, candidate, candidateDir); err != nil {
+		return "", err
+	}
+	return replay.definition.CeremonyID, nil
+}
+
+func verifyCandidateReplay(circuit *CompiledCircuit, replay *loadedReplay, paths ReplayPaths, candidate CandidateMetadata, dir string) error {
+	phase2Seal, err := loadCandidatePhase2Seal(replay.definition, candidate, dir)
+	if err != nil {
+		return err
+	}
+	if err := ValidateSeal(replay.phase2Close, replay.phase2Beacon, phase2Seal); err != nil {
+		return fmt.Errorf("candidate phase2 seal: %w", err)
+	}
+	replay.phase2Seal = phase2Seal
+	replayed, err := replayAll(circuit, *replay, paths)
+	if err != nil {
+		return err
+	}
+	return compareCandidateToReplay(circuit, *replay, replayed.pk, replayed.vk, candidate, dir, time.Now().UTC())
 }
 
 func compareCandidateToReplay(

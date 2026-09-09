@@ -69,6 +69,8 @@ func (workflowExecutor) Execute(ctx context.Context, invocation Invocation) (Com
 		return executePrepareFinalization(invocation.Options.(PrepareFinalizationOptions))
 	case CommandFinalizeComplete:
 		return executeFinalize(invocation.Options.(FinalizeOptions))
+	case CommandReplay:
+		return executeReplay(invocation.Options.(AuditOptions))
 	case CommandAudit:
 		return executeAudit(invocation.Options.(AuditOptions))
 	case CommandReleaseSign:
@@ -562,6 +564,26 @@ func executePrepareFinalization(options PrepareFinalizationOptions) (CommandResu
 			"checksums":             result.ChecksumsPath,
 		},
 	}, nil
+}
+
+func executeReplay(options AuditOptions) (CommandResult, error) {
+	trust := trustPaths(options.CeremonyPath, options.CeremonySignaturePath, options.CoordinatorPublicKeyFile)
+	if err := verifyRunningTrust(trust); err != nil {
+		return CommandResult{}, err
+	}
+	paths, err := replayPaths(trust, options.Replay)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	circuit, err := compileCircuitForCeremony(trust)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	id, err := mpcceremony.ReplayCandidate(paths, circuit, options.CandidateBundleDir)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	return CommandResult{CeremonyID: id, Summary: "independently replayed both phases and reproduced final parameters; no audit signed"}, nil
 }
 
 func executeAudit(options AuditOptions) (CommandResult, error) {

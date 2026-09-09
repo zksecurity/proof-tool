@@ -697,6 +697,25 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		return fmt.Errorf("complete finalization: %w", err)
 	}
 
+	if id, err := mpcceremony.ReplayCandidate(replay, circuit, candidateDir); err != nil || id != initialized.Definition.CeremonyID {
+		return fmt.Errorf("unsigned public replay failed: %s: %v", id, err)
+	}
+
+	candidateSignature := filepath.Join(candidateDir, mpcceremony.CandidateSignatureFile)
+	originalSignature, err := os.ReadFile(candidateSignature)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(candidateSignature, []byte("tampered"), 0600); err != nil {
+		return err
+	}
+	if _, err := mpcceremony.ReplayCandidate(replay, circuit, candidateDir); err == nil {
+		return errors.New("unsigned replay accepted tampered candidate signature")
+	}
+	if err := os.WriteFile(candidateSignature, originalSignature, 0600); err != nil {
+		return err
+	}
+
 	auditDir := filepath.Join(outputRoot, "audits")
 	if err := os.Mkdir(auditDir, 0o700); err != nil {
 		return err

@@ -36,6 +36,7 @@ const (
 	CommandRehearsalEvidence              Command = "finalize rehearsal-evidence"
 	CommandFinalizeComplete               Command = "finalize complete"
 	CommandAudit                          Command = "audit"
+	CommandReplay                         Command = "replay"
 	CommandReleaseSign                    Command = "release sign"
 	CommandReleaseVerify                  Command = "release verify"
 	CommandOpsPrepareMirrorReceipt        Command = "ops prepare-mirror-receipt"

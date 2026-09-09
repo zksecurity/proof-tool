@@ -84,6 +84,10 @@ func parseInvocation(args []string) (Invocation, error) {
 		return parsePhase2(invocation, rest[1:])
 	case "finalize":
 		return parseFinalize(invocation, rest[1:])
+	case "replay":
+		options, err := parseReplay(rest[1:])
+		invocation.Command, invocation.Options = CommandReplay, options
+		return invocation, wrapCommandError(err, "replay")
 	case "audit":
 		options, err := parseAudit(rest[1:])
 		invocation.Command, invocation.Options = CommandAudit, options
@@ -1050,6 +1054,21 @@ func parseCompleteFinalization(args []string) (FinalizeOptions, error) {
 		value("--finalized-at", options.FinalizedAt),
 		pathValue("--out-dir", options.OutDir),
 	); err != nil {
+		return options, err
+	}
+	return options, validateReplayOptions(options.Replay)
+}
+
+func parseReplay(args []string) (AuditOptions, error) {
+	var options AuditOptions
+	fs := commandFlagSet("replay")
+	addCeremonyTrustFlags(fs, &options.CeremonyPath, &options.CeremonySignaturePath, &options.CoordinatorPublicKeyFile)
+	addReplayFlags(fs, &options.Replay)
+	fs.StringVar(&options.CandidateBundleDir, "candidate-bundle", "", "signed candidate or released key directory")
+	if err := parseFlags(fs, args); err != nil {
+		return options, err
+	}
+	if err := requireValues(pathValue("--ceremony", options.CeremonyPath), pathValue("--ceremony-signature", options.CeremonySignaturePath), pathValue("--coordinator-public-key-file", options.CoordinatorPublicKeyFile), pathValue("--candidate-bundle", options.CandidateBundleDir)); err != nil {
 		return options, err
 	}
 	return options, validateReplayOptions(options.Replay)

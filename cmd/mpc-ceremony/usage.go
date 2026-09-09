@@ -49,6 +49,7 @@ Commands:
   finalize prepare     Replay both phases and publish preliminary final keys
   finalize complete    Verify external public evidence and create candidate
   finalize rehearsal-evidence  Generate a real proof for the tiny rehearsal circuit
+  replay               Publicly replay both phases without signing
   audit                Independently replay and audit ceremony artifacts
   release sign         Sign an audited release manifest
   release verify       Verify release and ceremony coherence
@@ -385,6 +386,16 @@ Replays both phases again, verifies the canonical external public proof
 against the replayed final VK, and creates the coordinator-signed but
 unsigned-for-release candidate. It accepts only the public evidence artifact.
 Release signing remains a separate post-audit step.
+`,
+	"replay": `Usage:
+  mpc-ceremony replay --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY [REPLAY EVIDENCE FLAGS] \
+    --candidate-bundle DIR
+` + replayFlagsHelp + `
+Independently compiles the signed circuit and replays both phases, checking
+randomness, final native keys, Cardano export and public proof evidence.
+Requires no private key and writes no signed audit. Release signatures and
+production approval are checked separately with release verify and decision verify.
 `,
 	"audit": `Usage:
   mpc-ceremony audit --ceremony FILE \
