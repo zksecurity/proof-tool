@@ -68,11 +68,11 @@ func executeOpsPrepareBundle(o OpsPrepareBundleOptions) (CommandResult, error) {
 	if err != nil {
 		return CommandResult{}, err
 	}
-	canonical, path, err := writeOperationalSigningExport(o.OutDir, raw, requestBytes)
+	_, path, err := writeOperationalSigningExport(o.OutDir, raw, requestBytes)
 	if err != nil {
 		return CommandResult{}, err
 	}
-	canonical = filepath.Join(o.OutDir, "evidence-bundle.json")
+	canonical := filepath.Join(o.OutDir, "evidence-bundle.json")
 	if err := writeFreshOperationalFile(canonical, raw, 0600); err != nil {
 		return CommandResult{}, err
 	}
