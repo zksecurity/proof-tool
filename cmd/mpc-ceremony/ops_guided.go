@@ -26,6 +26,7 @@ type OpsSignOptions struct {
 	OpsExportSigningOptions
 	SigningKey, OutPath string
 	ReviewedSHA256      string
+	EvidenceRoot        string
 	Reviewed            bool
 }
 
@@ -56,6 +57,7 @@ func parseOpsSign(args []string) (OpsSignOptions, error) {
 	f.StringVar(&o.OutPath, "out", "", "fresh detached signature JSON")
 	f.BoolVar(&o.Reviewed, "reviewed", false, "owner reviewed exact record and confirms its claims")
 	f.StringVar(&o.ReviewedSHA256, "reviewed-sha256", "", "optional SHA-256 of the exact bytes shown during interactive review")
+	f.StringVar(&o.EvidenceRoot, "evidence-root", "", "complete public evidence root, required for bundle signing")
 	if err := parseFlags(f, args); err != nil {
 		return o, err
 	}
@@ -148,6 +150,11 @@ func executeOpsSign(o OpsSignOptions) (CommandResult, error) {
 	}
 	if o.ReviewedSHA256 != "" && o.ReviewedSHA256 != fmt.Sprintf("%x", sha256.Sum256(canonical)) {
 		return CommandResult{}, errors.New("record changed since owner review")
+	}
+	if bundle, ok := record.(*mpcceremony.OperationalEvidenceBundle); ok {
+		if err := verifyBundleDraft(trusted, o.EvidenceRoot, canonical, *bundle); err != nil {
+			return CommandResult{}, fmt.Errorf("bundle evidence must verify before accessing the signing key: %w", err)
+		}
 	}
 	definitionBytes, err := canonicalDefinition(trusted)
 	if err != nil {

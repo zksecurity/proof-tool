@@ -792,7 +792,7 @@ func loadRelayInputs(directory string) ([]relayInput, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(rows) < 4 || len(rows) > 17 ||
+	if len(rows) < 3 || len(rows) > 17 ||
 		!slices.Equal(rows[0], []string{
 			"relay_id",
 			"operator_id",
@@ -800,7 +800,7 @@ func loadRelayInputs(directory string) ([]relayInput, error) {
 			"retrieved_at",
 			"filename",
 		}) {
-		return nil, errors.New("relays.tsv must have the exact header and 3-16 observations")
+		return nil, errors.New("relays.tsv must have the exact header and 2-16 observations")
 	}
 	safeName := regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*\.json$`)
 	safeID := regexp.MustCompile(`^[a-z0-9][a-z0-9._:-]{0,127}$`)

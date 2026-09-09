@@ -440,6 +440,10 @@ func parseOps(invocation Invocation, args []string) (Invocation, error) {
 		options, err := parseCustody(args[1:], args[0] == "prepare-receipt")
 		invocation.Command, invocation.Options = CommandOpsPrepareCustody, options
 		return invocation, wrapCommandError(err, "ops", args[0])
+	case "prepare-bundle":
+		options, err := parseOpsPrepareBundle(args[1:])
+		invocation.Command, invocation.Options = CommandOpsPrepareBundle, options
+		return invocation, wrapCommandError(err, "ops", "prepare-bundle")
 	case "prepare-public-witness-receipt":
 		options, err := parseOpsPreparePublicWitnessReceipt(args[1:])
 		invocation.Command, invocation.Options = CommandOpsPreparePublicWitnessReceipt, options

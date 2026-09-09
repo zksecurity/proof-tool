@@ -231,7 +231,7 @@ func TestVerifyOperationalEvidenceBundleEndToEndAndNegatives(t *testing.T) {
 			t.Fatal("participant self-witness unexpectedly accepted")
 		}
 	})
-	t.Run("less than three relay operators", func(t *testing.T) {
+	t.Run("less than two relay operators", func(t *testing.T) {
 		f := newOperationalBundleFixture(t)
 		pair := f.bundle.Phase1.MultiRelayBeaconEvidence
 		var evidence MultiRelayBeaconEvidence
@@ -242,13 +242,13 @@ func TestVerifyOperationalEvidenceBundleEndToEndAndNegatives(t *testing.T) {
 		if err := UnmarshalCanonical(recordBytes, &evidence); err != nil {
 			t.Fatal(err)
 		}
-		evidence.Observations = evidence.Observations[:2]
+		evidence.Observations = evidence.Observations[:1]
 		rewriteInvalidSignedPair(t, f.root, pair, evidence, f.coordinatorKey, f.definition.Coordinator.KeyID)
 		f.bundle.Phase1.MultiRelayBeaconEvidence = refreshPair(t, f.root, pair)
-		f.bundle.Phase1.RawBeaconResponses = f.bundle.Phase1.RawBeaconResponses[:2]
+		f.bundle.Phase1.RawBeaconResponses = f.bundle.Phase1.RawBeaconResponses[:1]
 		resignBundle(t, &f)
 		if err := verify(f); err == nil {
-			t.Fatal("two-operator relay evidence unexpectedly accepted")
+			t.Fatal("single-operator relay evidence unexpectedly accepted")
 		}
 	})
 	t.Run("reused phase rounds", func(t *testing.T) {
@@ -823,7 +823,9 @@ func buildOperationalPhaseFixture(
 	if err != nil {
 		t.Fatal(err)
 	}
-	operatorIDs := []string{"cloudflare", "drand", "secureweb3"}
+	// Exercise the minimum quorum throughout signed bundle verification.
+	// These are local fixtures, not claims of actual independent retrievals.
+	operatorIDs := []string{"cloudflare", "drand"}
 	rawRefs := make([]ArtifactRef, len(operatorIDs))
 	observations := make([]RelayObservation, len(operatorIDs))
 	rawMap := make(map[string][]byte, len(operatorIDs))

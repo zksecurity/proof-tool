@@ -260,6 +260,30 @@ func VerifyOperationalEvidenceBundle(options VerifyOperationalEvidenceOptions) (
 	); err != nil {
 		return VerifiedOperationalEvidence{}, fmt.Errorf("operational evidence bundle: %w", err)
 	}
+	return verifyOperationalEvidenceContents(options, bundle)
+}
+
+// VerifyOperationalEvidenceDraft checks every existing signed record without
+// claiming that the coordinator has signed the assembled bundle itself.
+func VerifyOperationalEvidenceDraft(options VerifyOperationalEvidenceOptions) error {
+	if err := options.Definition.Validate(); err != nil {
+		return err
+	}
+	if len(options.CoordinatorPublicKey) != ed25519.PublicKeySize {
+		return errors.New("coordinator public key is invalid")
+	}
+	var bundle OperationalEvidenceBundle
+	if err := UnmarshalCanonical(options.BundleBytes, &bundle); err != nil {
+		return err
+	}
+	if err := bundle.Validate(); err != nil {
+		return err
+	}
+	_, err := verifyOperationalEvidenceContents(options, bundle)
+	return err
+}
+
+func verifyOperationalEvidenceContents(options VerifyOperationalEvidenceOptions, bundle OperationalEvidenceBundle) (VerifiedOperationalEvidence, error) {
 	if bundle.CeremonyID != options.Definition.CeremonyID ||
 		bundle.CoordinatorID != options.Definition.Coordinator.ID ||
 		bundle.CoordinatorKeyID != options.Definition.Coordinator.KeyID {

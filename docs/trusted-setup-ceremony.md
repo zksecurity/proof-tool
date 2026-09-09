@@ -88,6 +88,25 @@ constitute production approval; each production ceremony requires an explicit,
 independently reviewed go/no-go record before any ceremony binary or artifact
 is used.
 
+## Beacon relay evidence
+
+Final release requires matching, cryptographically verified responses from at
+least **two distinct relay operators** for each phase's committed drand round.
+Relay IDs and endpoint digests must also differ; multiple hostnames belonging
+to one operator do not count as different operators. Every supplied response
+must verify against the pinned network and exact committed round.
+
+This reduces the operational minimum from three operators to two, trading one
+source of retrieval redundancy for availability during a relay outage. It does
+not change drand's cryptographic threshold, the future-round requirement, or
+the other signed operational-evidence and release checks. Operator identities
+remain authenticated coordinator claims, not proof of organizational independence.
+
+Existing three-operator evidence remains valid. Older binaries still require
+three; use an explicitly reviewed compatible release. Do not edit an existing
+signed ceremony's software allowlist or replace its pinned binary to force an
+in-progress ceremony through a changed verifier policy.
+
 ## Toxic Waste Handling
 
 gnark samples the Groth16 trapdoor in process memory during `groth16.Setup`.
