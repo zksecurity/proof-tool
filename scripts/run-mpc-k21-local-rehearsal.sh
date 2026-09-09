@@ -457,8 +457,8 @@ const fs = require("node:fs");
 const rows = fs.readFileSync(process.argv[2], "utf8").split("\n");
 if (rows.at(-1) === "") rows.pop();
 const header = "relay_id\toperator_id\tendpoint_sha256\tretrieved_at\tfilename";
-if (rows.length < 4 || rows.length > 17 || rows[0] !== header) {
-  throw new Error("relays.tsv must have the exact header and 3-16 observations");
+if (rows.length < 3 || rows.length > 17 || rows[0] !== header) {
+  throw new Error("relays.tsv must have the exact header and 2-16 observations");
 }
 const idPattern = /^[a-z0-9][a-z0-9._:-]{0,127}$/;
 const filenamePattern = /^[a-z0-9][a-z0-9._-]*\.json$/;

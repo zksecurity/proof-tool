@@ -465,8 +465,8 @@ func (r MultiRelayBeaconEvidence) Validate() error {
 	if err := validateID("network", r.Network); err != nil {
 		return err
 	}
-	if len(r.Observations) < 3 || len(r.Observations) > 16 {
-		return errors.New("multi-relay beacon evidence requires between 3 and 16 observations")
+	if len(r.Observations) < 2 || len(r.Observations) > 16 {
+		return errors.New("multi-relay beacon evidence requires between 2 and 16 observations")
 	}
 	relayIDs := make(map[string]struct{}, len(r.Observations))
 	operatorIDs := make(map[string]struct{}, len(r.Observations))

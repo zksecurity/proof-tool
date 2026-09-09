@@ -40,6 +40,7 @@ const (
 	CommandOpsPreparePublicWitnessReceipt Command = "ops prepare-public-witness-receipt"
 	CommandOpsExportSigning               Command = "ops export-signing"
 	CommandOpsPrepareEnrollment           Command = "ops prepare-enrollment"
+	CommandOpsPrepareBundle               Command = "ops prepare-bundle"
 	CommandOpsSign                        Command = "ops sign"
 	CommandOpsImportSig                   Command = "ops import-signature"
 	CommandOpsVerify                      Command = "ops verify"

@@ -58,12 +58,20 @@ mandatory. A tiny release cannot satisfy the production K=21 decision gate.
 
 Guided enrollment and receipt signing requires the commands `ops prepare-enrollment`
 and `ops sign`. The former derives the frozen ceremony/roster bindings; the latter
-accepts only enrollment, public-witness and mirror-receipt records, authenticates
+accepts enrollment, public-witness, mirror-receipt and evidence-bundle records, authenticates
 the definition, and checks the owner key. Enrollment signing also verifies the
 accompanying disclosure. Helpers can bind approval to displayed bytes with
 `--reviewed-sha256`. These are signed owner claims, not proof of independent
 people, publication observations, retained storage or physical erasure. Complete
 operational-bundle verification remains required before release.
+
+`ops prepare-bundle` discovers original public records below an explicit evidence
+root, reports missing/conflicting evidence by phase and turn, and exports an
+unsigned bundle only after full evidence verification. It does not author
+missing custody records or recreate observations. Bundle signing requires
+`--evidence-root` and repeats verification before accessing the coordinator key.
+The signed bundle remains mandatory for release; unsigned preparation is not
+release authorization.
 
 Release proof-tool first, then update the downstream Relay proof-tool pins and
 retest that published pairing. Local development-image tests are not release

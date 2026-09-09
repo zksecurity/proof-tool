@@ -432,6 +432,10 @@ func parseOps(invocation Invocation, args []string) (Invocation, error) {
 		return Invocation{}, &helpRequest{topic: append([]string{"ops"}, args[1:]...)}
 	}
 	switch args[0] {
+	case "prepare-bundle":
+		options, err := parseOpsPrepareBundle(args[1:])
+		invocation.Command, invocation.Options = CommandOpsPrepareBundle, options
+		return invocation, wrapCommandError(err, "ops", "prepare-bundle")
 	case "prepare-public-witness-receipt":
 		options, err := parseOpsPreparePublicWitnessReceipt(args[1:])
 		invocation.Command, invocation.Options = CommandOpsPreparePublicWitnessReceipt, options

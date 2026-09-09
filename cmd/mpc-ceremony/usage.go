@@ -515,12 +515,29 @@ No private key is read. Share the entire public export with the disclosure.
     --ceremony FILE --ceremony-signature FILE --coordinator-public-key-file KEY \
     --signing-key OWN_KEY_FILE --reviewed [--reviewed-sha256 HEX] --out FRESH_SIGNATURE_JSON
 
-Offline owner signing for enrollment, public-witness or mirror-receipt only.
+Owner signing for enrollment, public-witness, mirror-receipt or evidence-bundle.
+Bundle signing additionally requires --evidence-root DIR and verifies every
+referenced operational record before reading the coordinator's signing key.
 Authenticates the ceremony, canonical record and owner key. Review the exact
 record and associated disclosure/observations before --reviewed. This signs
 your claim; it does not independently observe publication or prove independence.
 Enrollment signing requires its matching disclosure tree beside the record.
 The optional reviewed hash binds signing to bytes previously shown by a helper.
+`,
+	"ops prepare-bundle": `Usage:
+  mpc-ceremony ops prepare-bundle --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --evidence-root PUBLIC_DIR --out-dir FRESH_DIR \
+    [--witness-quorum 2]
+
+Discovers bounded public JSON and signatures; never point it at private keys or
+credentials. Reports missing or conflicting evidence by phase and turn. Keep
+original relative paths when collecting public records from their owners.
+Set witness-quorum to your agreed minimum per phase (2-32), not a lower value
+chosen to fit the available receipts.
+If complete, independently verifies all referenced evidence and exports an
+UNSIGNED canonical bundle and signing request. It does not invent records,
+backdate observations, or sign for other roles. Release still requires the
+coordinator's bundle signature and successful signed-bundle verification.
 `,
 	"ops export-signing": `Usage:
   mpc-ceremony ops export-signing --record-type TYPE --record FILE \
@@ -550,6 +567,6 @@ Authenticates canonical bytes, immutable ceremony fields, enrolled signer, and
 detached signature. Receipt verification requires the exact related handoff.
 Evidence-bundle verification requires the complete local evidence root and
 validates both authenticated chains, every custody transfer, independent
-mirrors and public witnesses, and three distinct beacon relay operators.
+mirrors and public witnesses, and at least two distinct beacon relay operators.
 `,
 }

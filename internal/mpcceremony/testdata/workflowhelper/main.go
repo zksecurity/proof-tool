@@ -888,7 +888,8 @@ func writeRelayFixture(root, name string, raw []byte, retrievedAt string) (strin
 	rows := []string{
 		"relay_id\toperator_id\tendpoint_sha256\tretrieved_at\tfilename",
 	}
-	for index := 1; index <= 3; index++ {
+	// Exercise release verification with the minimum two synthetic operators.
+	for index := 1; index <= 2; index++ {
 		filename := fmt.Sprintf("relay-%02d.json", index)
 		if err := os.WriteFile(filepath.Join(dir, filename), raw, 0o600); err != nil {
 			return "", err

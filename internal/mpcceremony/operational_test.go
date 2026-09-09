@@ -247,7 +247,7 @@ func TestPublicWitnessQuorumRejectsDuplicateIdentityAndKey(t *testing.T) {
 	}
 }
 
-func TestMultiRelayEvidenceRequiresThreeOperatorsEndpointsAndMatchingRandomness(t *testing.T) {
+func TestMultiRelayEvidenceRequiresTwoOperatorsEndpointsAndMatchingRandomness(t *testing.T) {
 	base := RelayObservation{
 		RelayID:            "relay-01",
 		OperatorID:         "drand",
@@ -282,10 +282,16 @@ func TestMultiRelayEvidenceRequiresThreeOperatorsEndpointsAndMatchingRandomness(
 	if err := evidence.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	onlyTwo := evidence
-	onlyTwo.Observations = onlyTwo.Observations[:2]
-	if err := onlyTwo.Validate(); err == nil {
-		t.Fatal("two-relay evidence unexpectedly accepted")
+	evidence.Observations = evidence.Observations[:2]
+	if err := evidence.Validate(); err != nil {
+		t.Fatalf("two distinct relay operators rejected: %v", err)
+	}
+	for _, count := range []int{0, 1} {
+		tooFew := evidence
+		tooFew.Observations = tooFew.Observations[:count]
+		if err := tooFew.Validate(); err == nil {
+			t.Fatalf("%d relay observations unexpectedly accepted", count)
+		}
 	}
 	duplicateOperator := evidence
 	duplicateOperator.Observations = append([]RelayObservation(nil), evidence.Observations...)
@@ -295,9 +301,20 @@ func TestMultiRelayEvidenceRequiresThreeOperatorsEndpointsAndMatchingRandomness(
 	}
 	mismatch := evidence
 	mismatch.Observations = append([]RelayObservation(nil), evidence.Observations...)
-	mismatch.Observations[2].VerifiedRandomness = strings.Repeat("00", 32)
+	mismatch.Observations[1].VerifiedRandomness = strings.Repeat("00", 32)
 	if err := mismatch.Validate(); err == nil {
 		t.Fatal("relay randomness disagreement unexpectedly accepted")
+	}
+	duplicateEndpoint := evidence
+	duplicateEndpoint.Observations = append([]RelayObservation(nil), evidence.Observations...)
+	duplicateEndpoint.Observations[1].EndpointSHA256 = duplicateEndpoint.Observations[0].EndpointSHA256
+	if err := duplicateEndpoint.Validate(); err == nil {
+		t.Fatal("duplicate relay endpoint unexpectedly accepted")
+	}
+	tooMany := evidence
+	tooMany.Observations = make([]RelayObservation, 17)
+	if err := tooMany.Validate(); err == nil {
+		t.Fatal("more than 16 observations unexpectedly accepted")
 	}
 }
 

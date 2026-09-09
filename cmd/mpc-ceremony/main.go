@@ -275,7 +275,7 @@ command:
 		},
 		"ops": {
 			"export-signing": {}, "help": {}, "import-signature": {},
-			"prepare-mirror-receipt": {}, "prepare-public-witness-receipt": {}, "verify": {},
+			"prepare-mirror-receipt": {}, "prepare-public-witness-receipt": {}, "prepare-bundle": {}, "verify": {},
 		},
 		"release":   {"help": {}, "sign": {}, "verify": {}},
 		"rehearsal": {"help": {}, "init": {}},
