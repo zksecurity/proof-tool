@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -21,7 +22,7 @@ func parseOpsPrepareBundle(args []string) (OpsPrepareBundleOptions, error) {
 	f := commandFlagSet("ops prepare-bundle")
 	addCeremonyTrustFlags(f, &o.CeremonyPath, &o.CeremonySignaturePath, &o.CoordinatorPublicKeyFile)
 	f.StringVar(&o.EvidenceRoot, "evidence-root", "", "public-only evidence directory; never a keys or credentials directory")
-	f.StringVar(&o.OutDir, "out-dir", "", "fresh unsigned bundle export directory")
+	f.StringVar(&o.OutDir, "out-dir", "", "evidence-root/operational; existing evidence is preserved, bundle outputs must be fresh")
 	f.UintVar(&o.WitnessQuorum, "witness-quorum", 2, "agreed minimum public witnesses per phase (2-32)")
 	if err := parseFlags(f, args); err != nil {
 		return o, err
@@ -68,15 +69,76 @@ func executeOpsPrepareBundle(o OpsPrepareBundleOptions) (CommandResult, error) {
 	if err != nil {
 		return CommandResult{}, err
 	}
-	_, path, err := writeOperationalSigningExport(o.OutDir, raw, requestBytes)
+	canonical, path, err := writeEvidenceBundleExport(o.EvidenceRoot, o.OutDir, raw, requestBytes)
 	if err != nil {
 		return CommandResult{}, err
 	}
-	canonical := filepath.Join(o.OutDir, "evidence-bundle.json")
-	if err := writeFreshOperationalFile(canonical, raw, 0600); err != nil {
-		return CommandResult{}, err
-	}
 	return CommandResult{CeremonyID: trusted.Definition.CeremonyID, Summary: "assembled and verified the referenced operational evidence; the exported bundle is UNSIGNED and cannot authorize release", Outputs: map[string]string{"canonical": canonical, "signing_request": path}}, nil
+}
+
+// Only this export may reuse an evidence directory. Other signing exports keep
+// their fresh-directory contract. Root-relative operations prevent path escape.
+func writeEvidenceBundleExport(evidenceRoot, outDir string, canonical, request []byte) (string, string, error) {
+	rootAbs, err := filepath.Abs(evidenceRoot)
+	if err != nil {
+		return "", "", err
+	}
+	outAbs, err := filepath.Abs(outDir)
+	if err != nil || outAbs != filepath.Join(rootAbs, "operational") {
+		return "", "", errors.New("bundle output must be evidence-root/operational, as required by release verification")
+	}
+	if len(canonical) == 0 || len(request) == 0 {
+		return "", "", errors.New("refuse empty bundle export")
+	}
+	root, err := os.OpenRoot(rootAbs)
+	if err != nil {
+		return "", "", err
+	}
+	defer root.Close()
+	if err := root.Mkdir("operational", 0700); err != nil && !os.IsExist(err) {
+		return "", "", err
+	}
+	info, err := root.Lstat("operational")
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return "", "", errors.New("operational output must be a real directory, not a symlink")
+	}
+	dir, err := root.OpenRoot("operational")
+	if err != nil {
+		return "", "", err
+	}
+	defer dir.Close()
+	for _, name := range []string{"evidence-bundle.json", "evidence-bundle.sig", "signing-request.json"} {
+		if _, err := dir.Lstat(name); !os.IsNotExist(err) {
+			return "", "", fmt.Errorf("bundle output %s already exists or cannot be inspected; preserve and inspect it before retrying", name)
+		}
+	}
+	// Reserve the request first with O_EXCL; concurrent preparations cannot both
+	// proceed. On interruption retain partial outputs for explicit inspection.
+	for _, output := range []struct {
+		name string
+		data []byte
+	}{{"signing-request.json", request}, {"evidence-bundle.json", canonical}} {
+		file, err := dir.OpenFile(output.name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if err != nil {
+			return "", "", err
+		}
+		_, writeErr := file.Write(output.data)
+		syncErr := file.Sync()
+		closeErr := file.Close()
+		if err := errors.Join(writeErr, syncErr, closeErr); err != nil {
+			return "", "", fmt.Errorf("partial bundle export retained; inspect before retry: %w", err)
+		}
+	}
+	directory, err := dir.Open(".")
+	if err != nil {
+		return "", "", err
+	}
+	err = directory.Sync()
+	closeErr := directory.Close()
+	if err = errors.Join(err, closeErr); err != nil {
+		return "", "", err
+	}
+	return filepath.Join(outDir, "evidence-bundle.json"), filepath.Join(outDir, "signing-request.json"), nil
 }
 
 func verifyBundleDraft(trusted *mpcceremony.TrustedCeremony, root string, raw []byte, bundle mpcceremony.OperationalEvidenceBundle) error {

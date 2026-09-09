@@ -526,12 +526,15 @@ The optional reviewed hash binds signing to bytes previously shown by a helper.
 `,
 	"ops prepare-bundle": `Usage:
   mpc-ceremony ops prepare-bundle --ceremony FILE --ceremony-signature FILE \
-    --coordinator-public-key-file KEY --evidence-root PUBLIC_DIR --out-dir FRESH_DIR \
+    --coordinator-public-key-file KEY --evidence-root PUBLIC_DIR --out-dir PUBLIC_DIR/operational \
     [--witness-quorum 2]
 
 Discovers bounded public JSON and signatures; never point it at private keys or
 credentials. Reports missing or conflicting evidence by phase and turn. Keep
 original relative paths when collecting public records from their owners.
+The operational directory may exist; existing evidence is preserved. Bundle,
+signature and signing-request files must not already exist. Interrupted output
+is retained for inspection, never automatically overwritten.
 Set witness-quorum to your agreed minimum per phase (2-32), not a lower value
 chosen to fit the available receipts.
 If complete, independently verifies all referenced evidence and exports an

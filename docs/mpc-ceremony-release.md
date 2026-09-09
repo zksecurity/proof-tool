@@ -73,6 +73,13 @@ missing custody records or recreate observations. Bundle signing requires
 The signed bundle remains mandatory for release; unsigned preparation is not
 release authorization.
 
+Use `--out-dir EVIDENCE_ROOT/operational`. This directory may already contain
+collected evidence; preparation preserves it and adds only `evidence-bundle.json`
+and `signing-request.json`. Existing bundle, signature, or request files block
+preparation rather than being overwritten. Inspect retained outputs after an
+interruption before retrying. Release verification requires this exact bundle
+location; other signing exports still require fresh directories.
+
 Release proof-tool first, then update the downstream Relay proof-tool pins and
 retest that published pairing. Local development-image tests are not release
 provenance and must not be presented as verification of published assets.
