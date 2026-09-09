@@ -61,6 +61,10 @@ func (workflowExecutor) Execute(ctx context.Context, invocation Invocation) (Com
 		return executeClose(mpcceremony.Phase2, invocation.Options.(CloseOptions))
 	case CommandPhase2Beacon:
 		return executeBeacon(mpcceremony.Phase2, invocation.Options.(BeaconOptions))
+	case CommandRehearsalEvidence:
+		return executeRehearsalEvidence(invocation.Options.(RehearsalEvidenceOptions))
+	case CommandOpsPrepareCustody:
+		return executeCustody(invocation.Options.(CustodyOptions))
 	case CommandFinalizePrepare:
 		return executePrepareFinalization(invocation.Options.(PrepareFinalizationOptions))
 	case CommandFinalizeComplete:

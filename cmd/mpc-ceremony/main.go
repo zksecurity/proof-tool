@@ -146,6 +146,7 @@ const redactedCLIValue = "<redacted>"
 // messages remain useful, but values supplied by the caller are never echoed.
 func redactCLIError(message string, args []string) string {
 	safeCommandArguments := identifyCLICommandArguments(args)
+	markOperationalGrammar(args, safeCommandArguments)
 	candidates := make(map[string]struct{})
 	for index, arg := range args {
 		if _, safe := safeCommandArguments[index]; safe {
@@ -274,9 +275,10 @@ command:
 			"chain": {}, "definition": {}, "enrollment": {}, "help": {}, "participant": {},
 		},
 		"ops": {
-			"export-signing": {}, "help": {}, "import-signature": {},
+			"export-signing": {}, "help": {}, "import-signature": {}, "sign": {}, "prepare-enrollment": {}, "prepare-handoff": {}, "prepare-receipt": {},
 			"prepare-mirror-receipt": {}, "prepare-public-witness-receipt": {}, "verify": {},
 		},
+		"finalize":  {"prepare": {}, "complete": {}, "rehearsal-evidence": {}},
 		"release":   {"help": {}, "sign": {}, "verify": {}},
 		"rehearsal": {"help": {}, "init": {}},
 	}
@@ -337,4 +339,20 @@ func writeParseError(message string, args []string, stdout, stderr io.Writer) in
 		return 6
 	}
 	return 2
+}
+
+// Only fixed operational grammar is public. Unknown values and all paths remain
+// redacted, including values following a recognized flag.
+func markOperationalGrammar(args []string, safe map[int]struct{}) {
+	for index, arg := range args {
+		if arg == "--related-record" || arg == "--record-type" || arg == "--reviewed-sha256" || arg == "--evidence-root" {
+			safe[index] = struct{}{}
+		}
+		if index > 0 && args[index-1] == "--record-type" {
+			switch arg {
+			case "handoff", "receipt", "enrollment", "public-witness", "mirror-receipt", "beacon-evidence", "evidence-bundle":
+				safe[index] = struct{}{}
+			}
+		}
+	}
 }

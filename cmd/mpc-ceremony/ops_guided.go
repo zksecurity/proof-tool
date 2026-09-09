@@ -133,8 +133,14 @@ func executeOpsSign(o OpsSignOptions) (CommandResult, error) {
 		return CommandResult{}, errors.New("owner must review the exact record and explicitly supply --reviewed")
 	}
 	kind := mpcceremony.OperationalRecordType(o.RecordType)
-	if kind != mpcceremony.RecordEnrollment && kind != mpcceremony.RecordPublicWitness && kind != mpcceremony.RecordMirrorReceipt {
-		return CommandResult{}, errors.New("ops sign is restricted to enrollment, public-witness and mirror-receipt records")
+	switch kind {
+	case mpcceremony.RecordEnrollment, mpcceremony.RecordPublicWitness, mpcceremony.RecordMirrorReceipt:
+	case mpcceremony.RecordHandoff, mpcceremony.RecordReceipt, mpcceremony.RecordBeaconEvidence, mpcceremony.RecordEvidenceBundle:
+		if len(o.ReviewedSHA256) != 64 {
+			return CommandResult{}, errors.New("custody and aggregate evidence signing requires --reviewed-sha256 of the exact reviewed canonical bytes")
+		}
+	default:
+		return CommandResult{}, errors.New("unsupported operational signing record type")
 	}
 	canonical, record, trusted, err := loadBoundOperationalRecord(kind, o.RecordPath, o.CeremonyPath, o.CeremonySignaturePath, o.CoordinatorPublicKeyFile)
 	if err != nil {

@@ -75,3 +75,23 @@ func TestWriteDiagnosticRedactsByConstruction(t *testing.T) {
 		t.Fatalf("writeDiagnostic did not mark the redaction: %q", out.String())
 	}
 }
+
+func TestOperationalGrammarStaysReadableWithoutExposingPaths(t *testing.T) {
+	args := []string{"ops", "sign", "--record-type", "receipt", "--related-record", "/private/handoff.json", "--signing-key", "/private/signing.hex"}
+	message := "ops sign receipt requires --related-record; open /private/handoff.json /private/signing.hex"
+	actual := redactCLIError(message, args)
+	for _, text := range []string{"ops sign receipt", "--related-record"} {
+		if !strings.Contains(actual, text) {
+			t.Fatalf("lost public grammar: %s", actual)
+		}
+	}
+	for _, text := range []string{"/private/handoff.json", "/private/signing.hex"} {
+		if strings.Contains(actual, text) {
+			t.Fatal("private path was not redacted")
+		}
+	}
+	unknown := redactCLIError("unknown arbitrary-secret", []string{"ops", "arbitrary-secret"})
+	if strings.Contains(unknown, "arbitrary-secret") {
+		t.Fatal("unknown command exposed")
+	}
+}

@@ -432,6 +432,10 @@ func parseOps(invocation Invocation, args []string) (Invocation, error) {
 		return Invocation{}, &helpRequest{topic: append([]string{"ops"}, args[1:]...)}
 	}
 	switch args[0] {
+	case "prepare-handoff", "prepare-receipt":
+		options, err := parseCustody(args[1:], args[0] == "prepare-receipt")
+		invocation.Command, invocation.Options = CommandOpsPrepareCustody, options
+		return invocation, wrapCommandError(err, "ops", args[0])
 	case "prepare-public-witness-receipt":
 		options, err := parseOpsPreparePublicWitnessReceipt(args[1:])
 		invocation.Command, invocation.Options = CommandOpsPreparePublicWitnessReceipt, options
@@ -984,6 +988,10 @@ func parseFinalize(invocation Invocation, args []string) (Invocation, error) {
 		return Invocation{}, &usageError{message: "missing finalize command", topic: []string{"finalize"}}
 	}
 	switch args[0] {
+	case "rehearsal-evidence":
+		options, err := parseRehearsalEvidence(args[1:])
+		invocation.Command, invocation.Options = CommandRehearsalEvidence, options
+		return invocation, wrapCommandError(err, "finalize", "rehearsal-evidence")
 	case "prepare":
 		options, err := parsePrepareFinalization(args[1:])
 		invocation.Command, invocation.Options = CommandFinalizePrepare, options
