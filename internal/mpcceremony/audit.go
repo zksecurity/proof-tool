@@ -218,7 +218,7 @@ func verifyCandidateReplay(circuit *CompiledCircuit, replay *loadedReplay, paths
 	if err != nil {
 		return err
 	}
-	return compareCandidateToReplay(circuit, *replay, replayed.pk, replayed.vk, candidate, dir, time.Now().UTC())
+	return compareCandidateToReplay(circuit, *replay, replayed.pk, replayed.vk, candidate, dir)
 }
 
 func compareCandidateToReplay(
@@ -228,7 +228,6 @@ func compareCandidateToReplay(
 	vk groth16.VerifyingKey,
 	candidate CandidateMetadata,
 	dir string,
-	auditedAt time.Time,
 ) error {
 	loadedCCS, err := ReadR1CSFile(filepath.Join(dir, candidate.ConstraintSystem.Name), replay.definition.Circuit)
 	if err != nil {
