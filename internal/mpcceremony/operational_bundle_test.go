@@ -43,6 +43,35 @@ func TestVerifyOperationalEvidenceBundleEndToEndAndNegatives(t *testing.T) {
 		t.Fatalf("complete operational bundle rejected: %v", err)
 	}
 
+	t.Run("one witness and one mirror per head", func(t *testing.T) {
+		f := newOperationalBundleFixture(t)
+		for _, phase := range []*PhaseOperationalEvidence{&f.bundle.Phase1, &f.bundle.Phase2} {
+			phase.PublicWitnessQuorum = 1
+			phase.PublicWitnessReceipts = phase.PublicWitnessReceipts[:1]
+			for i := range phase.AcceptedHeads {
+				phase.AcceptedHeads[i].MirrorReceipts = phase.AcceptedHeads[i].MirrorReceipts[:1]
+			}
+		}
+		resignBundle(t, &f)
+		if err := verify(f); err != nil {
+			t.Fatal(err)
+		}
+		f.bundle.Phase1.PublicWitnessQuorum = 2
+		resignInvalidBundle(t, &f)
+		if err := verify(f); err == nil {
+			t.Fatal("higher agreed witness quorum was ignored")
+		}
+	})
+	t.Run("zero witnesses", func(t *testing.T) {
+		f := newOperationalBundleFixture(t)
+		f.bundle.Phase1.PublicWitnessQuorum = 1
+		f.bundle.Phase1.PublicWitnessReceipts = nil
+		resignInvalidBundle(t, &f)
+		if err := verify(f); err == nil {
+			t.Fatal("zero witnesses accepted")
+		}
+	})
+
 	t.Run("missing enrollment", func(t *testing.T) {
 		f := newOperationalBundleFixture(t)
 		f.bundle.Enrollments = f.bundle.Enrollments[1:]
@@ -101,10 +130,10 @@ func TestVerifyOperationalEvidenceBundleEndToEndAndNegatives(t *testing.T) {
 	t.Run("incomplete mirror evidence", func(t *testing.T) {
 		f := newOperationalBundleFixture(t)
 		f.bundle.Phase1.AcceptedHeads[0].MirrorReceipts =
-			f.bundle.Phase1.AcceptedHeads[0].MirrorReceipts[:1]
+			f.bundle.Phase1.AcceptedHeads[0].MirrorReceipts[:0]
 		resignInvalidBundle(t, &f)
 		if err := verify(f); err == nil {
-			t.Fatal("accepted head with one mirror unexpectedly accepted")
+			t.Fatal("accepted head with no mirrors unexpectedly accepted")
 		}
 	})
 	t.Run("swapped outbound custody direction", func(t *testing.T) {

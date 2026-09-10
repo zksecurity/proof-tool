@@ -27,7 +27,7 @@ func TestDefinitionJourneyProjectsEveryRequiredEnrollment(t *testing.T) {
 			t.Fatal("incorrect participant assignment")
 		}
 	}
-	if j.MinimumPublicWitnesses != 2 || j.MinimumMirrorsPerAcceptedHead != 2 || j.ObserverRequirementSource == "" {
+	if j.MinimumPublicWitnesses != 1 || j.MinimumMirrorsPerAcceptedHead != 1 || j.ObserverRequirementSource == "" {
 		t.Fatal("operational verifier minimums omitted")
 	}
 	d.Auditors[0].DisplayName = "changed"

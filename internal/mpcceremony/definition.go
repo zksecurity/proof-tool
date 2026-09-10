@@ -236,8 +236,8 @@ func (d CeremonyDefinition) validate(requireID bool) error {
 	if d.ReleaseSigner.ID == d.Coordinator.ID || d.ReleaseSigner.KeyID == d.Coordinator.KeyID {
 		return errors.New("release signer must be distinct from coordinator")
 	}
-	if len(d.Auditors) < 2 {
-		return errors.New("at least two independent auditors are required")
+	if len(d.Auditors) < 1 {
+		return errors.New("at least one independent auditor is required")
 	}
 	if len(d.Auditors) > MaxAuditors {
 		return fmt.Errorf("auditors exceed maximum %d recordable in the final transcript", MaxAuditors)

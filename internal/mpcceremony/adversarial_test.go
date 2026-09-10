@@ -1087,7 +1087,7 @@ func TestPinnedQuicknetBeaconVerificationRejectsMalformedOrForgedEvidence(t *tes
 	}
 }
 
-func TestReleaseRequiresTwoExactChronologicalIndependentAudits(t *testing.T) {
+func TestReleaseRequiresExactChronologicalIndependentAudits(t *testing.T) {
 	definition := adversarialDefinition(t)
 	candidate := adversarialCandidate(t, definition)
 	candidateBytes, err := MarshalCanonical(candidate)
@@ -1114,6 +1114,12 @@ func TestReleaseRequiresTwoExactChronologicalIndependentAudits(t *testing.T) {
 		"2026-07-23T13:02:00Z",
 		outputs,
 	)
+	if refs, _, err := verifyPassingAudits(definition, candidate, []AuditArtifact{first}); err != nil || len(refs) != 1 {
+		t.Fatalf("one exact signed audit rejected: refs=%d err=%v", len(refs), err)
+	}
+	if _, _, err := verifyPassingAudits(definition, candidate, nil); err == nil {
+		t.Fatal("zero signed audits accepted")
+	}
 	refs, latest, err := verifyPassingAudits(
 		definition,
 		candidate,

@@ -297,7 +297,7 @@ func compareCandidateToReplay(
 	return nil
 }
 
-// SignRelease validates at least two distinct, enrolled, signed passing
+// SignRelease validates at least one enrolled, signed passing
 // audits, assembles the final setup transcript and key manifest without
 // replacing candidate files, then signs the exact manifest with the distinct
 // pre-existing release key.
@@ -897,8 +897,8 @@ func verifyPassingAudits(
 	candidate CandidateMetadata,
 	inputs []AuditArtifact,
 ) ([]ArtifactRef, time.Time, error) {
-	if len(inputs) < 2 {
-		return nil, time.Time{}, errors.New("at least two independently signed audit reports are required")
+	if len(inputs) < 1 {
+		return nil, time.Time{}, errors.New("at least one independently signed audit report is required")
 	}
 	replayRoot, err := replayRootSHA256(candidate)
 	if err != nil {

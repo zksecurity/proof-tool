@@ -73,8 +73,8 @@ func (p InitParticipants) Validate() error {
 	if err := p.ReleaseSigner.Validate(); err != nil {
 		return fmt.Errorf("release_signer: %w", err)
 	}
-	if len(p.Auditors) < 2 {
-		return errors.New("at least two independent auditors are required")
+	if len(p.Auditors) < 1 {
+		return errors.New("at least one independent auditor is required")
 	}
 	if len(p.Auditors) > MaxAuditors {
 		return fmt.Errorf("auditors exceed maximum %d recordable in the final transcript", MaxAuditors)

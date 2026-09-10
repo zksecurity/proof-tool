@@ -1223,8 +1223,8 @@ func (r FinalTranscript) validate(requireID bool) error {
 	if r.Phase2.Phase != Phase2 {
 		return errors.New("phase2 summary has wrong phase")
 	}
-	if len(r.Audits) < 2 {
-		return errors.New("final transcript requires at least two independent audit artifacts")
+	if len(r.Audits) < 1 {
+		return errors.New("final transcript requires at least one independent audit artifact")
 	}
 	if err := validateArtifactList("audits", r.Audits, MaxParticipants); err != nil {
 		return err

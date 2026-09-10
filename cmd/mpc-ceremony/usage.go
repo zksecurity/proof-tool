@@ -425,7 +425,7 @@ Release authenticity is separate from MPC contribution identity.
 	    --release-signing-key KEY --signature-key-id ID \
     --released-at RFC3339_UTC --release-dir FRESH_DIR
 
-	Requires at least two distinct enrolled auditors plus the coordinator-signed
+	Requires at least one enrolled auditor plus the coordinator-signed
 	Phase 1 and Phase 2 operational bundle. Each phase must contain a valid public
 	witness quorum and matching multi-relay beacon responses. The candidate is
 	never mutated; all verified evidence is atomically published into a fresh
@@ -574,7 +574,7 @@ Run ops verify afterwards; receipts require --related-record and bundles require
 	"ops prepare-bundle": `Usage:
   mpc-ceremony ops prepare-bundle --ceremony FILE --ceremony-signature FILE \
     --coordinator-public-key-file KEY --evidence-root PUBLIC_DIR --out-dir PUBLIC_DIR/operational \
-    [--witness-quorum 2]
+    [--witness-quorum 1]
 
 Discovers bounded public JSON and signatures; never point it at private keys or
 credentials. Reports missing or conflicting evidence by phase and turn. Keep
@@ -582,7 +582,7 @@ original relative paths when collecting public records from their owners.
 The operational directory may exist; existing evidence is preserved. Bundle,
 signature and signing-request files must not already exist. Interrupted output
 is retained for inspection, never automatically overwritten.
-Set witness-quorum to your agreed minimum per phase (2-32), not a lower value
+Set witness-quorum to your agreed minimum per phase (1-32), not a lower value
 chosen to fit the available receipts.
 If complete, independently verifies all referenced evidence and exports an
 UNSIGNED canonical bundle and signing request. It does not invent records,

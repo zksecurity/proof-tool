@@ -44,7 +44,7 @@ type JourneyInspection struct {
 }
 
 func inspectDefinitionJourney(d mpcceremony.CeremonyDefinition) *DefinitionJourneyInspection {
-	r := &DefinitionJourneyInspection{Schema: "proof-tool-mpc-definition-journey-v1", MinimumPublicWitnesses: 2, MinimumMirrorsPerAcceptedHead: 2, ObserverRequirementSource: "operational-bundle verifier minimum; an agreed witness quorum can require more"}
+	r := &DefinitionJourneyInspection{Schema: "proof-tool-mpc-definition-journey-v1", MinimumPublicWitnesses: 1, MinimumMirrorsPerAcceptedHead: 1, ObserverRequirementSource: "operational-bundle verifier minimum; an agreed witness quorum can require more"}
 	r.RequiredEnrollments = append(r.RequiredEnrollments, ExpectedEnrollmentInspection{mpcceremony.EnrollmentCoordinator, 1, d.Coordinator}, ExpectedEnrollmentInspection{mpcceremony.EnrollmentReleaseSigner, 1, d.ReleaseSigner})
 	for n, id := range d.Auditors {
 		r.RequiredEnrollments = append(r.RequiredEnrollments, ExpectedEnrollmentInspection{mpcceremony.EnrollmentAuditor, n + 1, id})

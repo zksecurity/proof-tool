@@ -260,7 +260,7 @@ func TestProductionDecisionHashesTheExactReleaseTree(t *testing.T) {
 	})
 }
 
-func TestProductionDecisionRequiresTwoDistinctExternalAuditSignoffs(t *testing.T) {
+func TestProductionDecisionRequiresDistinctExternalAuditSignoffs(t *testing.T) {
 	fixture := newProductionDecisionFixture(t, DecisionGO)
 	value := fixture.decision
 	value.DecisionID = ""

@@ -23,12 +23,12 @@ func parseOpsPrepareBundle(args []string) (OpsPrepareBundleOptions, error) {
 	addCeremonyTrustFlags(f, &o.CeremonyPath, &o.CeremonySignaturePath, &o.CoordinatorPublicKeyFile)
 	f.StringVar(&o.EvidenceRoot, "evidence-root", "", "public-only evidence directory; never a keys or credentials directory")
 	f.StringVar(&o.OutDir, "out-dir", "", "evidence-root/operational; existing evidence is preserved, bundle outputs must be fresh")
-	f.UintVar(&o.WitnessQuorum, "witness-quorum", 2, "agreed minimum public witnesses per phase (2-32)")
+	f.UintVar(&o.WitnessQuorum, "witness-quorum", 1, "agreed minimum public witnesses per phase (1-32)")
 	if err := parseFlags(f, args); err != nil {
 		return o, err
 	}
-	if o.WitnessQuorum < 2 || o.WitnessQuorum > 32 {
-		return o, errors.New("witness quorum must be between 2 and 32")
+	if o.WitnessQuorum < 1 || o.WitnessQuorum > 32 {
+		return o, errors.New("witness quorum must be between 1 and 32")
 	}
 	return o, requireValues(pathValue("--ceremony", o.CeremonyPath), pathValue("--ceremony-signature", o.CeremonySignaturePath), pathValue("--coordinator-public-key-file", o.CoordinatorPublicKeyFile), pathValue("--evidence-root", o.EvidenceRoot), pathValue("--out-dir", o.OutDir))
 }
@@ -38,8 +38,8 @@ func executeOpsPrepareBundle(o OpsPrepareBundleOptions) (CommandResult, error) {
 	if err != nil {
 		return CommandResult{}, err
 	}
-	if o.WitnessQuorum < 2 || o.WitnessQuorum > 32 {
-		return CommandResult{}, errors.New("witness quorum must be between 2 and 32")
+	if o.WitnessQuorum < 1 || o.WitnessQuorum > 32 {
+		return CommandResult{}, errors.New("witness quorum must be between 1 and 32")
 	}
 	prepared, err := mpcceremony.PrepareOperationalEvidence(trusted.Definition, o.EvidenceRoot, time.Now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
@@ -47,7 +47,7 @@ func executeOpsPrepareBundle(o OpsPrepareBundleOptions) (CommandResult, error) {
 	}
 	for index, phase := range []*mpcceremony.PhaseOperationalEvidence{&prepared.Bundle.Phase1, &prepared.Bundle.Phase2} {
 		phase.PublicWitnessQuorum = uint8(o.WitnessQuorum)
-		if o.WitnessQuorum > 2 && len(phase.PublicWitnessReceipts) < int(o.WitnessQuorum) {
+		if o.WitnessQuorum > 1 && len(phase.PublicWitnessReceipts) < int(o.WitnessQuorum) {
 			prepared.Missing = append(prepared.Missing, fmt.Sprintf("phase%d: agreed witness quorum is %d, found %d records", index+1, o.WitnessQuorum, len(phase.PublicWitnessReceipts)))
 		}
 	}

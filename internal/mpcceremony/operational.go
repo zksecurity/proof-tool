@@ -812,8 +812,8 @@ func VerifyPublicWitnessQuorum(
 	receipts []SignedPublicWitness,
 	minimum int,
 ) error {
-	if minimum < 2 {
-		return errors.New("public witness quorum minimum must be at least 2")
+	if minimum < 1 {
+		return errors.New("public witness quorum minimum must be at least 1")
 	}
 	if len(receipts) < minimum {
 		return fmt.Errorf("have %d public witness receipts, need %d", len(receipts), minimum)

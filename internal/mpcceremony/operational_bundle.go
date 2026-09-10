@@ -71,8 +71,8 @@ func (e AcceptedHeadOperationalEvidence) Validate() error {
 	if err := e.AcceptedChainPrefix.Validate(); err != nil {
 		return fmt.Errorf("accepted_chain_prefix: %w", err)
 	}
-	if len(e.MirrorReceipts) < 2 || len(e.MirrorReceipts) > 8 {
-		return errors.New("accepted head requires between 2 and 8 immutable mirror receipts")
+	if len(e.MirrorReceipts) < 1 || len(e.MirrorReceipts) > 8 {
+		return errors.New("accepted head requires between 1 and 8 immutable mirror receipts")
 	}
 	return validateSignedArtifactSet("mirror_receipts", e.MirrorReceipts)
 }
@@ -109,8 +109,8 @@ func (p PhaseOperationalEvidence) Validate() error {
 			return errors.New("accepted heads must be complete and ordered by one-based index")
 		}
 	}
-	if p.PublicWitnessQuorum < 2 {
-		return errors.New("public_witness_quorum must be at least 2")
+	if p.PublicWitnessQuorum < 1 {
+		return errors.New("public_witness_quorum must be at least 1")
 	}
 	if len(p.PublicWitnessReceipts) < int(p.PublicWitnessQuorum) || len(p.PublicWitnessReceipts) > 32 {
 		return fmt.Errorf(
@@ -154,7 +154,7 @@ func (b OperationalEvidenceBundle) Validate() error {
 	if err := validateHashID("ceremony_id", b.CeremonyID); err != nil {
 		return err
 	}
-	minimumEnrollments := 6 // coordinator, release signer, two auditors, one participant, one witness
+	minimumEnrollments := 6 // coordinator, release signer, auditor, participant, witness, mirror
 	if len(b.Enrollments) < minimumEnrollments || len(b.Enrollments) > 128 {
 		return fmt.Errorf("enrollments must contain between %d and 128 records", minimumEnrollments)
 	}

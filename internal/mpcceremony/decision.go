@@ -491,14 +491,10 @@ func (d ProductionDecision) Validate() error {
 	if err := d.OperationalEvidence.Validate(); err != nil {
 		return fmt.Errorf("operational_evidence: %w", err)
 	}
-	// Two is the floor, not the ceiling. A ceremony may enroll more than two
-	// auditors (definition.go requires at least two), and SignRelease accepts
-	// every passing report it is given. Demanding exactly two here would let a
-	// three-auditor ceremony produce a valid signed release that could never be
-	// recorded in a valid decision, and the failure would only surface at final
-	// GO signing when nothing can be redone.
-	if len(d.Audits) < 2 {
-		return fmt.Errorf("production decision requires at least two audits, got %d", len(d.Audits))
+	// One is the floor, not the ceiling. Validate every supplied audit;
+	// additional auditors remain supported and must use distinct identities.
+	if len(d.Audits) < 1 {
+		return fmt.Errorf("production decision requires at least one audit, got %d", len(d.Audits))
 	}
 	auditKeyIDs := make(map[string]struct{}, len(d.Audits))
 	for index, audit := range d.Audits {
@@ -513,8 +509,8 @@ func (d ProductionDecision) Validate() error {
 		}
 		auditKeyIDs[audit.AuditorKeyID] = struct{}{}
 	}
-	if len(d.ExternalAudits) < 2 {
-		return fmt.Errorf("production decision requires at least two external audits, got %d", len(d.ExternalAudits))
+	if len(d.ExternalAudits) < 1 {
+		return fmt.Errorf("production decision requires at least one external audit, got %d", len(d.ExternalAudits))
 	}
 	externalFingerprints := make(map[string]struct{}, len(d.ExternalAudits))
 	for index, external := range d.ExternalAudits {
@@ -1270,8 +1266,8 @@ func decisionSignerIdentity(
 }
 
 // requiredDecisionSigners lists every signature a GO decision must carry.
-// Every named auditor is required, not just the first two: the decision accepts
-// two or more audits, and an auditor whose report is bound into the decision but
+// Every named auditor is required, not just the minimum: the decision accepts
+// one or more audits, and an auditor whose report is bound into the decision but
 // whose consent is not required would be recorded as having reviewed the release
 // without having agreed to it.
 func requiredDecisionSigners(definition CeremonyDefinition, decision ProductionDecision) []string {
