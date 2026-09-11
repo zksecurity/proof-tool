@@ -7,6 +7,7 @@ import (
 
 	"proof-tool/internal/keybundle"
 	"proof-tool/internal/mpcceremony"
+	"proof-tool/internal/mpcrehearsal"
 )
 
 func TestGenerateCreatesValidatedCanonicalRehearsalInputs(t *testing.T) {
@@ -74,7 +75,7 @@ func TestGenerateRejectsUnsafeParticipantCounts(t *testing.T) {
 }
 
 func TestGenerateRejectsShortBeaconWitnessLead(t *testing.T) {
-	if err := generate(filepath.Join(t.TempDir(), "rehearsal"), 3, 59); err == nil {
-		t.Fatal("accepted a rehearsal beacon witness lead below 60 seconds")
+	if err := generate(filepath.Join(t.TempDir(), "rehearsal"), 3, mpcrehearsal.MinimumBeaconLeadSeconds-1); err == nil {
+		t.Fatalf("accepted a rehearsal beacon witness lead below %d seconds", mpcrehearsal.MinimumBeaconLeadSeconds)
 	}
 }

@@ -18,7 +18,7 @@ func main() {
 	beaconWitnessLead := flag.Uint(
 		"beacon-witness-lead-seconds",
 		300,
-		"signed rehearsal witness/round lead in seconds (minimum 60)",
+		fmt.Sprintf("signed rehearsal witness/round lead in seconds (minimum %d)", mpcrehearsal.MinimumBeaconLeadSeconds),
 	)
 	flag.Parse()
 	if *outDir == "" || flag.NArg() != 0 {
