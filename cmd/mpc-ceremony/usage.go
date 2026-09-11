@@ -138,18 +138,21 @@ and neither output may already exist. Private key bytes are never printed.
 `,
 	"rehearsal": `Usage:
   mpc-ceremony rehearsal init --created-at RFC3339 --out-dir FRESH_DIR \
-    [--allowed-binary FILE ...]
+    [--beacon-lead-seconds N] [--allowed-binary FILE ...]
 
 Rehearsal commands create same-host test identities and must never be used as
 production enrollment evidence.
 `,
 	"rehearsal init": `Usage:
   mpc-ceremony rehearsal init --created-at RFC3339 --out-dir FRESH_DIR \
-    [--allowed-binary FILE ...]
+    [--beacon-lead-seconds N] [--allowed-binary FILE ...]
 
 Creates fresh same-host identities and canonical configuration for exactly
 three participants, then initializes a signed rehearsal-tiny-v1 ceremony. The
 output is a functional test fixture, not production or independence evidence.
+The witness window defaults to 300 seconds. --beacon-lead-seconds may shorten
+it to at least 12 seconds for automated tests; the chosen non-production value
+is signed into the rehearsal definition and cannot change production policy.
 `,
 	"inspect": inspectHelp + `
 Authenticated record projections are also available as subcommands:

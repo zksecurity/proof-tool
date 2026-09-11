@@ -21,7 +21,7 @@ func executeRehearsalInit(options RehearsalInitOptions) (result CommandResult, e
 	if err := mpcrehearsal.Generate(
 		options.OutDir,
 		rehearsalParticipantCount,
-		rehearsalBeaconLeadSeconds,
+		uint32(options.BeaconLeadSeconds),
 	); err != nil {
 		return CommandResult{}, err
 	}

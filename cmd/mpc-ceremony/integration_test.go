@@ -108,6 +108,7 @@ func TestParticipantCLIHelpHasExplicitSafeFlagAllowlist(t *testing.T) {
 		"--auditor-id",
 		"--auditor-signing-key",
 		"--beacon",
+		"--beacon-lead-seconds",
 		"--beacon-signature",
 		"--beacon-round",
 		"--beacon-round-lead",

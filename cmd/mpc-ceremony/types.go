@@ -90,6 +90,7 @@ type InitOptions struct {
 type RehearsalInitOptions struct {
 	CreatedAt          string
 	OutDir             string
+	BeaconLeadSeconds  uint64
 	AllowedBinaryPaths []string
 }
 

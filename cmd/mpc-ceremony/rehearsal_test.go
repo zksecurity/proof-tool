@@ -23,13 +23,30 @@ func TestParseRehearsalInitIsNarrowAndExplicit(t *testing.T) {
 		t.Fatalf("command = %q", invocation.Command)
 	}
 	options := invocation.Options.(RehearsalInitOptions)
-	if options.CreatedAt != "2026-08-20T06:00:00Z" || options.OutDir != "/secure/rehearsal" {
+	if options.CreatedAt != "2026-08-20T06:00:00Z" || options.OutDir != "/secure/rehearsal" || options.BeaconLeadSeconds != rehearsalBeaconLeadSeconds {
 		t.Fatalf("options = %+v", options)
+	}
+
+	custom, err := parseInvocation([]string{
+		"rehearsal", "init",
+		"--created-at", "2026-08-20T06:00:00Z",
+		"--out-dir", "/secure/rehearsal",
+		"--beacon-lead-seconds", "12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := custom.Options.(RehearsalInitOptions).BeaconLeadSeconds; got != 12 {
+		t.Fatalf("custom beacon lead = %d, want 12", got)
 	}
 
 	for name, args := range map[string][]string{
 		"missing creation time": {"rehearsal", "init", "--out-dir", "/secure/rehearsal"},
 		"missing output":        {"rehearsal", "init", "--created-at", "2026-08-20T06:00:00Z"},
+		"short beacon lead": {
+			"rehearsal", "init", "--created-at", "2026-08-20T06:00:00Z",
+			"--out-dir", "/secure/rehearsal", "--beacon-lead-seconds", "11",
+		},
 		"production mode": {
 			"rehearsal", "init", "--created-at", "2026-08-20T06:00:00Z",
 			"--out-dir", "/secure/rehearsal", "--mode", "production",

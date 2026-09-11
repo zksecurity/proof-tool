@@ -20,7 +20,11 @@ import (
 const (
 	minRehearsalParticipants = 3
 	maxRehearsalParticipants = 20
-	minRehearsalBeaconLead   = 60
+	// MinimumBeaconLeadSeconds gives automated rehearsals four Quicknet
+	// periods to commit to a round that does not exist yet. Rehearsal outputs
+	// are explicitly non-production; production policy has its own 24-hour
+	// minimum in mpcceremony.
+	MinimumBeaconLeadSeconds = 12
 )
 
 type generatedIdentity struct {
@@ -37,10 +41,10 @@ func Generate(outDir string, participantCount int, beaconWitnessLead uint32) (er
 			maxRehearsalParticipants,
 		)
 	}
-	if beaconWitnessLead < minRehearsalBeaconLead {
+	if beaconWitnessLead < MinimumBeaconLeadSeconds {
 		return fmt.Errorf(
 			"beacon witness lead must be at least %d seconds",
-			minRehearsalBeaconLead,
+			MinimumBeaconLeadSeconds,
 		)
 	}
 	if err := os.Mkdir(outDir, 0o700); err != nil {

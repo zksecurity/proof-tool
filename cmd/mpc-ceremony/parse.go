@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"proof-tool/internal/mpcceremony"
+	"proof-tool/internal/mpcrehearsal"
 )
 
 const supportedKeyVersion = "ownership-destination-v2"
@@ -172,6 +173,7 @@ func parseRehearsalInit(args []string) (RehearsalInitOptions, error) {
 	fs := commandFlagSet("rehearsal init")
 	fs.StringVar(&options.CreatedAt, "created-at", "", "ceremony creation timestamp in RFC3339")
 	fs.StringVar(&options.OutDir, "out-dir", "", "fresh rehearsal work directory")
+	fs.Uint64Var(&options.BeaconLeadSeconds, "beacon-lead-seconds", rehearsalBeaconLeadSeconds, "non-production witness window for this rehearsal")
 	fs.Var(&allowedBinaries, "allowed-binary", "additional exact mpc-ceremony binary to sign into the platform allowlist (repeatable)")
 	if err := parseFlags(fs, args); err != nil {
 		return options, err
@@ -181,6 +183,12 @@ func parseRehearsalInit(args []string) (RehearsalInitOptions, error) {
 		if err := validatePathValue("--allowed-binary", path); err != nil {
 			return options, err
 		}
+	}
+	if options.BeaconLeadSeconds < uint64(mpcrehearsal.MinimumBeaconLeadSeconds) {
+		return options, fmt.Errorf("--beacon-lead-seconds must be at least %d", mpcrehearsal.MinimumBeaconLeadSeconds)
+	}
+	if options.BeaconLeadSeconds > uint64(^uint32(0)) {
+		return options, errors.New("--beacon-lead-seconds is too large")
 	}
 	return options, requireValues(
 		value("--created-at", options.CreatedAt),
