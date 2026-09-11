@@ -646,12 +646,9 @@ func TestReleaseSignRequiresPairedIndependentAudits(t *testing.T) {
 		want string
 	}{
 		{
-			name: "one audit",
-			args: append(append([]string(nil), base...),
-				"--audit-report", "audit-1.json",
-				"--audit-signature", "audit-1.sig",
-			),
-			want: "at least twice",
+			name: "zero audits",
+			args: append([]string(nil), base...),
+			want: "at least once",
 		},
 		{
 			name: "mismatched signatures",
@@ -672,6 +669,13 @@ func TestReleaseSignRequiresPairedIndependentAudits(t *testing.T) {
 				t.Fatalf("error = %v, want substring %q", err, test.want)
 			}
 		})
+	}
+	oneAudit := append(append([]string(nil), base...),
+		"--audit-report", "audit-1.json",
+		"--audit-signature", "audit-1.sig",
+	)
+	if _, err := parseInvocation(oneAudit); err != nil {
+		t.Fatalf("one audit rejected: %v", err)
 	}
 }
 

@@ -9,6 +9,8 @@ Release signing requires at least one verified passing transcript audit.
 Production decisions also require at least one distinct external audit signoff;
 this is a separate report requirement, not evidence supplied by a mirror or
 witness. Every supplied report is still validated, including additional reports.
+The `release sign` command accepts one matching audit report/signature pair and
+rejects zero, matching the verifier's threshold.
 
 Production still requires at least two participants per phase, every scheduled
 contribution, distinct signing identities and the existing independence checks.

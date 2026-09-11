@@ -1211,8 +1211,8 @@ func validateReplayOptions(replay ReplayOptions) error {
 }
 
 func validateAuditArtifacts(reports, signatures []string) error {
-	if len(reports) < 2 {
-		return errors.New("--audit-report must be supplied at least twice for independent audits")
+	if len(reports) < 1 {
+		return errors.New("--audit-report must be supplied at least once")
 	}
 	if len(reports) > mpcceremony.MaxAuditors {
 		return fmt.Errorf("--audit-report supplied %d times, exceeds maximum %d recordable in the final transcript", len(reports), mpcceremony.MaxAuditors)

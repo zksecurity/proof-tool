@@ -418,7 +418,6 @@ Release authenticity is separate from MPC contribution identity.
   mpc-ceremony release sign --ceremony FILE --ceremony-signature FILE \
     --coordinator-public-key-file KEY --candidate-bundle DIR \
 	    --audit-report FILE --audit-signature FILE \
-	    --audit-report FILE --audit-signature FILE \
 	    --operational-evidence-root DIR \
 	    --operational-bundle DIR/operational/evidence-bundle.json \
 	    --operational-bundle-signature DIR/operational/evidence-bundle.sig \
