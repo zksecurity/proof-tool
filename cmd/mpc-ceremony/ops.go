@@ -216,6 +216,12 @@ func executeOpsExportSigning(options OpsExportSigningOptions) (result CommandRes
 }
 
 func writeOperationalSigningExport(outDir string, canonical, request []byte) (canonicalPath, requestPath string, err error) {
+	// The leaf must remain fresh, but guided custody outputs may live below a
+	// first-use parent such as /work/custody. Creating only that parent cannot
+	// overwrite a prior signing export.
+	if err := os.MkdirAll(filepath.Dir(outDir), 0o700); err != nil {
+		return "", "", fmt.Errorf("create signing export parent: %w", err)
+	}
 	if err := os.Mkdir(outDir, 0o700); err != nil {
 		return "", "", fmt.Errorf("create fresh signing export directory: %w", err)
 	}

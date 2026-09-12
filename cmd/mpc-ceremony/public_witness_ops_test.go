@@ -263,6 +263,21 @@ func TestWriteOperationalSigningExportCleansPartialPublication(t *testing.T) {
 	}
 }
 
+func TestWriteOperationalSigningExportCreatesMissingParentButNotExistingLeaf(t *testing.T) {
+	root := t.TempDir()
+	outDir := filepath.Join(root, "custody", "outbound")
+	canonical, request, err := writeOperationalSigningExport(outDir, []byte("canonical"), []byte("request"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canonical != filepath.Join(outDir, "canonical.json") || request != filepath.Join(outDir, "signing-request.json") {
+		t.Fatalf("unexpected export paths: %q %q", canonical, request)
+	}
+	if _, _, err := writeOperationalSigningExport(outDir, []byte("canonical"), []byte("request")); err == nil {
+		t.Fatal("existing signing export leaf was overwritten")
+	}
+}
+
 func trustOptionsFromArgs(t *testing.T, args []string) InspectDefinitionOptions {
 	t.Helper()
 	invocation, err := parseInvocation(append([]string{"inspect", "definition"}, args...))
