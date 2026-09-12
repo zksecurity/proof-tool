@@ -1836,23 +1836,19 @@ func writeR1CSNoReplace(path string, circuit *CompiledCircuit) (ArtifactRef, err
 }
 
 func saveNativeNoReplace(path string, save func(string) error) (err error) {
-	dir := filepath.Dir(path)
-	temp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".partial-*")
-	if err != nil {
+	// Finalize writes into a fresh, private staging directory and publishes the
+	// entire directory atomically only after every artifact has been verified.
+	// A second per-file hard-link publication is unnecessary here and is not
+	// portable across all Docker Desktop bind-mount implementations.
+	if _, err := os.Lstat(path); err == nil {
+		return fmt.Errorf("native artifact destination already exists: %w", fs.ErrExist)
+	} else if !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	tempPath := temp.Name()
-	if err := temp.Close(); err != nil {
+	if err := save(path); err != nil {
 		return err
 	}
-	if err := os.Remove(tempPath); err != nil {
-		return err
-	}
-	defer os.Remove(tempPath)
-	if err := save(tempPath); err != nil {
-		return err
-	}
-	file, err := os.Open(tempPath)
+	file, err := os.Open(path)
 	if err != nil {
 		return err
 	}
@@ -1863,8 +1859,12 @@ func saveNativeNoReplace(path string, save func(string) error) (err error) {
 	if err := file.Close(); err != nil {
 		return err
 	}
-	if err := publishFileNoReplace(tempPath, path); err != nil {
-		return fmt.Errorf("publish native artifact without replacement: %w", err)
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("native artifact output is not a real regular file")
 	}
 	return nil
 }

@@ -273,14 +273,48 @@ type InitFilesResult struct {
 	Phase1ChainSignaturePath string
 }
 
-// InitializeCeremonyFiles creates a fresh ceremony root and deterministic
-// Phase 1 genesis. The root must not already exist.
+// InitializeCeremonyFiles builds a complete ceremony beside its destination and
+// publishes the directory with one rename. A crash can leave a hidden staging
+// directory, but never a partially initialized ceremony at RootDir.
 func InitializeCeremonyFiles(options InitFilesOptions) (result InitFilesResult, err error) {
-	if options.Circuit == nil || options.Circuit.R1CS == nil {
-		return result, errors.New("compiled circuit is required")
-	}
 	if strings.TrimSpace(options.RootDir) == "" {
 		return result, errors.New("fresh ceremony root is required")
+	}
+	staging, err := createRecoveryStagingDir(options.RootDir)
+	if err != nil {
+		return result, fmt.Errorf("create ceremony staging directory: %w", err)
+	}
+	defer func() {
+		if staging != "" && !publicationWasCommitted(err) {
+			_ = os.RemoveAll(staging)
+		}
+	}()
+	stagedOptions := options
+	stagedOptions.RootDir = staging
+	result, err = initializeCeremonyFilesInRoot(stagedOptions)
+	if err != nil {
+		return result, err
+	}
+	if err = publishDirectoryNoReplaceOrExact(staging, options.RootDir); err != nil {
+		return InitFilesResult{}, fmt.Errorf("publish initialized ceremony: %w", err)
+	}
+	staging = ""
+	result.DefinitionPath = filepath.Join(options.RootDir, "ceremony.json")
+	result.DefinitionSignaturePath = filepath.Join(options.RootDir, "ceremony.sig")
+	result.CoordinatorPublicKeyPath = filepath.Join(options.RootDir, "coordinator-public-key.hex")
+	result.R1CSPath, err = resolveArtifactPath(options.RootDir, options.Circuit.Binding.R1CS.Name)
+	if err != nil {
+		return InitFilesResult{}, err
+	}
+	result.Phase1GenesisPath = filepath.Join(options.RootDir, "phase1", "genesis.bin")
+	result.Phase1ChainPath = filepath.Join(options.RootDir, "phase1", "chain-0000.json")
+	result.Phase1ChainSignaturePath = filepath.Join(options.RootDir, "phase1", "chain-0000.sig")
+	return result, nil
+}
+
+func initializeCeremonyFilesInRoot(options InitFilesOptions) (result InitFilesResult, err error) {
+	if options.Circuit == nil || options.Circuit.R1CS == nil {
+		return result, errors.New("compiled circuit is required")
 	}
 	if err := options.Circuit.Binding.Validate(); err != nil {
 		return result, fmt.Errorf("compiled circuit binding: %w", err)
@@ -292,15 +326,9 @@ func InitializeCeremonyFiles(options InitFilesOptions) (result InitFilesResult, 
 	if err != nil {
 		return result, fmt.Errorf("coordinator signing key: %w", err)
 	}
-	if err := os.Mkdir(options.RootDir, 0o700); err != nil {
-		return result, fmt.Errorf("create fresh ceremony root: %w", err)
+	if info, err := os.Lstat(options.RootDir); err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return result, errors.New("private ceremony staging root is required")
 	}
-	createdRoot := true
-	defer func() {
-		if err != nil && createdRoot && !publicationWasCommitted(err) {
-			_ = os.RemoveAll(options.RootDir)
-		}
-	}()
 	phase1Dir := filepath.Join(options.RootDir, "phase1")
 	if err := os.Mkdir(phase1Dir, 0o700); err != nil {
 		return result, fmt.Errorf("create Phase 1 directory: %w", err)
@@ -379,7 +407,6 @@ func InitializeCeremonyFiles(options InitFilesOptions) (result InitFilesResult, 
 	}
 	result.Definition = definition
 	result.Phase1Chain = chain
-	createdRoot = false
 	return result, nil
 }
 

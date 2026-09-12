@@ -68,8 +68,9 @@ Commands:
   ops import-signature Import and verify a raw offline Ed25519 signature
   ops verify           Verify a signed operational record fail-closed
 
-All input and output paths are explicit. Outputs must not already exist. There
-are no network, automatic-discovery, overwrite, deterministic-randomness, or
+All input and output paths are explicit. Outputs must not already exist unless
+command-specific help documents byte-exact crash continuation. There are no
+network, automatic-discovery, overwrite, deterministic-randomness, or
 verification-bypass flags.
 
 Run "mpc-ceremony help <command>" for command-specific help.
@@ -133,8 +134,14 @@ the trusted machine and never send it to Relay or the coordinator. The public
 output is canonical identity JSON containing the public key, its SHA-256
 fingerprint, and an automatically derived key ID. Share only that public file.
 
-Both parent directories must already exist, both output paths must be distinct,
-and neither output may already exist. Private key bytes are never printed.
+Both parent directories must already exist and the output paths must be
+distinct. Before creating the key, the command saves a protected recovery
+record beside the private output. If creation stops after the private key is
+saved but before the public file appears, repeating the exact command derives
+that public file from the same key. If both files were completed before the
+caller saw success, repeating the exact command verifies and adopts the exact
+pair. Changed identity inputs or output bytes are rejected and a second key is
+never generated automatically. Private key bytes are never printed.
 `,
 	"rehearsal": `Usage:
   mpc-ceremony rehearsal init --created-at RFC3339 --out-dir FRESH_DIR \

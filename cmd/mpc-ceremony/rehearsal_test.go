@@ -4,8 +4,12 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"proof-tool/internal/mpcceremony"
+	"proof-tool/internal/mpcrehearsal"
 )
 
 func TestParseRehearsalInitIsNarrowAndExplicit(t *testing.T) {
@@ -62,6 +66,56 @@ func TestParseRehearsalInitIsNarrowAndExplicit(t *testing.T) {
 				t.Fatal("unsafe rehearsal initializer invocation was accepted")
 			}
 		})
+	}
+}
+
+func TestInitExactRetryAcceptsAtomicallyPublishedTree(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(base, "fixture")
+	if err := mpcrehearsal.Generate(root, rehearsalParticipantCount, rehearsalBeaconLeadSeconds); err != nil {
+		t.Fatal(err)
+	}
+	participantsPath := filepath.Join(root, "config", "participants.json")
+	participants, err := mpcceremony.LoadInitParticipants(participantsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := mpcceremony.LoadInitPolicy(filepath.Join(root, "config", "policy.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	circuit, err := mpcceremony.CompileForKeyVersion(rehearsalKeyVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := mpcceremony.InitFilesOptions{
+		RootDir: filepath.Join(root, "public"), Circuit: circuit,
+		CoordinatorPrivateKeyPath: filepath.Join(root, "keys", "coordinator.ed25519.private.hex"),
+		Definition: mpcceremony.DefinitionOptions{
+			Mode: mpcceremony.ModeRehearsal, CreatedAt: "2026-09-12T00:00:00Z", SessionNonceHex: strings.Repeat("5a", 32),
+			Software: mpcceremony.SoftwareBinding{
+				ProofToolVersion: "test", GnarkVersion: mpcceremony.GnarkVersion, GnarkCryptoVersion: mpcceremony.GnarkCryptoVersion,
+				DrandVersion: mpcceremony.DrandVersion, GoVersion: "go-test", GoOS: "linux", GoArch: "amd64", GoAMD64: "v1",
+				Compiler: "gc", BuildMode: "exe", TrimPath: true, SourceCommit: strings.Repeat("6b", 20),
+				ToolBinary: mpcceremony.NewDigest([]byte("test mpc-ceremony binary")),
+			},
+			Coordinator: participants.Coordinator, ReleaseSigner: participants.ReleaseSigner, Auditors: participants.Auditors, Roster: participants.Roster,
+			Phase1Policy: policy.Phase1Policy, Phase2Policy: policy.Phase2Policy, BeaconPolicy: policy.BeaconPolicy,
+		},
+	}
+	first, err := mpcceremony.InitializeCeremonyFiles(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := mpcceremony.InitializeCeremonyFiles(options)
+	if err != nil {
+		t.Fatal("exact initialization retry rejected the committed tree:", err)
+	}
+	if first.Definition.CeremonyID != second.Definition.CeremonyID {
+		t.Fatal("exact initialization retry changed the ceremony")
 	}
 }
 

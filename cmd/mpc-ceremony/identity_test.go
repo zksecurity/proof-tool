@@ -166,6 +166,99 @@ func TestIdentityGenerateDoesNotOverwriteOrCreatePartialSecretOutput(t *testing.
 	}
 }
 
+func TestIdentityGenerateContinuesFromRetainedPrivateKey(t *testing.T) {
+	root := t.TempDir()
+	privatePath := filepath.Join(root, "identity.private.hex")
+	publicPath := filepath.Join(root, "identity.json")
+	options := IdentityGenerateOptions{
+		IdentityID:        "participant-03",
+		DisplayName:       "Participant Three",
+		PrivateKeyOut:     privatePath,
+		PublicIdentityOut: publicPath,
+	}
+	first, err := executeIdentityGenerate(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateBefore, err := os.ReadFile(privatePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicBefore, err := os.ReadFile(publicPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exact, err := executeIdentityGenerate(options)
+	if err != nil {
+		t.Fatal("exact completed identity retry was not adopted:", err)
+	}
+	if exact.Identity == nil || first.Identity == nil || *exact.Identity != *first.Identity {
+		t.Fatal("exact completed identity retry changed metadata")
+	}
+	if err := os.Remove(publicPath); err != nil {
+		t.Fatal(err)
+	}
+	second, err := executeIdentityGenerate(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateAfter, err := os.ReadFile(privatePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicAfter, err := os.ReadFile(publicPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(privateBefore, privateAfter) || !bytes.Equal(publicBefore, publicAfter) {
+		t.Fatal("continuation replaced the keypair instead of deriving the same public identity")
+	}
+	if first.Identity == nil || second.Identity == nil || *first.Identity != *second.Identity {
+		t.Fatal("continued identity metadata changed")
+	}
+	changed := options
+	changed.DisplayName = "Different Person"
+	if err := os.Remove(publicPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := executeIdentityGenerate(changed); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("changed recovery inputs error = %v", err)
+	}
+}
+
+func TestIdentityGenerateRejectsChangedCompletedPublicIdentity(t *testing.T) {
+	root := t.TempDir()
+	options := IdentityGenerateOptions{
+		IdentityID: "participant-03", DisplayName: "Participant Three",
+		PrivateKeyOut:     filepath.Join(root, "identity.private.hex"),
+		PublicIdentityOut: filepath.Join(root, "identity.json"),
+	}
+	if _, err := executeIdentityGenerate(options); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(options.PublicIdentityOut, []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := executeIdentityGenerate(options); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("changed completed public identity error = %v", err)
+	}
+}
+
+func TestIdentityGenerateDoesNotGuessLegacyPrivateKeyInputs(t *testing.T) {
+	root := t.TempDir()
+	privatePath := filepath.Join(root, "identity.private.hex")
+	if err := os.WriteFile(privatePath, []byte(strings.Repeat("01", 32)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := executeIdentityGenerate(IdentityGenerateOptions{
+		IdentityID: "participant-03", DisplayName: "Participant Three",
+		PrivateKeyOut: privatePath, PublicIdentityOut: filepath.Join(root, "identity.json"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "no identity recovery record") {
+		t.Fatalf("legacy private key error = %v", err)
+	}
+}
+
 func TestIdentityGenerateRejectsSameResolvedOutput(t *testing.T) {
 	root := t.TempDir()
 	realDir := filepath.Join(root, "real")
