@@ -295,8 +295,10 @@ func TestCheckpointCommandFullPhase1CandidateAcceptance(t *testing.T) {
 		CeremonyID: cp2.CeremonyID, Definition: cp2.Definition, RelayReleaseID: cp2.RelayReleaseID,
 		SubmitterID: candidateSlot.IdentityID, SubmitterKeyID: fixture.definition.Roster[0].Identity.KeyID,
 		SubmitterRole: mpcceremony.SubmissionRoleParticipant, Kind: candidateSlot.Kind, Phase: candidateSlot.Phase, Index: candidateSlot.Index,
-		ParentCheckpointSHA256: candidateSlot.BasisCheckpointSHA256, ParentHeadID: candidateSlot.ParentHeadID,
-		AttemptID: candidateSlot.AttemptID, ManifestKey: candidateSlot.ManifestKey, Payloads: payloads,
+		ParentCheckpointSHA256:     candidateSlot.BasisCheckpointSHA256,
+		AllocationCheckpointSHA256: mpcceremony.NewDigest(mustReadTestFile(t, cp2Path)).SHA256,
+		ParentHeadID:               candidateSlot.ParentHeadID,
+		AttemptID:                  candidateSlot.AttemptID, ManifestKey: candidateSlot.ManifestKey, Payloads: payloads,
 	}
 	envelopePath := filepath.Join(fixture.root, "submissions", "candidate", candidateSlot.AttemptID, "envelope.json")
 	envelopeSignaturePath := filepath.Join(fixture.root, "submissions", "candidate", candidateSlot.AttemptID, "envelope.sig")
@@ -326,8 +328,10 @@ func TestCheckpointCommandFullPhase1CandidateAcceptance(t *testing.T) {
 		CoordinatorID: fixture.definition.Coordinator.ID, CoordinatorKeyID: fixture.definition.Coordinator.KeyID,
 		SubmitterID: envelope.SubmitterID, SubmitterKeyID: envelope.SubmitterKeyID, SubmitterRole: envelope.SubmitterRole,
 		Kind: envelope.Kind, Phase: envelope.Phase, Index: envelope.Index,
-		ParentCheckpointSHA256: envelope.ParentCheckpointSHA256, ParentHeadID: envelope.ParentHeadID,
-		AttemptID: envelope.AttemptID, ManifestKey: envelope.ManifestKey,
+		ParentCheckpointSHA256:     envelope.ParentCheckpointSHA256,
+		AllocationCheckpointSHA256: envelope.AllocationCheckpointSHA256,
+		ParentHeadID:               envelope.ParentHeadID,
+		AttemptID:                  envelope.AttemptID, ManifestKey: envelope.ManifestKey,
 		Envelope: envelopeRefs, Manifest: manifestRef, Result: mpcceremony.SubmissionAccepted,
 	}
 	ackPath := filepath.Join(fixture.root, "acknowledgements", "candidate.json")
@@ -519,13 +523,19 @@ func prepareAndSignReceiptCheckpoint(t *testing.T, fixture checkpointCLIFixture,
 	if err != nil {
 		t.Fatal(err)
 	}
+	cp1Bytes, err := mpcceremony.MarshalCanonical(cp1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	envelope := mpcceremony.SubmissionEnvelopeV1{
 		Schema: mpcceremony.SubmissionEnvelopeSchemaV1, Workflow: cp1.Workflow,
 		CeremonyID: cp1.CeremonyID, Definition: cp1.Definition, RelayReleaseID: cp1.RelayReleaseID,
 		SubmitterID: slot.IdentityID, SubmitterKeyID: fixture.definition.Roster[0].Identity.KeyID,
 		SubmitterRole: mpcceremony.SubmissionRoleParticipant, Kind: slot.Kind, Phase: slot.Phase, Index: slot.Index,
-		ParentCheckpointSHA256: slot.BasisCheckpointSHA256, ParentHeadID: slot.ParentHeadID,
-		AttemptID: slot.AttemptID, ManifestKey: slot.ManifestKey,
+		ParentCheckpointSHA256:     slot.BasisCheckpointSHA256,
+		AllocationCheckpointSHA256: mpcceremony.NewDigest(cp1Bytes).SHA256,
+		ParentHeadID:               slot.ParentHeadID,
+		AttemptID:                  slot.AttemptID, ManifestKey: slot.ManifestKey,
 		Payloads: checkpointSortedArtifacts(receiptRef, receiptSignatureRef),
 	}
 	envelopePath, envelopeSignaturePath := filepath.Join(receiptDir, "envelope.json"), filepath.Join(receiptDir, "envelope.sig")
@@ -552,8 +562,10 @@ func prepareAndSignReceiptCheckpoint(t *testing.T, fixture checkpointCLIFixture,
 		CoordinatorID: fixture.definition.Coordinator.ID, CoordinatorKeyID: fixture.definition.Coordinator.KeyID,
 		SubmitterID: envelope.SubmitterID, SubmitterKeyID: envelope.SubmitterKeyID, SubmitterRole: envelope.SubmitterRole,
 		Kind: envelope.Kind, Phase: envelope.Phase, Index: envelope.Index,
-		ParentCheckpointSHA256: envelope.ParentCheckpointSHA256, ParentHeadID: envelope.ParentHeadID,
-		AttemptID: envelope.AttemptID, ManifestKey: envelope.ManifestKey,
+		ParentCheckpointSHA256:     envelope.ParentCheckpointSHA256,
+		AllocationCheckpointSHA256: envelope.AllocationCheckpointSHA256,
+		ParentHeadID:               envelope.ParentHeadID,
+		AttemptID:                  envelope.AttemptID, ManifestKey: envelope.ManifestKey,
 		Envelope: envelopeRefs, Manifest: manifestRef, Result: mpcceremony.SubmissionAccepted,
 	}
 	ackDir := filepath.Join(fixture.root, "acknowledgements")

@@ -1374,6 +1374,9 @@ func copyOperationalEvidence(
 // order exactly — so bundling in the caller's flag order would sign a release
 // for which no valid decision can ever exist.
 func bundleAuditArtifacts(inputs []AuditArtifact, stagingDir string) ([]AuditArtifact, error) {
+	if len(inputs) == 0 {
+		return []AuditArtifact{}, nil
+	}
 	auditDir := filepath.Join(stagingDir, "audits")
 	if err := os.Mkdir(auditDir, 0o700); err != nil {
 		return nil, err

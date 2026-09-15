@@ -733,9 +733,6 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	}
 
 	auditDir := filepath.Join(outputRoot, "audits")
-	if err := os.Mkdir(auditDir, 0o700); err != nil {
-		return err
-	}
 	audits := make([]mpcceremony.AuditArtifact, 0, 2)
 	auditInputs := []struct {
 		id      string
@@ -747,6 +744,11 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	}
 	if zeroAssurance {
 		auditInputs = nil
+	}
+	if len(auditInputs) > 0 {
+		if err := os.Mkdir(auditDir, 0o700); err != nil {
+			return err
+		}
 	}
 	for index, input := range auditInputs {
 		recordPath := filepath.Join(auditDir, fmt.Sprintf("audit-%02d.json", index+1))
