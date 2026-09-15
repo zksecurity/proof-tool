@@ -247,7 +247,7 @@ func executeCheckpointSign(options CheckpointSignOptions) (CommandResult, error)
 	_, signatureBytes, err := mpcceremony.SignRecord(
 		built.checkpoint,
 		built.trusted.Definition.Coordinator.KeyID,
-		ed25519.PrivateKey(key),
+		key,
 	)
 	if err != nil {
 		return CommandResult{}, err

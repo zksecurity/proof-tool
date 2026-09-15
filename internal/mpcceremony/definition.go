@@ -191,9 +191,10 @@ func ComputeCeremonyID(definition CeremonyDefinition) (string, error) {
 		return "", err
 	}
 	domain := "proof-tool/mpc-ceremony/root/v3"
-	if definition.Schema == DefinitionSchemaV1 {
+	switch definition.Schema {
+	case DefinitionSchemaV1:
 		domain = "proof-tool/mpc-ceremony/root/v1"
-	} else if definition.Schema == DefinitionSchemaV2 {
+	case DefinitionSchemaV2:
 		domain = "proof-tool/mpc-ceremony/root/v2"
 	}
 	return canonicalHash(domain, definition)

@@ -114,9 +114,10 @@ func GenerateWithAssurance(outDir string, participantCount int, beaconWitnessLea
 			if identityErr != nil {
 				return identityErr
 			}
-			if spec.id == "auditor-01" {
+			switch spec.id {
+			case "auditor-01":
 				auditor1 = identity
-			} else if spec.id == "auditor-02" {
+			case "auditor-02":
 				auditor2 = identity
 			}
 			generated = append(generated, identity)

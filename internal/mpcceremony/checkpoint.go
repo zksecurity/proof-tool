@@ -1,7 +1,6 @@
 package mpcceremony
 
 import (
-	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"reflect"
@@ -459,7 +458,7 @@ func VerifySignedCheckpoint(definition CeremonyDefinition, definitionBytes, defi
 		return Checkpoint{}, errors.New("authenticated definition bytes do not match supplied definition")
 	}
 	var checkpoint Checkpoint
-	if err := VerifySignedRecord(checkpointBytes, signatureBytes, &checkpoint, definition.Coordinator.KeyID, ed25519.PublicKey(publicKey)); err != nil {
+	if err := VerifySignedRecord(checkpointBytes, signatureBytes, &checkpoint, definition.Coordinator.KeyID, publicKey); err != nil {
 		return Checkpoint{}, fmt.Errorf("checkpoint signature: %w", err)
 	}
 	if checkpoint.CeremonyID != definition.CeremonyID {

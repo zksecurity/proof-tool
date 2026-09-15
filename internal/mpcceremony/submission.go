@@ -367,7 +367,7 @@ func validateReasonCode(value string) error {
 		return errors.New("rejected acknowledgement requires a short reason_code")
 	}
 	for _, r := range value {
-		if !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9') && r != '-' {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
 			return errors.New("reason_code must use lowercase letters, numbers, and hyphens")
 		}
 	}
