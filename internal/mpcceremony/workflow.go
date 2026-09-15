@@ -656,21 +656,32 @@ func loadVerifiedPhase2Files(
 	phase1Seal SealRecord,
 	paths PhaseTranscriptPaths,
 ) (Chain, error) {
+	chain, _, err := loadVerifiedPhase2FilesExact(trusted, circuit, commons, phase1Seal, paths)
+	return chain, err
+}
+
+func loadVerifiedPhase2FilesExact(
+	trusted *TrustedCeremony,
+	circuit *CompiledCircuit,
+	commons *gnarkmpc.SrsCommons,
+	phase1Seal SealRecord,
+	paths PhaseTranscriptPaths,
+) (Chain, SignedArtifactRefs, error) {
 	if err := validateWorkflowCircuit(trusted, circuit); err != nil {
-		return Chain{}, err
+		return Chain{}, SignedArtifactRefs{}, err
 	}
 	if commons == nil {
-		return Chain{}, errors.New("sealed Phase 1 commons are required")
+		return Chain{}, SignedArtifactRefs{}, errors.New("sealed Phase 1 commons are required")
 	}
-	chain, err := LoadSignedChain(trusted, paths)
+	chain, refs, err := LoadSignedChainExact(trusted, paths)
 	if err != nil {
-		return Chain{}, err
+		return Chain{}, SignedArtifactRefs{}, err
 	}
 	if chain.Phase != Phase2 {
-		return Chain{}, fmt.Errorf("chain phase is %q, want phase2", chain.Phase)
+		return Chain{}, SignedArtifactRefs{}, fmt.Errorf("chain phase is %q, want phase2", chain.Phase)
 	}
 	if phase1Seal.CeremonyID != trusted.Definition.CeremonyID || phase1Seal.Phase != Phase1 {
-		return Chain{}, errors.New("Phase 2 chain requires the signed Phase 1 seal")
+		return Chain{}, SignedArtifactRefs{}, errors.New("Phase 2 chain requires the signed Phase 1 seal")
 	}
 	expectedPhaseID, err := ComputePhaseID(
 		trusted.Definition.CeremonyID,
@@ -679,21 +690,21 @@ func loadVerifiedPhase2Files(
 		phase1Seal.SealID,
 	)
 	if err != nil {
-		return Chain{}, err
+		return Chain{}, SignedArtifactRefs{}, err
 	}
 	if chain.PhaseID != expectedPhaseID {
-		return Chain{}, errors.New("Phase 2 chain ID does not bind the signed Phase 1 seal")
+		return Chain{}, SignedArtifactRefs{}, errors.New("Phase 2 chain ID does not bind the signed Phase 1 seal")
 	}
 	deterministicGenesis, deterministicShape, err := InitializePhase2(circuit, commons)
 	if err != nil {
-		return Chain{}, fmt.Errorf("recompute deterministic Phase 2 genesis: %w", err)
+		return Chain{}, SignedArtifactRefs{}, fmt.Errorf("recompute deterministic Phase 2 genesis: %w", err)
 	}
 	if !equalPhase2Shape(deterministicShape, circuit.Binding.Phase2Shape) {
-		return Chain{}, errors.New("deterministic Phase 2 genesis shape differs from signed circuit binding")
+		return Chain{}, SignedArtifactRefs{}, errors.New("deterministic Phase 2 genesis shape differs from signed circuit binding")
 	}
 	expectedGenesisSize, err := ExpectedPhase2Size(deterministicShape)
 	if err != nil {
-		return Chain{}, err
+		return Chain{}, SignedArtifactRefs{}, err
 	}
 	genesisHash := newDualHash()
 	written, err := writeToWithPanicBoundary(
@@ -702,18 +713,18 @@ func loadVerifiedPhase2Files(
 		genesisHash,
 	)
 	if err != nil {
-		return Chain{}, fmt.Errorf("hash deterministic Phase 2 genesis: %w", err)
+		return Chain{}, SignedArtifactRefs{}, fmt.Errorf("hash deterministic Phase 2 genesis: %w", err)
 	}
 	if written != expectedGenesisSize {
-		return Chain{}, fmt.Errorf("deterministic Phase 2 genesis wrote %d bytes, expected %d", written, expectedGenesisSize)
+		return Chain{}, SignedArtifactRefs{}, fmt.Errorf("deterministic Phase 2 genesis wrote %d bytes, expected %d", written, expectedGenesisSize)
 	}
 	if modelDigest(genesisHash.digest(written, nil)) != chain.Genesis.Digest {
-		return Chain{}, errors.New("Phase 2 chain genesis is not the deterministic circuit/commons initialization")
+		return Chain{}, SignedArtifactRefs{}, errors.New("Phase 2 chain genesis is not the deterministic circuit/commons initialization")
 	}
 	if err := verifyChainFiles(trusted, paths.RootDir, chain, circuit.Binding.Phase2Shape); err != nil {
-		return Chain{}, err
+		return Chain{}, SignedArtifactRefs{}, err
 	}
-	return chain, nil
+	return chain, refs, nil
 }
 
 func LoadReplayPhase2Files(
@@ -723,7 +734,7 @@ func LoadReplayPhase2Files(
 	phase1Seal SealRecord,
 	paths PhaseTranscriptPaths,
 ) (Chain, error) {
-	chain, err := loadVerifiedPhase2Files(trusted, circuit, commons, phase1Seal, paths)
+	chain, _, err := loadVerifiedPhase2FilesExact(trusted, circuit, commons, phase1Seal, paths)
 	if err != nil {
 		return Chain{}, err
 	}
@@ -2031,6 +2042,55 @@ type VerifyPhase1SealFilesResult struct {
 	Seal    SealRecord
 	Close   CloseRecord
 	Commons ArtifactRef
+}
+
+type VerifyPhase2GenesisFilesOptions struct {
+	Trust                    TrustPaths
+	Circuit                  *CompiledCircuit
+	TranscriptRoot           string
+	Phase1SealPath           string
+	Phase1SealSignaturePath  string
+	Phase2ChainPath          string
+	Phase2ChainSignaturePath string
+}
+
+type VerifyPhase2GenesisFilesResult struct {
+	Chain     Chain
+	ChainRefs SignedArtifactRefs
+	Genesis   ArtifactRef
+}
+
+// VerifyPhase2GenesisFiles fully replays sealed Phase 1 and proves that the
+// signed zero-contribution Phase 2 chain names its deterministic genesis.
+func VerifyPhase2GenesisFiles(options VerifyPhase2GenesisFilesOptions) (VerifyPhase2GenesisFilesResult, error) {
+	trusted, err := loadOperationalCeremony(options.Trust)
+	if err != nil {
+		return VerifyPhase2GenesisFilesResult{}, err
+	}
+	if err := validateWorkflowCircuit(trusted, options.Circuit); err != nil {
+		return VerifyPhase2GenesisFilesResult{}, err
+	}
+	commons, seal, _, err := loadPhase1CommonsForPhase2(trusted, options.Circuit, options.TranscriptRoot, options.Phase1SealPath, options.Phase1SealSignaturePath)
+	if err != nil {
+		return VerifyPhase2GenesisFilesResult{}, fmt.Errorf("verify sealed Phase 1: %w", err)
+	}
+	paths := PhaseTranscriptPaths{RootDir: options.TranscriptRoot, ChainPath: options.Phase2ChainPath, ChainSignaturePath: options.Phase2ChainSignaturePath}
+	verified, refs, err := loadVerifiedPhase2FilesExact(trusted, options.Circuit, commons, seal, paths)
+	if err != nil {
+		return VerifyPhase2GenesisFilesResult{}, err
+	}
+	if len(verified.Records) != 0 {
+		return VerifyPhase2GenesisFilesResult{}, errors.New("Phase 2 initialization requires a zero-contribution chain")
+	}
+	loader := phase2FileLoader(paths.RootDir, verified, contributionPhase2Shape(options.Circuit.Binding.Phase2Shape), paths.Progress)
+	if err := ReplayPhase2Loaded(options.Circuit, commons, len(verified.Records), loader); err != nil {
+		return VerifyPhase2GenesisFilesResult{}, err
+	}
+	genesis, err := verified.HeadPayload()
+	if err != nil {
+		return VerifyPhase2GenesisFilesResult{}, err
+	}
+	return VerifyPhase2GenesisFilesResult{Chain: verified, ChainRefs: refs, Genesis: genesis}, nil
 }
 
 // VerifyPhase1SealFiles performs the same full, read-only Phase 1 replay used

@@ -69,6 +69,7 @@ const (
 	CheckpointPhase1Closed            CheckpointTransitionKind = "phase1-closed"
 	CheckpointPhase1BeaconRecorded    CheckpointTransitionKind = "phase1-beacon-recorded"
 	CheckpointPhase1Sealed            CheckpointTransitionKind = "phase1-sealed"
+	CheckpointPhase2Initialized       CheckpointTransitionKind = "phase2-initialized"
 )
 
 type CheckpointSubmissionKind string
@@ -97,8 +98,8 @@ type CheckpointPhaseState struct {
 }
 
 func (s CheckpointPhaseState) Validate() error {
-	if s.Phase != Phase1 {
-		return fmt.Errorf("checkpoint phase %q, want phase1", s.Phase)
+	if s.Phase != Phase1 && s.Phase != Phase2 {
+		return fmt.Errorf("checkpoint phase %q, want phase1 or phase2", s.Phase)
 	}
 	if s.AcceptedCount > MaxParticipants {
 		return fmt.Errorf("accepted_count %d exceeds maximum %d", s.AcceptedCount, MaxParticipants)
@@ -248,6 +249,19 @@ func (t CheckpointTransition) Validate() error {
 		}
 		return nil
 	}
+	if t.Kind == CheckpointPhase2Initialized {
+		if t.Phase != Phase2 || t.Index != 0 || t.ParticipantID != "" || t.AttemptID != "" ||
+			t.NextAttemptID != "" || t.Record == nil || t.Acknowledgement != nil || len(t.Evidence) != 1 {
+			return errors.New("phase2 initialization transition requires only the signed genesis chain and genesis payload")
+		}
+		if err := t.Record.Validate(); err != nil {
+			return fmt.Errorf("transition record: %w", err)
+		}
+		if err := t.Evidence[0].Validate(); err != nil {
+			return fmt.Errorf("transition phase2 genesis: %w", err)
+		}
+		return nil
+	}
 	if t.Phase != Phase1 {
 		return fmt.Errorf("transition phase %q, want phase1", t.Phase)
 	}
@@ -334,6 +348,7 @@ type Checkpoint struct {
 	Phase1Closure      *SignedArtifactRefs        `json:"phase1_closure,omitempty"`
 	Phase1Beacon       *SignedArtifactRefs        `json:"phase1_beacon,omitempty"`
 	Phase1Seal         *SignedArtifactRefs        `json:"phase1_seal,omitempty"`
+	Phase2             *CheckpointPhaseState      `json:"phase2,omitempty"`
 	AcceptedArtifacts  []ArtifactRef              `json:"accepted_artifacts"`
 	Submissions        []CheckpointSubmissionSlot `json:"submissions"`
 }
@@ -381,12 +396,15 @@ func (c Checkpoint) Validate() error {
 	if err := c.Transition.Validate(); err != nil {
 		return fmt.Errorf("transition: %w", err)
 	}
-	if c.Schema != CheckpointSchema && (c.Phase1Closure != nil || c.Phase1Beacon != nil || c.Phase1Seal != nil ||
-		c.Transition.Kind == CheckpointPhase1Closed || c.Transition.Kind == CheckpointPhase1BeaconRecorded || c.Transition.Kind == CheckpointPhase1Sealed) {
-		return errors.New("phase1 closure, beacon, and seal require checkpoint v3")
+	if c.Schema != CheckpointSchema && (c.Phase1Closure != nil || c.Phase1Beacon != nil || c.Phase1Seal != nil || c.Phase2 != nil ||
+		c.Transition.Kind == CheckpointPhase1Closed || c.Transition.Kind == CheckpointPhase1BeaconRecorded || c.Transition.Kind == CheckpointPhase1Sealed || c.Transition.Kind == CheckpointPhase2Initialized) {
+		return errors.New("phase1 closure and later lifecycle state require checkpoint v3")
 	}
 	if err := c.Phase1.Validate(); err != nil {
 		return fmt.Errorf("phase1: %w", err)
+	}
+	if c.Phase1.Phase != Phase1 {
+		return errors.New("phase1 state must identify phase1")
 	}
 	if c.Phase1Closure != nil {
 		if err := c.Phase1Closure.Validate(); err != nil {
@@ -418,8 +436,24 @@ func (c Checkpoint) Validate() error {
 			return errors.New("phase1 seal must be present in accepted_artifacts")
 		}
 	}
-	if c.Sequence == 0 && (c.Phase1Closure != nil || c.Phase1Beacon != nil || c.Phase1Seal != nil) {
-		return errors.New("initial checkpoint must not contain phase1 closure, beacon, or seal state")
+	if c.Phase2 != nil {
+		if c.Phase1Seal == nil {
+			return errors.New("phase2 state requires a phase1 seal")
+		}
+		if err := c.Phase2.Validate(); err != nil {
+			return fmt.Errorf("phase2: %w", err)
+		}
+		if c.Phase2.Phase != Phase2 {
+			return errors.New("phase2 state must identify phase2")
+		}
+		for _, ref := range []ArtifactRef{c.Phase2.Chain.Record, c.Phase2.Chain.Signature, c.Phase2.HeadPayload} {
+			if !slices.Contains(c.AcceptedArtifacts, ref) {
+				return errors.New("phase2 state artifacts must be present in accepted_artifacts")
+			}
+		}
+	}
+	if c.Sequence == 0 && (c.Phase1Closure != nil || c.Phase1Beacon != nil || c.Phase1Seal != nil || c.Phase2 != nil) {
+		return errors.New("initial checkpoint must not contain later lifecycle state")
 	}
 	if c.Sequence == 0 && (c.Phase1.AcceptedCount != 0 || len(c.Submissions) != 0) {
 		return errors.New("initial checkpoint must start before contributions and submissions")
@@ -611,9 +645,33 @@ func ValidateCheckpointTransition(previous, next Checkpoint) error {
 		return validatePhase1BeaconTransition(previous, next)
 	case CheckpointPhase1Sealed:
 		return validatePhase1SealTransition(previous, next)
+	case CheckpointPhase2Initialized:
+		return validatePhase2InitializedTransition(previous, next)
 	default:
 		return fmt.Errorf("transition %q cannot follow another checkpoint", next.Transition.Kind)
 	}
+}
+
+func validatePhase2InitializedTransition(previous, next Checkpoint) error {
+	if previous.Phase1Seal == nil || next.Phase1Seal == nil || *previous.Phase1Seal != *next.Phase1Seal ||
+		previous.Phase1Closure == nil || next.Phase1Closure == nil || *previous.Phase1Closure != *next.Phase1Closure ||
+		previous.Phase1Beacon == nil || next.Phase1Beacon == nil || *previous.Phase1Beacon != *next.Phase1Beacon {
+		return errors.New("phase2 initialization must preserve sealed phase1 state")
+	}
+	if previous.Phase2 != nil || next.Phase2 == nil || next.Phase2.AcceptedCount != 0 {
+		return errors.New("phase2 initialization must add exactly one zero-contribution phase2 state")
+	}
+	if !samePhaseState(previous.Phase1, next.Phase1) || !slotsEqual(previous.Submissions, next.Submissions) {
+		return errors.New("phase2 initialization must preserve phase1 and submission slots")
+	}
+	if next.Transition.Record == nil || *next.Transition.Record != next.Phase2.Chain || len(next.Transition.Evidence) != 1 || next.Transition.Evidence[0] != next.Phase2.HeadPayload {
+		return errors.New("phase2 initialization transition must name its exact chain and genesis")
+	}
+	if !exactArtifactDelta(previous.AcceptedArtifacts, next.AcceptedArtifacts,
+		next.Phase2.Chain.Record, next.Phase2.Chain.Signature, next.Phase2.HeadPayload) {
+		return errors.New("phase2 initialization accepted an unexpected artifact set")
+	}
+	return nil
 }
 
 func validatePhase1SealTransition(previous, next Checkpoint) error {

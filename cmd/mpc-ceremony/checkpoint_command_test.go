@@ -306,7 +306,7 @@ func TestCheckpointPrepareReceiptAcceptedAuthenticatesInnerEvidence(t *testing.T
 	)
 }
 
-func TestCheckpointCommandFullPhase1LifecycleThroughSeal(t *testing.T) {
+func TestCheckpointCommandFullLifecycleThroughPhase2Initialization(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("full signed workflow fixture requires Linux executable identity")
 	}
@@ -492,6 +492,30 @@ func TestCheckpointCommandFullPhase1LifecycleThroughSeal(t *testing.T) {
 	if phase2.Outputs["phase2_genesis"] == "" || phase2.Outputs["phase2_chain"] == "" {
 		t.Fatalf("Phase 2 initialization after cp6 outputs = %#v", phase2.Outputs)
 	}
+	phase2Args := append(append([]string{}, fixture.trustArgs...),
+		"--artifact-root", fixture.root, "--relay-release-id", "role-images-test",
+		"--transition", string(mpcceremony.CheckpointPhase2Initialized),
+		"--previous-checkpoint", cp6.Outputs["checkpoint"], "--previous-checkpoint-signature", cp6SignaturePath,
+		"--chain", chainPath, "--chain-signature", chainSignaturePath,
+		"--head-payload", filepath.Join(fixture.root, filepath.FromSlash(accepted.OutputPayload.Name)),
+		"--transition-record", phase2.Outputs["phase2_chain"],
+		"--transition-record-signature", phase2.Outputs["phase2_chain_signature"],
+		"--phase2-genesis", phase2.Outputs["phase2_genesis"],
+	)
+	cp7Packet := filepath.Join(fixture.root, "prepared", "cp7")
+	cp7 := runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "prepare"}, phase2Args...), "--out-dir", cp7Packet))
+	cp7SignaturePath := filepath.Join(fixture.root, "state", "signed-cp7.sig")
+	runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "sign"}, phase2Args...),
+		"--checkpoint", cp7.Outputs["checkpoint"], "--signing-request", cp7.Outputs["signing_request"],
+		"--coordinator-signing-key", keyPath, "--out", cp7SignaturePath))
+	verified = runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "verify-stored"}, fixture.trustArgs...),
+		"--checkpoint", cp7.Outputs["checkpoint"], "--checkpoint-signature", cp7SignaturePath, "--artifact-root", fixture.root))
+	if verified.CheckpointEvidenceInspection == nil || !verified.CheckpointEvidenceInspection.FullyVerified || verified.CheckpointEvidenceInspection.Sequence != 7 {
+		t.Fatalf("cp7 stored verification = %#v", verified.CheckpointEvidenceInspection)
+	}
+	assertChangedCheckpointEvidenceFails(t, fixture.executable, phase2Args, "phase2/genesis.bin", "phase2-genesis")
+	assertChangedCheckpointEvidenceFails(t, fixture.executable, phase2Args, "phase2/chain-0000.json", "phase2-chain")
+	assertChangedCheckpointEvidenceFails(t, fixture.executable, phase2Args, "phase2/chain-0000.sig", "phase2-chain-signature")
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, sealArgs, "phase1/sealed/seal.sig", "seal-signature")
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, sealArgs, "phase1/sealed/commons.bin", "sealed-commons")
 

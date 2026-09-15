@@ -56,10 +56,10 @@ Commands:
   decision prepare     Derive the canonical production GO/NO-GO record
   decision sign        Sign the canonical production GO/NO-GO record
   decision verify      Verify decision evidence and role threshold
-  checkpoint prepare   Re-derive a supported Phase 1 checkpoint from authenticated evidence
-  checkpoint sign      Re-derive and sign an exact reviewed Phase 1 checkpoint
-  checkpoint verify    Fully verify a signed Phase 1 checkpoint and its evidence
-  checkpoint verify-stored  Infer and fully verify a fetched Phase 1 checkpoint ancestry
+  checkpoint prepare   Re-derive a supported ceremony checkpoint from authenticated evidence
+  checkpoint sign      Re-derive and sign an exact reviewed ceremony checkpoint
+  checkpoint verify    Fully verify a signed ceremony checkpoint and its evidence
+  checkpoint verify-stored  Infer and fully verify a fetched checkpoint ancestry
   inspect definition   Authenticate and describe a ceremony definition
   inspect chain        Authenticate and describe an accepted chain
   inspect participant  Match an existing key to the participant roster
@@ -254,7 +254,7 @@ replays the contribution mathematics and cleanup evidence.
     --relay-release-id ID --transition KIND --chain FILE \
     --chain-signature FILE --head-payload FILE [transition flags] --out-dir DIR
 
-Re-derives a canonical supported Phase 1 checkpoint from authenticated evidence and
+Re-derives a canonical supported ceremony checkpoint from authenticated evidence and
 writes canonical.json plus signing-request.json to a fresh directory.
 
 For phase1-outbound-published also supply the previous checkpoint pair, signed
@@ -292,7 +292,7 @@ private key belongs to the authenticated coordinator, then signs it.
     --checkpoint FILE --checkpoint-signature FILE
 
 Re-derives and authenticates the signed checkpoint and all transition-defining
-evidence within the supported Phase 1 boundary. Its JSON projection sets fully_verified
+evidence within the supported lifecycle boundary. Its JSON projection sets fully_verified
 only after those checks pass. Structural inspect checkpoint output must not be
 used to advance Relay's trusted high-water state.
 `,
@@ -304,7 +304,7 @@ used to advance Relay's trusted high-water state.
 
 Walks the fetched checkpoint ancestry and derives every evidence path and
 transition input from the authenticated checkpoints themselves. Every
-supported Phase 1 edge is fully re-derived; candidate acceptance replays
+supported ceremony edge is fully re-derived; candidate acceptance replays
 contribution mathematics and cleanup, while closure and beacon validation use
 the exact authenticated head and raw beacon response.
 Only this command (or checkpoint verify with explicit evidence) emits

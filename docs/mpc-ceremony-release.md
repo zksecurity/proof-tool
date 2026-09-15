@@ -132,3 +132,7 @@ The signed checkpoint graph uses the same canonical Phase 1 paths consumed by
 Phase 2 (`phase1/chain-NNNN.*`, `phase1/closure/*`, `phase1/beacon/*`, and
 `phase1/sealed/*`). Checkpoint creation rejects alternate aliases, so a fully
 verified Phase 1 graph cannot depend on hidden duplicate files before Phase 2.
+The next checkpoint fully replays that sealed Phase 1 state and accepts only
+the deterministic zero-contribution Phase 2 tree at
+`phase2/chain-0000.json`, `phase2/chain-0000.sig`, and
+`phase2/genesis.bin`. Merely uploading files with those names is insufficient.

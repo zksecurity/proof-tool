@@ -275,6 +275,17 @@ func TestCheckpointPhase1LegalSequence(t *testing.T) {
 	}
 }
 
+func TestCheckpointRejectsMislabeledPhase1State(t *testing.T) {
+	sequence := phase1CheckpointSequence(t)
+	for index := range sequence {
+		changed := cloneCheckpoint(t, sequence[index])
+		changed.Phase1.Phase = Phase2
+		if err := changed.Validate(); err == nil || !strings.Contains(err.Error(), "phase1 state must identify phase1") {
+			t.Fatalf("checkpoint %d mislabeled phase1 err=%v", index, err)
+		}
+	}
+}
+
 func TestCheckpointPhase1ClosureIsOneWayAndExact(t *testing.T) {
 	sequence := phase1CheckpointSequence(t)
 	previous := sequence[3]
@@ -458,6 +469,64 @@ func TestPhase1SealRejectsUnverifiedExtraOutputs(t *testing.T) {
 	}}
 	if _, err := phase1CommonsOutput(seal); err == nil || !strings.Contains(err.Error(), "exactly one") {
 		t.Fatalf("extra Phase 1 seal output err=%v", err)
+	}
+}
+
+func TestCheckpointPhase2InitializationRequiresExactGenesis(t *testing.T) {
+	base := phase1ClosedCheckpoint(t, phase1CheckpointSequence(t)[3])
+	beaconRefs := checkpointSigned("phase1/beacon/record")
+	raw := checkpointArtifact("phase1/beacon/raw-response.bin", "raw")
+	beacon := cloneCheckpoint(t, base)
+	beacon.Sequence++
+	beaconParent := checkpointReference(t, base, "phase1-closed")
+	beacon.PreviousCheckpoint = &beaconParent
+	beacon.Transition = CheckpointTransition{Kind: CheckpointPhase1BeaconRecorded, Phase: Phase1, Record: &beaconRefs, Evidence: []ArtifactRef{raw}}
+	beacon.Phase1Beacon = &beaconRefs
+	beacon.AcceptedArtifacts = appendCheckpointArtifacts(beacon.AcceptedArtifacts, beaconRefs.Record, beaconRefs.Signature, raw)
+	sealRefs := checkpointSigned("phase1/sealed/seal")
+	commons := checkpointArtifact("phase1/sealed/commons.bin", "commons")
+	sealed := cloneCheckpoint(t, beacon)
+	sealed.Sequence++
+	sealParent := checkpointReference(t, beacon, "phase1-beacon")
+	sealed.PreviousCheckpoint = &sealParent
+	sealed.Transition = CheckpointTransition{Kind: CheckpointPhase1Sealed, Phase: Phase1, Record: &sealRefs, Evidence: []ArtifactRef{commons}}
+	sealed.Phase1Seal = &sealRefs
+	sealed.AcceptedArtifacts = appendCheckpointArtifacts(sealed.AcceptedArtifacts, sealRefs.Record, sealRefs.Signature, commons)
+
+	chain := checkpointSigned("phase2/chain-0000")
+	genesis := checkpointArtifact("phase2/genesis.bin", "phase2 genesis")
+	next := cloneCheckpoint(t, sealed)
+	next.Sequence++
+	phase2Parent := checkpointReference(t, sealed, "phase1-sealed")
+	next.PreviousCheckpoint = &phase2Parent
+	next.Transition = CheckpointTransition{Kind: CheckpointPhase2Initialized, Phase: Phase2, Record: &chain, Evidence: []ArtifactRef{genesis}}
+	phase2 := CheckpointPhaseState{Phase: Phase2, HeadRecordID: "sha256:" + strings.Repeat("7", 64), HeadPayload: genesis, Chain: chain}
+	next.Phase2 = &phase2
+	next.AcceptedArtifacts = appendCheckpointArtifacts(next.AcceptedArtifacts, chain.Record, chain.Signature, genesis)
+	if err := ValidateCheckpointTransition(sealed, next); err != nil {
+		t.Fatalf("valid phase2 initialization: %v", err)
+	}
+	changed := cloneCheckpoint(t, next)
+	changed.Phase2.HeadPayload = checkpointArtifact("phase2/other.bin", "other")
+	if err := ValidateCheckpointTransition(sealed, changed); err == nil {
+		t.Fatal("changed phase2 genesis unexpectedly accepted")
+	}
+	changed = cloneCheckpoint(t, next)
+	changed.AcceptedArtifacts = appendCheckpointArtifacts(changed.AcceptedArtifacts, checkpointArtifact("phase2/unexpected.bin", "unexpected"))
+	if err := ValidateCheckpointTransition(sealed, changed); err == nil {
+		t.Fatal("unexpected phase2 artifact accepted")
+	}
+	unsealed := cloneCheckpoint(t, sealed)
+	unsealed.Phase1Seal = nil
+	if err := ValidateCheckpointTransition(unsealed, next); err == nil {
+		t.Fatal("phase2 initialization from unsealed parent accepted")
+	}
+	repeated := cloneCheckpoint(t, next)
+	repeated.Sequence++
+	repeatedParent := checkpointReference(t, next, "phase2-initialized")
+	repeated.PreviousCheckpoint = &repeatedParent
+	if err := ValidateCheckpointTransition(next, repeated); err == nil {
+		t.Fatal("repeated phase2 initialization accepted")
 	}
 }
 
