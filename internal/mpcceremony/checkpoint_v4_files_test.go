@@ -6,10 +6,49 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"strings"
 	"testing"
 )
+
+func TestCheckpointV4RealContributionTurn(t *testing.T) {
+	if testing.Short() {
+		t.Skip("real signed contribution checkpoint round trip")
+	}
+	if runtime.GOOS != "linux" {
+		t.Skip("executable identity and contributor environment require Linux; run in Docker")
+	}
+	_, source, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve source")
+	}
+	repo := filepath.Clean(filepath.Join(filepath.Dir(source), "..", ".."))
+	helper := filepath.Join(t.TempDir(), "workflow")
+	build := exec.Command("go", "build", "-o", helper, "./internal/mpcceremony/testdata/workflowhelper")
+	build.Dir = repo
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, output)
+	}
+	run := exec.Command(helper, filepath.Join(t.TempDir(), "ceremony-run"))
+	run.Dir = repo
+	for _, entry := range os.Environ() {
+		if strings.HasPrefix(entry, "MPC_WORKFLOW_") || strings.HasPrefix(entry, "MPC_CEREMONY_TEST_") || strings.HasPrefix(entry, "PROOF_TOOL_TEST_") {
+			continue
+		}
+		run.Env = append(run.Env, entry)
+	}
+	run.Env = append(run.Env, "MPC_WORKFLOW_CHECKPOINT_V4=1", "PROOF_TOOL_TEST_ZERO_ASSURANCE=1")
+	output, err := run.CombinedOutput()
+	if err != nil {
+		t.Fatalf("real checkpoint turn: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "V4 real phase1 turn passed") {
+		t.Fatalf("missing completion: %s", output)
+	}
+}
 
 func putCheckpointTestFileV4(t *testing.T, root, name string, data []byte) ArtifactRef {
 	t.Helper()
