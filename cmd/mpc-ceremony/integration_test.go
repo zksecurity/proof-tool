@@ -197,6 +197,7 @@ func TestParticipantCLIHelpHasExplicitSafeFlagAllowlist(t *testing.T) {
 		"--accepted-at",
 		"--allowed-binary",
 		"--contributed-at",
+		"--disable-optional-assurance",
 	}
 	flagPattern := regexp.MustCompile(`--[a-z0-9-]+`)
 	seenSet := make(map[string]struct{})
@@ -231,6 +232,12 @@ func TestFinalizationAuditAndReleaseCommandsAreWired(t *testing.T) {
 		{Command: CommandInspectChain, Options: InspectChainOptions{}},
 		{Command: CommandInspectParticipant, Options: InspectParticipantOptions{}},
 		{Command: CommandInspectEnrollment, Options: InspectEnrollmentOptions{}},
+		{Command: CommandInspectCheckpoint, Options: InspectCheckpointOptions{}},
+		{Command: CommandInspectCheckpointTransition, Options: InspectCheckpointTransitionOptions{}},
+		{Command: CommandCheckpointPrepare, Options: CheckpointPrepareOptions{}},
+		{Command: CommandCheckpointSign, Options: CheckpointSignOptions{}},
+		{Command: CommandCheckpointVerify, Options: CheckpointVerifyOptions{}},
+		{Command: CommandCheckpointVerifyStored, Options: CheckpointVerifyStoredOptions{}},
 	}
 	for _, invocation := range tests {
 		t.Run(string(invocation.Command), func(t *testing.T) {
@@ -269,6 +276,12 @@ func TestEveryCommandRejectsWalletAndWitnessSecretInputs(t *testing.T) {
 		{"inspect", "chain"},
 		{"inspect", "participant"},
 		{"inspect", "enrollment"},
+		{"inspect", "checkpoint"},
+		{"inspect", "checkpoint-transition"},
+		{"checkpoint", "prepare"},
+		{"checkpoint", "sign"},
+		{"checkpoint", "verify"},
+		{"checkpoint", "verify-stored"},
 		{"ops", "prepare-public-witness-receipt"},
 		{"ops", "prepare-mirror-receipt"},
 		{"ops", "export-signing"},

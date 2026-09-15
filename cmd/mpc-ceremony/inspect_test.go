@@ -146,6 +146,9 @@ func TestInspectParticipantMatchesRosterPositionsWithoutExposingPrivateKey(t *te
 	root := t.TempDir()
 	definition, _, coordinatorKey := decisionSignFixture(t)
 	definition.Mode = mpcceremony.ModeRehearsal
+	assurance := *definition.AssurancePolicy
+	assurance.ExternalSecurityAuditSignoffs = 0
+	definition.AssurancePolicy = &assurance
 	definition.Phase2Policy.Participants = []string{"participant-01", "participant-03"}
 	definition.Phase2Policy.Minimum = 2
 	var err error

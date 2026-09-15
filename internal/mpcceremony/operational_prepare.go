@@ -23,9 +23,16 @@ type discoveredOperational struct {
 }
 
 func PrepareOperationalEvidence(definition CeremonyDefinition, root, assembledAt string) (OperationalPreparation, error) {
+	bundleSchema := OperationalEvidenceBundleSchema
+	bundleAssurance := cloneAssurancePolicy(definition.AssurancePolicy)
+	if definition.Schema != DefinitionSchema {
+		bundleSchema = OperationalEvidenceBundleSchemaV2
+		bundleAssurance = nil
+	}
 	result := OperationalPreparation{Bundle: OperationalEvidenceBundle{
-		Schema: OperationalEvidenceBundleSchema, CeremonyID: definition.CeremonyID,
-		CoordinatorID: definition.Coordinator.ID, CoordinatorKeyID: definition.Coordinator.KeyID,
+		Schema: bundleSchema, CeremonyID: definition.CeremonyID,
+		AssurancePolicy: bundleAssurance,
+		CoordinatorID:   definition.Coordinator.ID, CoordinatorKeyID: definition.Coordinator.KeyID,
 		AssembledAt: assembledAt, Enrollments: []SignedArtifactRefs{}, GovernanceRecords: []SignedArtifactRefs{},
 	}, Missing: []string{}}
 	if err := definition.Validate(); err != nil {
@@ -33,6 +40,10 @@ func PrepareOperationalEvidence(definition CeremonyDefinition, root, assembledAt
 	}
 	if err := validateTimestamp("assembled_at", assembledAt); err != nil {
 		return result, err
+	}
+	assurance := defaultAssurancePolicy(definition.Mode)
+	if definition.Schema == DefinitionSchema {
+		assurance = *definition.AssurancePolicy
 	}
 	var records []discoveredOperational
 	signatures := map[string][]ArtifactRef{}
@@ -179,7 +190,7 @@ func PrepareOperationalEvidence(definition CeremonyDefinition, root, assembledAt
 		}
 	}
 	for _, phase := range []Phase{Phase1, Phase2} {
-		p := PhaseOperationalEvidence{Phase: phase, PublicWitnessQuorum: 1, AcceptedHeads: []AcceptedHeadOperationalEvidence{}, RawBeaconResponses: []ArtifactRef{}}
+		p := PhaseOperationalEvidence{Phase: phase, PublicWitnessQuorum: assurance.PublicWitnessesPerPhase, AcceptedHeads: []AcceptedHeadOperationalEvidence{}, PublicWitnessReceipts: []SignedArtifactRefs{}, RawBeaconResponses: []ArtifactRef{}}
 		label := string(phase)
 		closePair, closeAny := pick(label+" closure", func(v any) bool { c, ok := v.(*CloseRecord); return ok && c.Phase == phase })
 		p.Close = closePair
@@ -196,8 +207,8 @@ func PrepareOperationalEvidence(definition CeremonyDefinition, root, assembledAt
 			w, ok := v.(*PublicWitnessReceipt)
 			return ok && w.Phase == phase && w.CloseID == close.CloseID
 		})
-		if len(p.PublicWitnessReceipts) < 1 {
-			result.Missing = append(result.Missing, label+": collect signed observations from at least one witness; expired windows cannot be recreated")
+		if len(p.PublicWitnessReceipts) < int(assurance.PublicWitnessesPerPhase) {
+			result.Missing = append(result.Missing, fmt.Sprintf("%s: collect %d signed witness observations; expired windows cannot be recreated", label, assurance.PublicWitnessesPerPhase))
 		}
 		p.MultiRelayBeaconEvidence, closeAny = pick(label+" two-operator beacon evidence", func(v any) bool {
 			b, ok := v.(*MultiRelayBeaconEvidence)
@@ -260,8 +271,8 @@ func PrepareOperationalEvidence(definition CeremonyDefinition, root, assembledAt
 					}
 					break
 				}
-				if len(h.MirrorReceipts) < 1 {
-					result.Missing = append(result.Missing, scope+": collect at least one signed mirror receipt for this exact head")
+				if len(h.MirrorReceipts) < int(assurance.MirrorsPerAcceptedHead) {
+					result.Missing = append(result.Missing, fmt.Sprintf("%s: collect %d signed mirror receipts for this exact head", scope, assurance.MirrorsPerAcceptedHead))
 				}
 				p.AcceptedHeads = append(p.AcceptedHeads, h)
 			}

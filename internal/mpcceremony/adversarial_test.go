@@ -463,8 +463,8 @@ func TestCeremonyDefinitionRejectsMetadataDrift(t *testing.T) {
 		{name: "beacon policy weakened", mutate: func(d *CeremonyDefinition) {
 			d.BeaconPolicy.FutureRoundRequired = false
 		}},
-		{name: "beacon witness lead weakened", mutate: func(d *CeremonyDefinition) {
-			d.BeaconPolicy.MinimumWitnessLeadSeconds = ProductionMinimumWitnessLeadSeconds - 1
+		{name: "beacon witness lead removed", mutate: func(d *CeremonyDefinition) {
+			d.BeaconPolicy.MinimumWitnessLeadSeconds = 0
 		}},
 		{name: "beacon chain replaced", mutate: func(d *CeremonyDefinition) {
 			d.BeaconPolicy.ChainHashHex = strings.Repeat("00", 32)
@@ -1176,10 +1176,14 @@ func TestReleaseRequiresExactChronologicalIndependentAudits(t *testing.T) {
 		t.Fatal("audit predating candidate finalization unexpectedly accepted")
 	}
 
-	if err := validateReleaseChronology(latest, latest); err == nil {
+	candidateTime := latest.Add(-time.Hour)
+	if err := validateReleaseChronology(candidateTime, candidateTime, time.Time{}); err == nil {
+		t.Fatal("zero-audit release at candidate finalization unexpectedly accepted")
+	}
+	if err := validateReleaseChronology(latest, candidateTime, latest); err == nil {
 		t.Fatal("release at the latest audit timestamp unexpectedly accepted")
 	}
-	if err := validateReleaseChronology(latest.Add(time.Nanosecond), latest); err != nil {
+	if err := validateReleaseChronology(latest.Add(time.Nanosecond), candidateTime, latest); err != nil {
 		t.Fatalf("release strictly after the latest audit rejected: %v", err)
 	}
 }

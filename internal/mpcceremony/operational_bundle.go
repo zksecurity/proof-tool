@@ -10,7 +10,8 @@ import (
 )
 
 const (
-	OperationalEvidenceBundleSchema = "proof-tool-mpc-operational-evidence-bundle-v2"
+	OperationalEvidenceBundleSchemaV2 = "proof-tool-mpc-operational-evidence-bundle-v2"
+	OperationalEvidenceBundleSchema   = "proof-tool-mpc-operational-evidence-bundle-v3"
 )
 
 type SignedArtifactRefs struct {
@@ -71,8 +72,8 @@ func (e AcceptedHeadOperationalEvidence) Validate() error {
 	if err := e.AcceptedChainPrefix.Validate(); err != nil {
 		return fmt.Errorf("accepted_chain_prefix: %w", err)
 	}
-	if len(e.MirrorReceipts) < 1 || len(e.MirrorReceipts) > 8 {
-		return errors.New("accepted head requires between 1 and 8 immutable mirror receipts")
+	if len(e.MirrorReceipts) > MaxAuditors {
+		return fmt.Errorf("accepted head mirror receipts exceed maximum %d", MaxAuditors)
 	}
 	return validateSignedArtifactSet("mirror_receipts", e.MirrorReceipts)
 }
@@ -109,9 +110,6 @@ func (p PhaseOperationalEvidence) Validate() error {
 			return errors.New("accepted heads must be complete and ordered by one-based index")
 		}
 	}
-	if p.PublicWitnessQuorum < 1 {
-		return errors.New("public_witness_quorum must be at least 1")
-	}
 	if len(p.PublicWitnessReceipts) < int(p.PublicWitnessQuorum) || len(p.PublicWitnessReceipts) > 32 {
 		return fmt.Errorf(
 			"public witness receipt count %d does not satisfy quorum %d or maximum 32",
@@ -138,6 +136,7 @@ func (p PhaseOperationalEvidence) Validate() error {
 type OperationalEvidenceBundle struct {
 	Schema            string                   `json:"schema"`
 	CeremonyID        string                   `json:"ceremony_id"`
+	AssurancePolicy   *AssurancePolicy         `json:"assurance_policy,omitempty"`
 	Enrollments       []SignedArtifactRefs     `json:"enrollments"`
 	GovernanceRecords []SignedArtifactRefs     `json:"governance_records"`
 	Phase1            PhaseOperationalEvidence `json:"phase1"`
@@ -148,13 +147,34 @@ type OperationalEvidenceBundle struct {
 }
 
 func (b OperationalEvidenceBundle) Validate() error {
-	if b.Schema != OperationalEvidenceBundleSchema {
+	switch b.Schema {
+	case OperationalEvidenceBundleSchema:
+		if b.AssurancePolicy == nil {
+			return errors.New("operational evidence v3 requires assurance_policy")
+		}
+		if b.Enrollments == nil || b.GovernanceRecords == nil ||
+			b.Phase1.AcceptedHeads == nil || b.Phase1.PublicWitnessReceipts == nil || b.Phase1.RawBeaconResponses == nil ||
+			b.Phase2.AcceptedHeads == nil || b.Phase2.PublicWitnessReceipts == nil || b.Phase2.RawBeaconResponses == nil {
+			return errors.New("operational evidence v3 requires explicit arrays; use [] for enabled collections with no records")
+		}
+		for _, phase := range []PhaseOperationalEvidence{b.Phase1, b.Phase2} {
+			for _, head := range phase.AcceptedHeads {
+				if head.MirrorReceipts == nil {
+					return fmt.Errorf("%s head %d requires an explicit mirror_receipts array", phase.Phase, head.Index)
+				}
+			}
+		}
+	case OperationalEvidenceBundleSchemaV2:
+		if b.AssurancePolicy != nil {
+			return errors.New("operational evidence v2 must not contain assurance_policy")
+		}
+	default:
 		return fmt.Errorf("operational evidence schema %q is unsupported", b.Schema)
 	}
 	if err := validateHashID("ceremony_id", b.CeremonyID); err != nil {
 		return err
 	}
-	minimumEnrollments := 6 // coordinator, release signer, auditor, participant, witness, mirror
+	minimumEnrollments := 2 // coordinator and release signer; definition binding adds roster requirements
 	if len(b.Enrollments) < minimumEnrollments || len(b.Enrollments) > 128 {
 		return fmt.Errorf("enrollments must contain between %d and 128 records", minimumEnrollments)
 	}
@@ -180,6 +200,24 @@ func (b OperationalEvidenceBundle) Validate() error {
 	}
 	if b.Phase2.Phase != Phase2 {
 		return errors.New("phase2 evidence has wrong phase")
+	}
+	if b.Schema == OperationalEvidenceBundleSchema {
+		for _, phase := range []PhaseOperationalEvidence{b.Phase1, b.Phase2} {
+			if phase.PublicWitnessQuorum != b.AssurancePolicy.PublicWitnessesPerPhase {
+				return fmt.Errorf("%s public witness quorum does not match assurance_policy", phase.Phase)
+			}
+			if b.AssurancePolicy.PublicWitnessesPerPhase == 0 && len(phase.PublicWitnessReceipts) != 0 {
+				return fmt.Errorf("%s contains witness receipts while witnessing is disabled", phase.Phase)
+			}
+			for _, head := range phase.AcceptedHeads {
+				if len(head.MirrorReceipts) < int(b.AssurancePolicy.MirrorsPerAcceptedHead) {
+					return fmt.Errorf("%s head %d mirror receipts are below assurance_policy minimum", phase.Phase, head.Index)
+				}
+				if b.AssurancePolicy.MirrorsPerAcceptedHead == 0 && len(head.MirrorReceipts) != 0 {
+					return fmt.Errorf("%s head %d contains mirror receipts while mirrors are disabled", phase.Phase, head.Index)
+				}
+			}
+		}
 	}
 	if err := validateID("coordinator_id", b.CoordinatorID); err != nil {
 		return err
@@ -289,6 +327,20 @@ func verifyOperationalEvidenceContents(options VerifyOperationalEvidenceOptions,
 		bundle.CoordinatorKeyID != options.Definition.Coordinator.KeyID {
 		return VerifiedOperationalEvidence{}, errors.New("operational evidence bundle does not bind ceremony coordinator")
 	}
+	expectedAssurance := defaultAssurancePolicy(options.Definition.Mode)
+	if options.Definition.Schema == DefinitionSchema {
+		if bundle.Schema != OperationalEvidenceBundleSchema {
+			return VerifiedOperationalEvidence{}, errors.New("definition v3 requires operational evidence bundle v3")
+		}
+		expectedAssurance = *options.Definition.AssurancePolicy
+		if bundle.AssurancePolicy == nil || *bundle.AssurancePolicy != expectedAssurance {
+			return VerifiedOperationalEvidence{}, errors.New("operational evidence assurance_policy does not exactly match signed definition")
+		}
+	} else {
+		if bundle.Schema != OperationalEvidenceBundleSchemaV2 || bundle.AssurancePolicy != nil {
+			return VerifiedOperationalEvidence{}, errors.New("legacy definition requires legacy operational evidence without an assurance-policy override")
+		}
+	}
 	definitionBytes, err := MarshalCanonical(options.Definition)
 	if err != nil {
 		return VerifiedOperationalEvidence{}, err
@@ -321,7 +373,7 @@ func verifyOperationalEvidenceContents(options VerifyOperationalEvidenceOptions,
 		options.EvidenceRoot,
 		bundle.Phase1,
 		options.Phase1Close,
-		enrollments,
+		enrollments, expectedAssurance, options.Definition.Schema != DefinitionSchema,
 	)
 	if err != nil {
 		return VerifiedOperationalEvidence{}, fmt.Errorf("phase1 operational evidence: %w", err)
@@ -332,7 +384,7 @@ func verifyOperationalEvidenceContents(options VerifyOperationalEvidenceOptions,
 		options.EvidenceRoot,
 		bundle.Phase2,
 		options.Phase2Close,
-		enrollments,
+		enrollments, expectedAssurance, options.Definition.Schema != DefinitionSchema,
 	)
 	if err != nil {
 		return VerifiedOperationalEvidence{}, fmt.Errorf("phase2 operational evidence: %w", err)
@@ -505,6 +557,8 @@ func verifyPhaseOperationalEvidence(
 	phaseEvidence PhaseOperationalEvidence,
 	authenticated AuthenticatedCloseEvidence,
 	enrollments map[string]EnrollmentRecord,
+	assurance AssurancePolicy,
+	legacy bool,
 ) ([]ArtifactRef, error) {
 	if err := authenticated.Record.Validate(); err != nil {
 		return nil, err
@@ -573,6 +627,23 @@ func verifyPhaseOperationalEvidence(
 	}
 	if acceptedHeadIDs[len(acceptedHeadIDs)-1] != authenticated.Record.ChainHeadID {
 		return nil, errors.New("authenticated accepted heads do not terminate at close chain head")
+	}
+	if !legacy && phaseEvidence.PublicWitnessQuorum != assurance.PublicWitnessesPerPhase {
+		return nil, fmt.Errorf("public witness quorum %d does not match signed assurance policy %d", phaseEvidence.PublicWitnessQuorum, assurance.PublicWitnessesPerPhase)
+	}
+	if legacy && phaseEvidence.PublicWitnessQuorum < 1 {
+		return nil, errors.New("legacy operational evidence requires at least one public witness")
+	}
+	if assurance.PublicWitnessesPerPhase == 0 && len(phaseEvidence.PublicWitnessReceipts) != 0 {
+		return nil, errors.New("public witness receipts are forbidden when witnessing is disabled")
+	}
+	for index, head := range phaseEvidence.AcceptedHeads {
+		if assurance.MirrorsPerAcceptedHead == 0 && len(head.MirrorReceipts) != 0 {
+			return nil, fmt.Errorf("accepted head %d has mirror receipts while mirrors are disabled", index+1)
+		}
+		if len(head.MirrorReceipts) < int(assurance.MirrorsPerAcceptedHead) {
+			return nil, fmt.Errorf("accepted head %d mirror receipt count %d does not satisfy signed minimum %d", index+1, len(head.MirrorReceipts), assurance.MirrorsPerAcceptedHead)
+		}
 	}
 	headRefs, err := verifyAcceptedHeadEvidence(
 		definition,

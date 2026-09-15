@@ -288,8 +288,9 @@ func decisionSignFixture(t *testing.T) (mpcceremony.CeremonyDefinition, []byte, 
 		}
 	}
 	decision, err := mpcceremony.NewProductionDecision(mpcceremony.ProductionDecision{
-		CeremonyID: definition.CeremonyID,
-		Release:    release,
+		CeremonyID:      definition.CeremonyID,
+		AssurancePolicy: definition.AssurancePolicy,
+		Release:         release,
 		SourceRelease: mpcceremony.SourceReleaseEvidence{
 			SourceCommit: definition.Software.SourceCommit, SignedTag: "v1.0.0-mainnet",
 			SignatureFormat: "openpgp-primary-key-v4", SignerFingerprintHex: strings.Repeat("ab", 20),
@@ -396,9 +397,14 @@ func decisionReleaseArtifacts() []mpcceremony.LocatedArtifactRef {
 }
 
 func decisionDraft(decision mpcceremony.ProductionDecision) mpcceremony.ProductionDecisionDraft {
+	schema := mpcceremony.ProductionDecisionDraftSchema
+	if decision.Schema == mpcceremony.ProductionDecisionSchemaV1 {
+		schema = mpcceremony.ProductionDecisionDraftSchemaV1
+	}
 	return mpcceremony.ProductionDecisionDraft{
-		Schema:     mpcceremony.ProductionDecisionDraftSchema,
-		CeremonyID: decision.CeremonyID,
+		Schema:          schema,
+		CeremonyID:      decision.CeremonyID,
+		AssurancePolicy: decision.AssurancePolicy,
 		Release: mpcceremony.SignedReleaseEvidenceDraft{
 			CandidateID:       decision.Release.CandidateID,
 			Manifest:          decision.Release.Manifest,

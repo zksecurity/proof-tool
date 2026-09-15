@@ -252,7 +252,7 @@ func identifyCLICommandArguments(args []string) map[int]struct{} {
 
 command:
 	topLevel := map[string]struct{}{
-		"audit": {}, "decision": {}, "finalize": {}, "help": {}, "init": {},
+		"audit": {}, "checkpoint": {}, "decision": {}, "finalize": {}, "help": {}, "init": {},
 		"inspect": {}, "ops": {}, "phase1": {}, "phase2": {}, "rehearsal": {},
 		"release": {}, "replay": {},
 	}
@@ -270,9 +270,10 @@ command:
 			"attest-erasure": {}, "beacon": {}, "close": {},
 			"contribute": {}, "help": {}, "init": {}, "verify": {},
 		},
-		"decision": {"help": {}, "prepare": {}, "sign": {}, "verify": {}},
+		"decision":   {"help": {}, "prepare": {}, "sign": {}, "verify": {}},
+		"checkpoint": {"help": {}, "prepare": {}, "sign": {}, "verify": {}, "verify-stored": {}},
 		"inspect": {
-			"chain": {}, "definition": {}, "enrollment": {}, "help": {}, "participant": {},
+			"chain": {}, "checkpoint": {}, "checkpoint-transition": {}, "definition": {}, "enrollment": {}, "help": {}, "participant": {},
 		},
 		"ops": {
 			"export-signing": {}, "help": {}, "import-signature": {}, "sign": {}, "prepare-enrollment": {}, "prepare-handoff": {}, "prepare-receipt": {},

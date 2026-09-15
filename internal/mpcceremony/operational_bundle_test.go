@@ -25,6 +25,18 @@ type operationalBundleFixture struct {
 	witnessKeys    map[string]ed25519.PrivateKey
 }
 
+func TestOperationalBundleV3RejectsNullOptionalCollections(t *testing.T) {
+	fixture := newOperationalBundleFixtureWithAssurance(t, &AssurancePolicy{})
+	fixture.bundle.GovernanceRecords = nil
+	if err := fixture.bundle.Validate(); err == nil || !strings.Contains(err.Error(), "explicit arrays") {
+		t.Fatalf("nil collection error = %v", err)
+	}
+	fixture.bundle.GovernanceRecords = []SignedArtifactRefs{}
+	if err := fixture.bundle.Validate(); err != nil {
+		t.Fatalf("explicit empty collection rejected: %v", err)
+	}
+}
+
 func TestVerifyOperationalEvidenceBundleEndToEndAndNegatives(t *testing.T) {
 	fixture := newOperationalBundleFixture(t)
 	verify := func(f operationalBundleFixture) error {
@@ -44,15 +56,7 @@ func TestVerifyOperationalEvidenceBundleEndToEndAndNegatives(t *testing.T) {
 	}
 
 	t.Run("one witness and one mirror per head", func(t *testing.T) {
-		f := newOperationalBundleFixture(t)
-		for _, phase := range []*PhaseOperationalEvidence{&f.bundle.Phase1, &f.bundle.Phase2} {
-			phase.PublicWitnessQuorum = 1
-			phase.PublicWitnessReceipts = phase.PublicWitnessReceipts[:1]
-			for i := range phase.AcceptedHeads {
-				phase.AcceptedHeads[i].MirrorReceipts = phase.AcceptedHeads[i].MirrorReceipts[:1]
-			}
-		}
-		resignBundle(t, &f)
+		f := newOperationalBundleFixtureWithAssurance(t, &AssurancePolicy{PublicWitnessesPerPhase: 1, MirrorsPerAcceptedHead: 1, PassingCeremonyAudits: 1})
 		if err := verify(f); err != nil {
 			t.Fatal(err)
 		}
@@ -60,6 +64,18 @@ func TestVerifyOperationalEvidenceBundleEndToEndAndNegatives(t *testing.T) {
 		resignInvalidBundle(t, &f)
 		if err := verify(f); err == nil {
 			t.Fatal("higher agreed witness quorum was ignored")
+		}
+	})
+	t.Run("all optional operational observers disabled", func(t *testing.T) {
+		f := newOperationalBundleFixtureWithAssurance(t, &AssurancePolicy{})
+		if err := verify(f); err != nil {
+			t.Fatalf("zero-observer bundle rejected: %v", err)
+		}
+
+		f.bundle.Phase1.PublicWitnessReceipts = []SignedArtifactRefs{f.bundle.Enrollments[0]}
+		resignInvalidBundle(t, &f)
+		if err := verify(f); err == nil || !strings.Contains(err.Error(), "while witnessing is disabled") {
+			t.Fatalf("injected witness evidence error = %v", err)
 		}
 	})
 	t.Run("zero witnesses", func(t *testing.T) {
@@ -421,10 +437,30 @@ func TestVerifyOperationalEvidenceBundleEndToEndAndNegatives(t *testing.T) {
 }
 
 func newOperationalBundleFixture(t *testing.T) operationalBundleFixture {
+	return newOperationalBundleFixtureConfigured(t, nil, false)
+}
+
+func newOperationalBundleFixtureWithAssurance(t *testing.T, selected *AssurancePolicy) operationalBundleFixture {
+	return newOperationalBundleFixtureConfigured(t, selected, false)
+}
+
+func newLegacyOperationalBundleFixture(t *testing.T) operationalBundleFixture {
+	return newOperationalBundleFixtureConfigured(t, nil, true)
+}
+
+func newOperationalBundleFixtureConfigured(t *testing.T, selected *AssurancePolicy, legacy bool) operationalBundleFixture {
 	t.Helper()
 	definition := adversarialDefinition(t)
 	round42Time, _ := QuicknetRoundTime(42)
 	definition.Mode = ModeRehearsal
+	assurance := AssurancePolicy{PublicWitnessesPerPhase: 2, MirrorsPerAcceptedHead: 2, PassingCeremonyAudits: 1}
+	if selected != nil {
+		assurance = *selected
+	}
+	definition.AssurancePolicy = &assurance
+	if assurance.PassingCeremonyAudits == 0 {
+		definition.Auditors = []Identity{}
+	}
 	definition.CreatedAt = round42Time.Add(-30 * time.Hour).Format(time.RFC3339)
 	// Keep this downstream evidence fixture small. Canonical production circuit
 	// identity is covered by definition_test.go; rehearsal mode may bind these
@@ -440,6 +476,18 @@ func newOperationalBundleFixture(t *testing.T) operationalBundleFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if legacy {
+		definition.Schema = DefinitionSchemaV2
+		definition.AssurancePolicy = nil
+		definition.CeremonyID = ""
+		definition.CeremonyID, err = ComputeCeremonyID(definition)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := definition.Validate(); err != nil {
+			t.Fatal(err)
+		}
+	}
 	definitionBytes, _ := MarshalCanonical(definition)
 	root := t.TempDir()
 	coordinatorKey := adversarialPrivateKey(0x01)
@@ -450,6 +498,7 @@ func newOperationalBundleFixture(t *testing.T) operationalBundleFixture {
 		{adversarialIdentity(t, "public-witness-01", 0x91), adversarialPrivateKey(0x91)},
 		{adversarialIdentity(t, "public-witness-02", 0x92), adversarialPrivateKey(0x92)},
 	}
+	witnesses = witnesses[:int(assurance.PublicWitnessesPerPhase)]
 	mirrors := []struct {
 		identity Identity
 		key      ed25519.PrivateKey
@@ -457,6 +506,7 @@ func newOperationalBundleFixture(t *testing.T) operationalBundleFixture {
 		{adversarialIdentity(t, "mirror-operator-01", 0xa1), adversarialPrivateKey(0xa1)},
 		{adversarialIdentity(t, "mirror-operator-02", 0xa2), adversarialPrivateKey(0xa2)},
 	}
+	mirrors = mirrors[:int(assurance.MirrorsPerAcceptedHead)]
 
 	type enrollmentInput struct {
 		identity Identity
@@ -467,8 +517,9 @@ func newOperationalBundleFixture(t *testing.T) operationalBundleFixture {
 	inputs := []enrollmentInput{
 		{definition.Coordinator, EnrollmentCoordinator, 1, coordinatorKey},
 		{definition.ReleaseSigner, EnrollmentReleaseSigner, 1, adversarialPrivateKey(0x02)},
-		{definition.Auditors[0], EnrollmentAuditor, 1, adversarialPrivateKey(0x03)},
-		{definition.Auditors[1], EnrollmentAuditor, 2, adversarialPrivateKey(0x04)},
+	}
+	for index, auditor := range definition.Auditors {
+		inputs = append(inputs, enrollmentInput{auditor, EnrollmentAuditor, uint16(index + 1), adversarialPrivateKey(byte(0x03 + index))})
 	}
 	for index, participant := range definition.Roster {
 		inputs = append(inputs, enrollmentInput{
@@ -526,14 +577,20 @@ func newOperationalBundleFixture(t *testing.T) operationalBundleFixture {
 		coordinatorKey, witnesses, mirrors,
 	)
 	bundle := OperationalEvidenceBundle{
-		Schema:           OperationalEvidenceBundleSchema,
-		CeremonyID:       definition.CeremonyID,
-		Enrollments:      enrollments,
-		Phase1:           phase1,
-		Phase2:           phase2,
-		CoordinatorID:    definition.Coordinator.ID,
-		CoordinatorKeyID: definition.Coordinator.KeyID,
-		AssembledAt:      round42Time.Add(time.Hour).Format(time.RFC3339),
+		Schema:            OperationalEvidenceBundleSchema,
+		CeremonyID:        definition.CeremonyID,
+		AssurancePolicy:   cloneAssurancePolicy(definition.AssurancePolicy),
+		Enrollments:       enrollments,
+		GovernanceRecords: []SignedArtifactRefs{},
+		Phase1:            phase1,
+		Phase2:            phase2,
+		CoordinatorID:     definition.Coordinator.ID,
+		CoordinatorKeyID:  definition.Coordinator.KeyID,
+		AssembledAt:       round42Time.Add(time.Hour).Format(time.RFC3339),
+	}
+	if legacy {
+		bundle.Schema = OperationalEvidenceBundleSchemaV2
+		bundle.AssurancePolicy = nil
 	}
 	bundleBytes, signatureBytes, err := SignRecord(bundle, definition.Coordinator.KeyID, coordinatorKey)
 	if err != nil {
@@ -902,7 +959,7 @@ func buildOperationalPhaseFixture(
 				AcceptedChainPrefix: prefixPair,
 				MirrorReceipts:      mirrorPairs,
 			}},
-			PublicWitnessQuorum:      2,
+			PublicWitnessQuorum:      uint8(len(witnesses)),
 			PublicWitnessReceipts:    witnessPairs,
 			MultiRelayBeaconEvidence: beaconPair,
 			RawBeaconResponses:       rawRefs,

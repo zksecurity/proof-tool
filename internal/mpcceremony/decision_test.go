@@ -501,7 +501,7 @@ func TestProductionDecisionNOGOMayBeSignedByOneAuthorizedRole(t *testing.T) {
 
 func newProductionDecisionFixture(t *testing.T, outcome ProductionDecisionOutcome) productionDecisionFixture {
 	t.Helper()
-	operationalFixture := newOperationalBundleFixture(t)
+	operationalFixture := newLegacyOperationalBundleFixture(t)
 	root := t.TempDir()
 	copyRegularTree(t, operationalFixture.root, filepath.Join(root, "release"))
 	definition := operationalFixture.definition
@@ -784,6 +784,7 @@ func newProductionDecisionFixture(t *testing.T, outcome ProductionDecisionOutcom
 		gates[len(gates)-1].Rationale = "The live twenty-party production ceremony has not occurred."
 	}
 	decision, err := NewProductionDecision(ProductionDecision{
+		Schema:     ProductionDecisionSchemaV1,
 		CeremonyID: definition.CeremonyID,
 		Release:    release,
 		SourceRelease: SourceReleaseEvidence{
@@ -1060,9 +1061,14 @@ func signedExternalAuditFixture(
 }
 
 func productionDecisionDraft(decision ProductionDecision) ProductionDecisionDraft {
+	schema := ProductionDecisionDraftSchema
+	if decision.Schema == ProductionDecisionSchemaV1 {
+		schema = ProductionDecisionDraftSchemaV1
+	}
 	return ProductionDecisionDraft{
-		Schema:     ProductionDecisionDraftSchema,
-		CeremonyID: decision.CeremonyID,
+		Schema:          schema,
+		CeremonyID:      decision.CeremonyID,
+		AssurancePolicy: cloneAssurancePolicy(decision.AssurancePolicy),
 		Release: SignedReleaseEvidenceDraft{
 			CandidateID:       decision.Release.CandidateID,
 			Manifest:          decision.Release.Manifest,

@@ -22,8 +22,8 @@ const (
 	maxRehearsalParticipants = 20
 	// MinimumBeaconLeadSeconds gives automated rehearsals four Quicknet
 	// periods to commit to a round that does not exist yet. Rehearsal outputs
-	// are explicitly non-production; production policy has its own 24-hour
-	// minimum in mpcceremony.
+	// are explicitly non-production. Production tooling recommends 24 hours,
+	// but the exact signed ceremony policy is configurable.
 	MinimumBeaconLeadSeconds = 12
 )
 
@@ -33,6 +33,13 @@ type generatedIdentity struct {
 }
 
 func Generate(outDir string, participantCount int, beaconWitnessLead uint32) (err error) {
+	return GenerateWithAssurance(outDir, participantCount, beaconWitnessLead, true)
+}
+
+// GenerateWithAssurance exposes both supported rehearsal paths to the real
+// command surface. When optionalAssurance is false, the signed policy uses
+// explicit zeroes and no auditor is enrolled; drand verification remains on.
+func GenerateWithAssurance(outDir string, participantCount int, beaconWitnessLead uint32, optionalAssurance bool) (err error) {
 	if participantCount < minRehearsalParticipants ||
 		participantCount > maxRehearsalParticipants {
 		return fmt.Errorf(
@@ -89,39 +96,32 @@ func Generate(outDir string, participantCount int, beaconWitnessLead uint32) (er
 	if err != nil {
 		return err
 	}
-	auditor1, err := newIdentity("auditor-01", "Local Rehearsal Auditor 01")
-	if err != nil {
-		return err
-	}
-	auditor2, err := newIdentity("auditor-02", "Local Rehearsal Auditor 02")
-	if err != nil {
-		return err
-	}
-	witness1, err := newIdentity("witness-01", "Local Rehearsal Public Witness 01")
-	if err != nil {
-		return err
-	}
-	witness2, err := newIdentity("witness-02", "Local Rehearsal Public Witness 02")
-	if err != nil {
-		return err
-	}
-	mirror1, err := newIdentity("mirror-01", "Local Rehearsal Mirror Operator 01")
-	if err != nil {
-		return err
-	}
-	mirror2, err := newIdentity("mirror-02", "Local Rehearsal Mirror Operator 02")
-	if err != nil {
-		return err
-	}
 	generated := []generatedIdentity{
 		coordinator,
 		releaseSigner,
-		auditor1,
-		auditor2,
-		witness1,
-		witness2,
-		mirror1,
-		mirror2,
+	}
+	var auditor1, auditor2 generatedIdentity
+	if optionalAssurance {
+		for _, spec := range []struct{ id, display string }{
+			{"auditor-01", "Local Rehearsal Auditor 01"},
+			{"auditor-02", "Local Rehearsal Auditor 02"},
+			{"witness-01", "Local Rehearsal Public Witness 01"},
+			{"witness-02", "Local Rehearsal Public Witness 02"},
+			{"mirror-01", "Local Rehearsal Mirror Operator 01"},
+			{"mirror-02", "Local Rehearsal Mirror Operator 02"},
+		} {
+			identity, identityErr := newIdentity(spec.id, spec.display)
+			if identityErr != nil {
+				return identityErr
+			}
+			switch spec.id {
+			case "auditor-01":
+				auditor1 = identity
+			case "auditor-02":
+				auditor2 = identity
+			}
+			generated = append(generated, identity)
+		}
 	}
 	participants := make([]mpcceremony.Participant, 0, participantCount)
 	participantIDs := make([]string, 0, participantCount)
@@ -155,13 +155,22 @@ func Generate(outDir string, participantCount int, beaconWitnessLead uint32) (er
 		}
 	}
 
+	auditors := []mpcceremony.Identity{}
+	assurance := &mpcceremony.AssurancePolicy{}
+	if optionalAssurance {
+		auditors = []mpcceremony.Identity{auditor1.identity, auditor2.identity}
+		assurance.PublicWitnessesPerPhase = 1
+		assurance.MirrorsPerAcceptedHead = 1
+		assurance.PassingCeremonyAudits = 1
+	}
 	enrollment := mpcceremony.InitParticipants{
 		Coordinator:   coordinator.identity,
 		ReleaseSigner: releaseSigner.identity,
-		Auditors:      []mpcceremony.Identity{auditor1.identity, auditor2.identity},
+		Auditors:      auditors,
 		Roster:        participants,
 	}
 	policy := mpcceremony.InitPolicy{
+		AssurancePolicy: assurance,
 		Phase1Policy: mpcceremony.PhasePolicy{
 			Participants: participantIDs,
 			Minimum:      uint8(participantCount),

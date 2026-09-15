@@ -103,3 +103,40 @@ func TestValidateCloseCommitTimeReservesProductionWitnessWindow(t *testing.T) {
 		t.Fatalf("production close without the witness window error = %v, want lead rejection", err)
 	}
 }
+
+func TestValidateCloseCommitTimeUsesCustomProductionBeaconLead(t *testing.T) {
+	t.Parallel()
+
+	roundTime := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	const customLead uint32 = 12
+	policy := AssurancePolicy{PublicWitnessesPerPhase: 1}
+	definition := CeremonyDefinition{
+		Schema:          DefinitionSchema,
+		Mode:            ModeProduction,
+		AssurancePolicy: &policy,
+		BeaconPolicy: BeaconPolicy{
+			MinimumWitnessLeadSeconds: customLead,
+		},
+	}
+	requiredLead := time.Duration(
+		customLead+ProductionWitnessObservationWindowSeconds,
+	)*time.Second + closePublicationSafetyMargin
+
+	closedAt := roundTime.Add(-requiredLead - time.Second)
+	if err := validateCloseCommitTime(
+		closedAt,
+		roundTime.Add(-requiredLead),
+		roundTime,
+		definition,
+	); err != nil {
+		t.Fatalf("custom production beacon lead rejected: %v", err)
+	}
+	if err := validateCloseCommitTime(
+		closedAt,
+		roundTime.Add(-requiredLead+time.Second),
+		roundTime,
+		definition,
+	); err == nil || !strings.Contains(err.Error(), "below required") {
+		t.Fatalf("shortened custom production wait error = %v, want lead rejection", err)
+	}
+}

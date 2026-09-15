@@ -27,11 +27,32 @@ func TestDefinitionJourneyProjectsEveryRequiredEnrollment(t *testing.T) {
 			t.Fatal("incorrect participant assignment")
 		}
 	}
-	if j.MinimumPublicWitnesses != 1 || j.MinimumMirrorsPerAcceptedHead != 1 || j.ObserverRequirementSource == "" {
+	if j.MinimumPublicWitnesses != 1 || j.MinimumMirrorsPerAcceptedHead != 1 || j.MinimumPassingCeremonyAudits != 1 || j.MinimumExternalAuditSignoffs != 1 || j.ObserverRequirementSource != "signed ceremony assurance_policy" {
 		t.Fatal("operational verifier minimums omitted")
+	}
+	if j.BeaconRoundLeadSeconds != d.BeaconPolicy.MinimumWitnessLeadSeconds {
+		t.Fatal("signed beacon lead omitted")
 	}
 	d.Auditors[0].DisplayName = "changed"
 	if j.RequiredEnrollments[2].Identity.DisplayName == "changed" {
 		t.Fatal("projection aliases mutable roster")
+	}
+}
+
+func TestDefinitionJourneyProjectsDisabledControlsFromSignedPolicy(t *testing.T) {
+	d, _, _ := decisionSignFixture(t)
+	d.CeremonyID = ""
+	d.Auditors = nil
+	d.AssurancePolicy = &mpcceremony.AssurancePolicy{}
+	d, err := mpcceremony.FinalizeCeremonyDefinition(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := inspectDefinitionJourney(d)
+	if j.MinimumPublicWitnesses != 0 || j.MinimumMirrorsPerAcceptedHead != 0 || j.MinimumPassingCeremonyAudits != 0 || j.MinimumExternalAuditSignoffs != 0 {
+		t.Fatalf("disabled policy projection = %#v", j)
+	}
+	if len(j.RequiredEnrollments) != 2+len(d.Roster) {
+		t.Fatal("disabled auditor enrollment remained required")
 	}
 }

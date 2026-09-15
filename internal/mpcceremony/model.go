@@ -20,7 +20,8 @@ import (
 
 const (
 	DefinitionSchemaV1            = "proof-tool-mpc-ceremony-definition-v1"
-	DefinitionSchema              = "proof-tool-mpc-ceremony-definition-v2"
+	DefinitionSchemaV2            = "proof-tool-mpc-ceremony-definition-v2"
+	DefinitionSchema              = "proof-tool-mpc-ceremony-definition-v3"
 	DetachedSignatureSchema       = "proof-tool-mpc-detached-signature-v1"
 	ContributionAttestationSchema = "proof-tool-mpc-contribution-attestation-v2"
 	ErasureAttestationSchema      = "proof-tool-mpc-erasure-attestation-v2"
@@ -30,7 +31,8 @@ const (
 	BeaconRecordSchema            = "proof-tool-mpc-beacon-record-v1"
 	SealRecordSchema              = "proof-tool-mpc-seal-record-v1"
 	AuditRecordSchema             = "proof-tool-mpc-audit-record-v1"
-	FinalTranscriptSchema         = "proof-tool-mpc-final-transcript-v1"
+	FinalTranscriptSchemaV1       = "proof-tool-mpc-final-transcript-v1"
+	FinalTranscriptSchema         = "proof-tool-mpc-final-transcript-v2"
 
 	KeyVersionDestinationV2 = "ownership-destination-v2"
 	CircuitIDDestinationV2  = "root-ownership-destination-v2/bls12-381/groth16"
@@ -707,6 +709,9 @@ func validateArtifactName(value string) error {
 		return fmt.Errorf("artifact name %q %w", value, err)
 	}
 	for segment := range strings.SplitSeq(value, "/") {
+		if segment == ".." {
+			return fmt.Errorf("artifact name %q must not escape its artifact root", value)
+		}
 		if segment != strings.TrimSpace(segment) {
 			return fmt.Errorf("artifact name %q has untrimmed whitespace in a path segment", value)
 		}

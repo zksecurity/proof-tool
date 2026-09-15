@@ -16,6 +16,9 @@ type DefinitionJourneyInspection struct {
 	RequiredEnrollments           []ExpectedEnrollmentInspection `json:"required_enrollments"`
 	MinimumPublicWitnesses        int                            `json:"minimum_public_witnesses"`
 	MinimumMirrorsPerAcceptedHead int                            `json:"minimum_mirrors_per_accepted_head"`
+	MinimumPassingCeremonyAudits  int                            `json:"minimum_passing_ceremony_audits"`
+	MinimumExternalAuditSignoffs  int                            `json:"minimum_external_audit_signoffs"`
+	BeaconRoundLeadSeconds        uint32                         `json:"beacon_round_lead_seconds"`
 	ObserverRequirementSource     string                         `json:"observer_requirement_source"`
 }
 
@@ -44,7 +47,14 @@ type JourneyInspection struct {
 }
 
 func inspectDefinitionJourney(d mpcceremony.CeremonyDefinition) *DefinitionJourneyInspection {
-	r := &DefinitionJourneyInspection{Schema: "proof-tool-mpc-definition-journey-v1", MinimumPublicWitnesses: 1, MinimumMirrorsPerAcceptedHead: 1, ObserverRequirementSource: "operational-bundle verifier minimum; an agreed witness quorum can require more"}
+	r := &DefinitionJourneyInspection{Schema: "proof-tool-mpc-definition-journey-v2", MinimumPublicWitnesses: 1, MinimumMirrorsPerAcceptedHead: 1, MinimumPassingCeremonyAudits: 1, MinimumExternalAuditSignoffs: 1, BeaconRoundLeadSeconds: d.BeaconPolicy.MinimumWitnessLeadSeconds, ObserverRequirementSource: "legacy verifier minimums"}
+	if d.Schema == mpcceremony.DefinitionSchema && d.AssurancePolicy != nil {
+		r.MinimumPublicWitnesses = int(d.AssurancePolicy.PublicWitnessesPerPhase)
+		r.MinimumMirrorsPerAcceptedHead = int(d.AssurancePolicy.MirrorsPerAcceptedHead)
+		r.MinimumPassingCeremonyAudits = int(d.AssurancePolicy.PassingCeremonyAudits)
+		r.MinimumExternalAuditSignoffs = int(d.AssurancePolicy.ExternalSecurityAuditSignoffs)
+		r.ObserverRequirementSource = "signed ceremony assurance_policy"
+	}
 	r.RequiredEnrollments = append(r.RequiredEnrollments, ExpectedEnrollmentInspection{mpcceremony.EnrollmentCoordinator, 1, d.Coordinator}, ExpectedEnrollmentInspection{mpcceremony.EnrollmentReleaseSigner, 1, d.ReleaseSigner})
 	for n, id := range d.Auditors {
 		r.RequiredEnrollments = append(r.RequiredEnrollments, ExpectedEnrollmentInspection{mpcceremony.EnrollmentAuditor, n + 1, id})

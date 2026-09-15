@@ -99,6 +99,8 @@ func parseInvocation(args []string) (Invocation, error) {
 		return parseOps(invocation, rest[1:])
 	case "decision":
 		return parseDecision(invocation, rest[1:])
+	case "checkpoint":
+		return parseCheckpoint(invocation, rest[1:])
 	default:
 		return Invocation{}, &usageError{
 			message: fmt.Sprintf("unknown command %q", rest[0]),
@@ -174,6 +176,7 @@ func parseRehearsalInit(args []string) (RehearsalInitOptions, error) {
 	fs.StringVar(&options.CreatedAt, "created-at", "", "ceremony creation timestamp in RFC3339")
 	fs.StringVar(&options.OutDir, "out-dir", "", "fresh rehearsal work directory")
 	fs.Uint64Var(&options.BeaconLeadSeconds, "beacon-lead-seconds", rehearsalBeaconLeadSeconds, "non-production witness window for this rehearsal")
+	fs.BoolVar(&options.DisableOptionalAssurance, "disable-optional-assurance", false, "sign explicit zero witness, mirror, and ceremony-audit requirements (rehearsal only)")
 	fs.Var(&allowedBinaries, "allowed-binary", "additional exact mpc-ceremony binary to sign into the platform allowlist (repeatable)")
 	if err := parseFlags(fs, args); err != nil {
 		return options, err
@@ -220,12 +223,120 @@ func parseInspectSubcommand(invocation Invocation, args []string) (Invocation, e
 		options, err := parseInspectEnrollment(args[1:])
 		invocation.Command, invocation.Options = CommandInspectEnrollment, options
 		return invocation, wrapCommandError(err, "inspect", "enrollment")
+	case "checkpoint":
+		options, err := parseInspectCheckpoint(args[1:])
+		invocation.Command, invocation.Options = CommandInspectCheckpoint, options
+		return invocation, wrapCommandError(err, "inspect", "checkpoint")
+	case "checkpoint-transition":
+		options, err := parseInspectCheckpointTransition(args[1:])
+		invocation.Command, invocation.Options = CommandInspectCheckpointTransition, options
+		return invocation, wrapCommandError(err, "inspect", "checkpoint-transition")
+	case "submission":
+		options, err := parseInspectSubmission(args[1:])
+		invocation.Command, invocation.Options = CommandInspectSubmission, options
+		return invocation, wrapCommandError(err, "inspect", "submission")
+	case "submission-acknowledgement":
+		options, err := parseInspectSubmissionAcknowledgement(args[1:])
+		invocation.Command, invocation.Options = CommandInspectSubmissionAcknowledgement, options
+		return invocation, wrapCommandError(err, "inspect", "submission-acknowledgement")
 	default:
 		return Invocation{}, &usageError{
 			message: fmt.Sprintf("unknown inspect command %q", args[0]),
 			topic:   []string{"inspect"},
 		}
 	}
+}
+
+func addSubmissionInspectionFlags(fs *flag.FlagSet, options *InspectSubmissionOptions) {
+	addCeremonyTrustFlags(fs, &options.CeremonyPath, &options.CeremonySignaturePath, &options.CoordinatorPublicKeyFile)
+	fs.StringVar(&options.CheckpointPath, "checkpoint", "", "signed checkpoint containing the allocated slot")
+	fs.StringVar(&options.CheckpointSignaturePath, "checkpoint-signature", "", "detached checkpoint signature")
+	fs.StringVar(&options.Kind, "kind", "", "submission kind: receipt or candidate")
+	fs.StringVar(&options.Phase, "phase", "", "submission phase")
+	fs.UintVar(&options.Index, "index", 0, "one-based contribution index")
+	fs.StringVar(&options.SubmitterID, "submitter-id", "", "assigned participant identity")
+	fs.StringVar(&options.AttemptID, "attempt-id", "", "preallocated submission attempt")
+	fs.StringVar(&options.EnvelopePath, "envelope", "", "canonical participant submission envelope")
+	fs.StringVar(&options.EnvelopeSignaturePath, "envelope-signature", "", "detached participant envelope signature")
+	fs.StringVar(&options.ManifestPath, "manifest", "", "exact transport manifest")
+}
+
+func validateSubmissionInspectionOptions(options InspectSubmissionOptions) error {
+	if options.Index == 0 || options.Index > mpcceremony.MaxParticipants {
+		return fmt.Errorf("--index must be between 1 and %d", mpcceremony.MaxParticipants)
+	}
+	return requireValues(
+		pathValue("--ceremony", options.CeremonyPath), pathValue("--ceremony-signature", options.CeremonySignaturePath),
+		pathValue("--coordinator-public-key-file", options.CoordinatorPublicKeyFile), pathValue("--checkpoint", options.CheckpointPath),
+		pathValue("--checkpoint-signature", options.CheckpointSignaturePath), value("--kind", options.Kind), value("--phase", options.Phase),
+		value("--submitter-id", options.SubmitterID), value("--attempt-id", options.AttemptID),
+		pathValue("--envelope", options.EnvelopePath), pathValue("--envelope-signature", options.EnvelopeSignaturePath), pathValue("--manifest", options.ManifestPath),
+	)
+}
+
+func parseInspectSubmission(args []string) (InspectSubmissionOptions, error) {
+	var options InspectSubmissionOptions
+	fs := commandFlagSet("inspect submission")
+	addSubmissionInspectionFlags(fs, &options)
+	if err := parseFlags(fs, args); err != nil {
+		return options, err
+	}
+	return options, validateSubmissionInspectionOptions(options)
+}
+
+func parseInspectSubmissionAcknowledgement(args []string) (InspectSubmissionAcknowledgementOptions, error) {
+	var options InspectSubmissionAcknowledgementOptions
+	fs := commandFlagSet("inspect submission-acknowledgement")
+	addSubmissionInspectionFlags(fs, &options.InspectSubmissionOptions)
+	fs.StringVar(&options.AcknowledgementPath, "acknowledgement", "", "canonical coordinator acknowledgement")
+	fs.StringVar(&options.AcknowledgementSignaturePath, "acknowledgement-signature", "", "detached coordinator acknowledgement signature")
+	if err := parseFlags(fs, args); err != nil {
+		return options, err
+	}
+	if err := validateSubmissionInspectionOptions(options.InspectSubmissionOptions); err != nil {
+		return options, err
+	}
+	return options, requireValues(pathValue("--acknowledgement", options.AcknowledgementPath), pathValue("--acknowledgement-signature", options.AcknowledgementSignaturePath))
+}
+
+func parseInspectCheckpoint(args []string) (InspectCheckpointOptions, error) {
+	var options InspectCheckpointOptions
+	fs := commandFlagSet("inspect checkpoint")
+	addCeremonyTrustFlags(fs, &options.CeremonyPath, &options.CeremonySignaturePath, &options.CoordinatorPublicKeyFile)
+	fs.StringVar(&options.CheckpointPath, "checkpoint", "", "canonical signed checkpoint record")
+	fs.StringVar(&options.CheckpointSignaturePath, "checkpoint-signature", "", "detached checkpoint signature")
+	if err := parseFlags(fs, args); err != nil {
+		return options, err
+	}
+	return options, requireValues(
+		pathValue("--ceremony", options.CeremonyPath),
+		pathValue("--ceremony-signature", options.CeremonySignaturePath),
+		pathValue("--coordinator-public-key-file", options.CoordinatorPublicKeyFile),
+		pathValue("--checkpoint", options.CheckpointPath),
+		pathValue("--checkpoint-signature", options.CheckpointSignaturePath),
+	)
+}
+
+func parseInspectCheckpointTransition(args []string) (InspectCheckpointTransitionOptions, error) {
+	var options InspectCheckpointTransitionOptions
+	fs := commandFlagSet("inspect checkpoint-transition")
+	addCeremonyTrustFlags(fs, &options.CeremonyPath, &options.CeremonySignaturePath, &options.CoordinatorPublicKeyFile)
+	fs.StringVar(&options.PreviousCheckpointPath, "previous-checkpoint", "", "canonical previous checkpoint record")
+	fs.StringVar(&options.PreviousCheckpointSignaturePath, "previous-checkpoint-signature", "", "detached previous checkpoint signature")
+	fs.StringVar(&options.CheckpointPath, "checkpoint", "", "canonical next checkpoint record")
+	fs.StringVar(&options.CheckpointSignaturePath, "checkpoint-signature", "", "detached next checkpoint signature")
+	if err := parseFlags(fs, args); err != nil {
+		return options, err
+	}
+	return options, requireValues(
+		pathValue("--ceremony", options.CeremonyPath),
+		pathValue("--ceremony-signature", options.CeremonySignaturePath),
+		pathValue("--coordinator-public-key-file", options.CoordinatorPublicKeyFile),
+		pathValue("--previous-checkpoint", options.PreviousCheckpointPath),
+		pathValue("--previous-checkpoint-signature", options.PreviousCheckpointSignaturePath),
+		pathValue("--checkpoint", options.CheckpointPath),
+		pathValue("--checkpoint-signature", options.CheckpointSignaturePath),
+	)
 }
 
 func parseInspectParticipant(args []string) (InspectParticipantOptions, error) {
@@ -1131,6 +1242,7 @@ func parseReleaseSign(args []string) (ReleaseSignOptions, error) {
 	fs.StringVar(&options.SignatureKeyID, "signature-key-id", "", "release signing key identifier")
 	fs.StringVar(&options.ReleasedAt, "released-at", "", "release publication timestamp in RFC3339 UTC")
 	fs.StringVar(&options.ReleaseDir, "release-dir", "", "fresh release bundle directory distinct from the candidate")
+	addReplayFlags(fs, &options.Replay)
 	if err := parseFlags(fs, args); err != nil {
 		return options, err
 	}
@@ -1154,7 +1266,7 @@ func parseReleaseSign(args []string) (ReleaseSignOptions, error) {
 	if err := validateAuditArtifacts(options.AuditReportPaths, options.AuditSignaturePaths); err != nil {
 		return options, err
 	}
-	return options, nil
+	return options, validateReplayOptions(options.Replay)
 }
 
 func parseReleaseVerify(args []string) (ReleaseVerifyOptions, error) {
@@ -1219,9 +1331,6 @@ func validateReplayOptions(replay ReplayOptions) error {
 }
 
 func validateAuditArtifacts(reports, signatures []string) error {
-	if len(reports) < 1 {
-		return errors.New("--audit-report must be supplied at least once")
-	}
 	if len(reports) > mpcceremony.MaxAuditors {
 		return fmt.Errorf("--audit-report supplied %d times, exceeds maximum %d recordable in the final transcript", len(reports), mpcceremony.MaxAuditors)
 	}

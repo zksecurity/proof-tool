@@ -15,45 +15,53 @@ const commandResultSchema = "proof-tool-mpc-command-result-v1"
 type Command string
 
 const (
-	CommandInit                           Command = "init"
-	CommandIdentityGenerate               Command = "identity generate"
-	CommandRehearsalInit                  Command = "rehearsal init"
-	CommandInspect                        Command = "inspect"
-	CommandPhase1Contribute               Command = "phase1 contribute"
-	CommandPhase1Erasure                  Command = "phase1 attest-erasure"
-	CommandPhase1Verify                   Command = "phase1 verify"
-	CommandPhase1Close                    Command = "phase1 close"
-	CommandPhase1Beacon                   Command = "phase1 beacon"
-	CommandPhase1Seal                     Command = "phase1 seal"
-	CommandPhase2Init                     Command = "phase2 init"
-	CommandPhase2Contribute               Command = "phase2 contribute"
-	CommandPhase2Erasure                  Command = "phase2 attest-erasure"
-	CommandPhase2Verify                   Command = "phase2 verify"
-	CommandPhase2Close                    Command = "phase2 close"
-	CommandPhase2Beacon                   Command = "phase2 beacon"
-	CommandOpsPrepareCustody              Command = "ops prepare-custody"
-	CommandFinalizePrepare                Command = "finalize prepare"
-	CommandRehearsalEvidence              Command = "finalize rehearsal-evidence"
-	CommandFinalizeComplete               Command = "finalize complete"
-	CommandAudit                          Command = "audit"
-	CommandReplay                         Command = "replay"
-	CommandReleaseSign                    Command = "release sign"
-	CommandReleaseVerify                  Command = "release verify"
-	CommandOpsPrepareMirrorReceipt        Command = "ops prepare-mirror-receipt"
-	CommandOpsPreparePublicWitnessReceipt Command = "ops prepare-public-witness-receipt"
-	CommandOpsExportSigning               Command = "ops export-signing"
-	CommandOpsPrepareEnrollment           Command = "ops prepare-enrollment"
-	CommandOpsPrepareBundle               Command = "ops prepare-bundle"
-	CommandOpsSign                        Command = "ops sign"
-	CommandOpsImportSig                   Command = "ops import-signature"
-	CommandOpsVerify                      Command = "ops verify"
-	CommandDecisionPrepare                Command = "decision prepare"
-	CommandDecisionSign                   Command = "decision sign"
-	CommandDecisionVerify                 Command = "decision verify"
-	CommandInspectDefinition              Command = "inspect definition"
-	CommandInspectChain                   Command = "inspect chain"
-	CommandInspectParticipant             Command = "inspect participant"
-	CommandInspectEnrollment              Command = "inspect enrollment"
+	CommandInit                             Command = "init"
+	CommandIdentityGenerate                 Command = "identity generate"
+	CommandRehearsalInit                    Command = "rehearsal init"
+	CommandInspect                          Command = "inspect"
+	CommandPhase1Contribute                 Command = "phase1 contribute"
+	CommandPhase1Erasure                    Command = "phase1 attest-erasure"
+	CommandPhase1Verify                     Command = "phase1 verify"
+	CommandPhase1Close                      Command = "phase1 close"
+	CommandPhase1Beacon                     Command = "phase1 beacon"
+	CommandPhase1Seal                       Command = "phase1 seal"
+	CommandPhase2Init                       Command = "phase2 init"
+	CommandPhase2Contribute                 Command = "phase2 contribute"
+	CommandPhase2Erasure                    Command = "phase2 attest-erasure"
+	CommandPhase2Verify                     Command = "phase2 verify"
+	CommandPhase2Close                      Command = "phase2 close"
+	CommandPhase2Beacon                     Command = "phase2 beacon"
+	CommandOpsPrepareCustody                Command = "ops prepare-custody"
+	CommandFinalizePrepare                  Command = "finalize prepare"
+	CommandRehearsalEvidence                Command = "finalize rehearsal-evidence"
+	CommandFinalizeComplete                 Command = "finalize complete"
+	CommandAudit                            Command = "audit"
+	CommandReplay                           Command = "replay"
+	CommandReleaseSign                      Command = "release sign"
+	CommandReleaseVerify                    Command = "release verify"
+	CommandOpsPrepareMirrorReceipt          Command = "ops prepare-mirror-receipt"
+	CommandOpsPreparePublicWitnessReceipt   Command = "ops prepare-public-witness-receipt"
+	CommandOpsExportSigning                 Command = "ops export-signing"
+	CommandOpsPrepareEnrollment             Command = "ops prepare-enrollment"
+	CommandOpsPrepareBundle                 Command = "ops prepare-bundle"
+	CommandOpsSign                          Command = "ops sign"
+	CommandOpsImportSig                     Command = "ops import-signature"
+	CommandOpsVerify                        Command = "ops verify"
+	CommandDecisionPrepare                  Command = "decision prepare"
+	CommandDecisionSign                     Command = "decision sign"
+	CommandDecisionVerify                   Command = "decision verify"
+	CommandInspectDefinition                Command = "inspect definition"
+	CommandInspectChain                     Command = "inspect chain"
+	CommandInspectParticipant               Command = "inspect participant"
+	CommandInspectEnrollment                Command = "inspect enrollment"
+	CommandInspectCheckpoint                Command = "inspect checkpoint"
+	CommandInspectCheckpointTransition      Command = "inspect checkpoint-transition"
+	CommandInspectSubmission                Command = "inspect submission"
+	CommandInspectSubmissionAcknowledgement Command = "inspect submission-acknowledgement"
+	CommandCheckpointPrepare                Command = "checkpoint prepare"
+	CommandCheckpointSign                   Command = "checkpoint sign"
+	CommandCheckpointVerify                 Command = "checkpoint verify"
+	CommandCheckpointVerifyStored           Command = "checkpoint verify-stored"
 )
 
 type GlobalOptions struct {
@@ -88,10 +96,11 @@ type InitOptions struct {
 }
 
 type RehearsalInitOptions struct {
-	CreatedAt          string
-	OutDir             string
-	BeaconLeadSeconds  uint64
-	AllowedBinaryPaths []string
+	CreatedAt                string
+	OutDir                   string
+	BeaconLeadSeconds        uint64
+	AllowedBinaryPaths       []string
+	DisableOptionalAssurance bool
 }
 
 type ContributeOptions struct {
@@ -232,6 +241,7 @@ type ReleaseSignOptions struct {
 	SignatureKeyID           string
 	ReleasedAt               string
 	ReleaseDir               string
+	Replay                   ReplayOptions
 }
 
 type ReleaseVerifyOptions struct {
@@ -326,6 +336,89 @@ type InspectEnrollmentOptions struct {
 	EnrollmentSignaturePath string
 }
 
+type InspectCheckpointOptions struct {
+	InspectDefinitionOptions
+	CheckpointPath          string
+	CheckpointSignaturePath string
+}
+
+type InspectCheckpointTransitionOptions struct {
+	InspectDefinitionOptions
+	PreviousCheckpointPath          string
+	PreviousCheckpointSignaturePath string
+	CheckpointPath                  string
+	CheckpointSignaturePath         string
+}
+
+type InspectSubmissionOptions struct {
+	InspectCheckpointOptions
+	Kind                  string
+	Phase                 string
+	Index                 uint
+	SubmitterID           string
+	AttemptID             string
+	EnvelopePath          string
+	EnvelopeSignaturePath string
+	ManifestPath          string
+}
+
+type InspectSubmissionAcknowledgementOptions struct {
+	InspectSubmissionOptions
+	AcknowledgementPath          string
+	AcknowledgementSignaturePath string
+}
+
+type CheckpointEvidenceOptions struct {
+	InspectDefinitionOptions
+	ArtifactRoot                    string
+	RelayReleaseID                  string
+	TransitionKind                  string
+	PreviousCheckpointPath          string
+	PreviousCheckpointSignaturePath string
+	ChainPath                       string
+	ChainSignaturePath              string
+	HeadPayloadPath                 string
+	Phase2GenesisPath               string
+	Phase2ChainPath                 string
+	Phase2ChainSignaturePath        string
+	Phase2HeadPayloadPath           string
+	TransitionRecordPath            string
+	TransitionRecordSignaturePath   string
+	AcknowledgementPath             string
+	AcknowledgementSignaturePath    string
+	ManifestPath                    string
+	AttemptID                       string
+	ManifestKey                     string
+	NextAttemptID                   string
+	NextManifestKey                 string
+	CandidateDir                    string
+	ReleaseDir                      string
+}
+
+type CheckpointPrepareOptions struct {
+	CheckpointEvidenceOptions
+	OutDir string
+}
+
+type CheckpointSignOptions struct {
+	CheckpointEvidenceOptions
+	CheckpointPath        string
+	SigningRequestPath    string
+	CoordinatorSigningKey string
+	OutPath               string
+}
+
+type CheckpointVerifyOptions struct {
+	CheckpointEvidenceOptions
+	CheckpointPath          string
+	CheckpointSignaturePath string
+}
+
+type CheckpointVerifyStoredOptions struct {
+	InspectCheckpointOptions
+	ArtifactRoot string
+}
+
 type DefinitionInspection struct {
 	Schema             string                       `json:"schema"`
 	CeremonyID         string                       `json:"ceremony_id"`
@@ -370,6 +463,84 @@ type EnrollmentInspection struct {
 	RoleIndex              uint16                     `json:"role_index"`
 	EnrolledAt             string                     `json:"enrolled_at"`
 	IndependenceDisclosure mpcceremony.ArtifactRef    `json:"independence_disclosure"`
+}
+
+type CheckpointInspection struct {
+	Schema             string                                 `json:"schema"`
+	CeremonyID         string                                 `json:"ceremony_id"`
+	Workflow           string                                 `json:"workflow"`
+	RelayReleaseID     string                                 `json:"relay_release_id"`
+	Sequence           uint64                                 `json:"sequence"`
+	Digest             mpcceremony.Digest                     `json:"digest"`
+	Definition         mpcceremony.SignedArtifactRefs         `json:"definition"`
+	PreviousCheckpoint *mpcceremony.SignedArtifactRefs        `json:"previous_checkpoint"`
+	Transition         mpcceremony.CheckpointTransition       `json:"transition"`
+	Phase1             mpcceremony.CheckpointPhaseState       `json:"phase1"`
+	Phase1Closure      *mpcceremony.SignedArtifactRefs        `json:"phase1_closure,omitempty"`
+	Phase1Beacon       *mpcceremony.SignedArtifactRefs        `json:"phase1_beacon,omitempty"`
+	Phase1Seal         *mpcceremony.SignedArtifactRefs        `json:"phase1_seal,omitempty"`
+	Phase2             *mpcceremony.CheckpointPhaseState      `json:"phase2,omitempty"`
+	Phase2Closure      *mpcceremony.SignedArtifactRefs        `json:"phase2_closure,omitempty"`
+	Phase2Beacon       *mpcceremony.SignedArtifactRefs        `json:"phase2_beacon,omitempty"`
+	FinalCandidate     *mpcceremony.SignedArtifactRefs        `json:"final_candidate,omitempty"`
+	FinalRelease       *mpcceremony.SignedArtifactRefs        `json:"final_release,omitempty"`
+	Submissions        []mpcceremony.CheckpointSubmissionSlot `json:"submissions"`
+	AcceptedArtifacts  []mpcceremony.ArtifactRef              `json:"accepted_artifacts"`
+}
+
+type CheckpointTransitionInspection struct {
+	Schema                   string                           `json:"schema"`
+	CeremonyID               string                           `json:"ceremony_id"`
+	PreviousSequence         uint64                           `json:"previous_sequence"`
+	Sequence                 uint64                           `json:"sequence"`
+	PreviousCheckpointDigest mpcceremony.Digest               `json:"previous_checkpoint_digest"`
+	PreviousSignatureDigest  mpcceremony.Digest               `json:"previous_signature_digest"`
+	CheckpointDigest         mpcceremony.Digest               `json:"checkpoint_digest"`
+	Transition               mpcceremony.CheckpointTransition `json:"transition"`
+	Checkpoint               CheckpointInspection             `json:"checkpoint"`
+}
+
+type CheckpointEvidenceInspection struct {
+	Schema                   string                               `json:"schema"`
+	CeremonyID               string                               `json:"ceremony_id"`
+	Sequence                 uint64                               `json:"sequence"`
+	CheckpointDigest         mpcceremony.Digest                   `json:"checkpoint_digest"`
+	TransitionKind           mpcceremony.CheckpointTransitionKind `json:"transition_kind"`
+	FullyVerified            bool                                 `json:"fully_verified"`
+	VerifiedEvidenceBoundary string                               `json:"verified_evidence_boundary"`
+}
+
+type SubmissionInspection struct {
+	Schema                     string                               `json:"schema"`
+	CeremonyID                 string                               `json:"ceremony_id"`
+	Workflow                   string                               `json:"workflow"`
+	RelayReleaseID             string                               `json:"relay_release_id"`
+	SubmitterID                string                               `json:"submitter_id"`
+	SubmitterKeyID             string                               `json:"submitter_key_id"`
+	SubmitterRole              string                               `json:"submitter_role"`
+	Kind                       mpcceremony.CheckpointSubmissionKind `json:"kind"`
+	Phase                      mpcceremony.Phase                    `json:"phase"`
+	Index                      uint8                                `json:"index"`
+	ParentCheckpointSHA256     string                               `json:"parent_checkpoint_sha256"`
+	AllocationCheckpointSHA256 string                               `json:"allocation_checkpoint_sha256"`
+	ParentHeadID               string                               `json:"parent_head_id"`
+	AttemptID                  string                               `json:"attempt_id"`
+	ManifestKey                string                               `json:"manifest_key"`
+	Payloads                   []mpcceremony.ArtifactRef            `json:"payloads"`
+	EnvelopeDigest             mpcceremony.Digest                   `json:"envelope_digest"`
+	EnvelopeSignatureDigest    mpcceremony.Digest                   `json:"envelope_signature_digest"`
+	ManifestDigest             mpcceremony.Digest                   `json:"manifest_digest"`
+}
+
+type SubmissionAcknowledgementInspection struct {
+	Schema                         string                                      `json:"schema"`
+	Submission                     SubmissionInspection                        `json:"submission"`
+	CoordinatorID                  string                                      `json:"coordinator_id"`
+	CoordinatorKeyID               string                                      `json:"coordinator_key_id"`
+	Result                         mpcceremony.SubmissionAcknowledgementResult `json:"result"`
+	ReasonCode                     string                                      `json:"reason_code,omitempty"`
+	AcknowledgementDigest          mpcceremony.Digest                          `json:"acknowledgement_digest"`
+	AcknowledgementSignatureDigest mpcceremony.Digest                          `json:"acknowledgement_signature_digest"`
 }
 
 type DecisionSignOptions struct {
@@ -420,30 +591,35 @@ type ReplayOptions struct {
 }
 
 type CommandResult struct {
-	ReleaseManifestSHA256      string                 `json:"release_manifest_sha256,omitempty"`
-	Schema                     string                 `json:"schema"`
-	OK                         bool                   `json:"ok"`
-	Command                    Command                `json:"command"`
-	CeremonyID                 string                 `json:"ceremony_id,omitempty"`
-	Phase                      string                 `json:"phase,omitempty"`
-	Sequence                   int                    `json:"sequence,omitempty"`
-	ClosedAt                   string                 `json:"closed_at,omitempty"`
-	Decision                   string                 `json:"decision,omitempty"`
-	DecisionID                 string                 `json:"decision_id,omitempty"`
-	ReleaseID                  string                 `json:"release_id,omitempty"`
-	CandidateID                string                 `json:"candidate_id,omitempty"`
-	SourceCommit               string                 `json:"source_commit,omitempty"`
-	SourceSignedTag            string                 `json:"source_signed_tag,omitempty"`
-	SourceTagSignerFingerprint string                 `json:"source_tag_signer_fingerprint,omitempty"`
-	SourceTagObjectSHA256      string                 `json:"source_tag_object_sha256,omitempty"`
-	Outputs                    map[string]string      `json:"outputs,omitempty"`
-	Summary                    string                 `json:"summary,omitempty"`
-	Identity                   *mpcceremony.Identity  `json:"identity,omitempty"`
-	DefinitionInspection       *DefinitionInspection  `json:"definition_inspection,omitempty"`
-	ChainInspection            *ChainInspection       `json:"chain_inspection,omitempty"`
-	ParticipantInspection      *ParticipantInspection `json:"participant_inspection,omitempty"`
-	EnrollmentInspection       *EnrollmentInspection  `json:"enrollment_inspection,omitempty"`
-	JourneyInspection          *JourneyInspection     `json:"journey_inspection,omitempty"`
+	ReleaseManifestSHA256               string                               `json:"release_manifest_sha256,omitempty"`
+	Schema                              string                               `json:"schema"`
+	OK                                  bool                                 `json:"ok"`
+	Command                             Command                              `json:"command"`
+	CeremonyID                          string                               `json:"ceremony_id,omitempty"`
+	Phase                               string                               `json:"phase,omitempty"`
+	Sequence                            int                                  `json:"sequence,omitempty"`
+	ClosedAt                            string                               `json:"closed_at,omitempty"`
+	Decision                            string                               `json:"decision,omitempty"`
+	DecisionID                          string                               `json:"decision_id,omitempty"`
+	ReleaseID                           string                               `json:"release_id,omitempty"`
+	CandidateID                         string                               `json:"candidate_id,omitempty"`
+	SourceCommit                        string                               `json:"source_commit,omitempty"`
+	SourceSignedTag                     string                               `json:"source_signed_tag,omitempty"`
+	SourceTagSignerFingerprint          string                               `json:"source_tag_signer_fingerprint,omitempty"`
+	SourceTagObjectSHA256               string                               `json:"source_tag_object_sha256,omitempty"`
+	Outputs                             map[string]string                    `json:"outputs,omitempty"`
+	Summary                             string                               `json:"summary,omitempty"`
+	Identity                            *mpcceremony.Identity                `json:"identity,omitempty"`
+	DefinitionInspection                *DefinitionInspection                `json:"definition_inspection,omitempty"`
+	ChainInspection                     *ChainInspection                     `json:"chain_inspection,omitempty"`
+	ParticipantInspection               *ParticipantInspection               `json:"participant_inspection,omitempty"`
+	EnrollmentInspection                *EnrollmentInspection                `json:"enrollment_inspection,omitempty"`
+	CheckpointInspection                *CheckpointInspection                `json:"checkpoint_inspection,omitempty"`
+	CheckpointTransitionInspection      *CheckpointTransitionInspection      `json:"checkpoint_transition_inspection,omitempty"`
+	CheckpointEvidenceInspection        *CheckpointEvidenceInspection        `json:"checkpoint_evidence_inspection,omitempty"`
+	SubmissionInspection                *SubmissionInspection                `json:"submission_inspection,omitempty"`
+	SubmissionAcknowledgementInspection *SubmissionAcknowledgementInspection `json:"submission_acknowledgement_inspection,omitempty"`
+	JourneyInspection                   *JourneyInspection                   `json:"journey_inspection,omitempty"`
 }
 
 type Executor interface {

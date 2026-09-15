@@ -66,6 +66,8 @@ type SignReleaseOptions struct {
 	ReleaseSigningKey        string
 	SignatureKeyID           string
 	ReleasedAt               time.Time
+	Replay                   *ReplayPaths
+	Circuit                  *CompiledCircuit
 }
 
 type SignReleaseResult struct {
@@ -205,6 +207,81 @@ func ReplayCandidate(paths ReplayPaths, circuit *CompiledCircuit, candidateDir s
 	return replay.definition.CeremonyID, nil
 }
 
+// VerifyFinalCandidateCheckpoint fully replays a finalized candidate and
+// returns the exact closed file inventory a storage-first checkpoint may
+// commit. Extra files, missing files, symbolic links, other non-regular
+// entries, and changed bytes are rejected. Regular hard links are treated as
+// ordinary files; the checkpoint commits their exact contents, not inode
+// identity.
+func VerifyFinalCandidateCheckpoint(paths ReplayPaths, circuit *CompiledCircuit, candidateDir string) (CandidateMetadata, []ArtifactRef, error) {
+	if circuit == nil || circuit.R1CS == nil {
+		return CandidateMetadata{}, nil, errors.New("independently compiled circuit is required")
+	}
+	replay, err := loadReplay(paths)
+	if err != nil {
+		return CandidateMetadata{}, nil, err
+	}
+	if err := VerifyRunningSoftwareForMode(replay.definition.Software, replay.definition.Mode); err != nil {
+		return CandidateMetadata{}, nil, err
+	}
+	if err := ValidateCircuitBinding(circuit, replay.definition.Circuit); err != nil {
+		return CandidateMetadata{}, nil, err
+	}
+	candidate, candidateRef, err := verifyCandidate(replay.definition, replay.definitionRef, candidateDir)
+	if err != nil {
+		return CandidateMetadata{}, nil, err
+	}
+	if err := verifyCandidateReplay(circuit, &replay, paths, candidate, candidateDir); err != nil {
+		return CandidateMetadata{}, nil, err
+	}
+	names := append(candidateChecksumNames(), CandidateChecksumsFile)
+	expected := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		expected[name] = struct{}{}
+	}
+	entries, err := os.ReadDir(candidateDir)
+	if err != nil {
+		return CandidateMetadata{}, nil, err
+	}
+	refs := make([]ArtifactRef, 0, len(names))
+	for _, entry := range entries {
+		name := entry.Name()
+		if _, ok := expected[name]; !ok {
+			return CandidateMetadata{}, nil, fmt.Errorf("unexpected finalized candidate entry %q", name)
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return CandidateMetadata{}, nil, err
+		}
+		if !info.Mode().IsRegular() {
+			return CandidateMetadata{}, nil, fmt.Errorf("finalized candidate entry %q is not a regular file", name)
+		}
+		ref, err := artifactRefForFile(name, filepath.Join(candidateDir, name))
+		if err != nil {
+			return CandidateMetadata{}, nil, err
+		}
+		refs = append(refs, ref)
+		delete(expected, name)
+	}
+	if len(expected) != 0 {
+		return CandidateMetadata{}, nil, errors.New("finalized candidate tree is incomplete")
+	}
+	slices.SortFunc(refs, func(a, b ArtifactRef) int { return strings.Compare(a.Name, b.Name) })
+	for _, ref := range refs {
+		if ref.Name == CandidateMetadataFile && ref != candidateRef {
+			return CandidateMetadata{}, nil, errors.New("finalized candidate record changed during verification")
+		}
+	}
+	verifiedAgain, candidateRefAgain, err := verifyCandidate(replay.definition, replay.definitionRef, candidateDir)
+	if err != nil {
+		return CandidateMetadata{}, nil, fmt.Errorf("finalized candidate changed during closed-tree verification: %w", err)
+	}
+	if !reflect.DeepEqual(verifiedAgain, candidate) || candidateRefAgain != candidateRef {
+		return CandidateMetadata{}, nil, errors.New("finalized candidate changed during closed-tree verification")
+	}
+	return candidate, refs, nil
+}
+
 func verifyCandidateReplay(circuit *CompiledCircuit, replay *loadedReplay, paths ReplayPaths, candidate CandidateMetadata, dir string) error {
 	phase2Seal, err := loadCandidatePhase2Seal(replay.definition, candidate, dir)
 	if err != nil {
@@ -214,11 +291,36 @@ func verifyCandidateReplay(circuit *CompiledCircuit, replay *loadedReplay, paths
 		return fmt.Errorf("candidate phase2 seal: %w", err)
 	}
 	replay.phase2Seal = phase2Seal
+	phase1Summary, err := phaseSummary(replay.phase1Chain, replay.phase1ChainRef, replay.phase1Close, replay.phase1Beacon, replay.phase1Seal)
+	if err != nil {
+		return fmt.Errorf("derive phase1 candidate summary: %w", err)
+	}
+	phase2Summary, err := phaseSummary(replay.phase2Chain, replay.phase2ChainRef, replay.phase2Close, replay.phase2Beacon, replay.phase2Seal)
+	if err != nil {
+		return fmt.Errorf("derive phase2 candidate summary: %w", err)
+	}
+	var report VerificationReport
+	if _, err := readCanonicalFile(filepath.Join(dir, VerificationReportFile), &report); err != nil {
+		return fmt.Errorf("candidate verification report: %w", err)
+	}
+	if err := validateCandidateReplayClaims(candidate, phase1Summary, phase2Summary, phase2Seal, report); err != nil {
+		return err
+	}
 	replayed, err := replayAll(circuit, *replay, paths)
 	if err != nil {
 		return err
 	}
 	return compareCandidateToReplay(circuit, *replay, replayed.pk, replayed.vk, candidate, dir)
+}
+
+func validateCandidateReplayClaims(candidate CandidateMetadata, phase1, phase2 PhaseSummary, phase2Seal SealRecord, report VerificationReport) error {
+	if !reflect.DeepEqual(candidate.Phase1, phase1) || !reflect.DeepEqual(candidate.Phase2, phase2) {
+		return errors.New("candidate phase summaries do not equal the authenticated replay")
+	}
+	if candidate.FinalizedAt != phase2Seal.SealedAt || candidate.FinalizedAt != report.CheckedAt {
+		return errors.New("candidate finalization, phase2 seal, and verification report timestamps must match exactly")
+	}
+	return nil
 }
 
 func compareCandidateToReplay(
@@ -297,8 +399,8 @@ func compareCandidateToReplay(
 	return nil
 }
 
-// SignRelease validates at least one enrolled, signed passing
-// audits, assembles the final setup transcript and key manifest without
+// SignRelease validates the signed definition's required passing-audit count,
+// assembles the final setup transcript and key manifest without
 // replacing candidate files, then signs the exact manifest with the distinct
 // pre-existing release key.
 func SignRelease(options SignReleaseOptions) (*SignReleaseResult, error) {
@@ -329,6 +431,14 @@ func SignRelease(options SignReleaseOptions) (*SignReleaseResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	if definition.Schema == DefinitionSchema {
+		if options.Replay == nil || options.Circuit == nil {
+			return nil, errors.New("storage-first release signing requires independent two-phase replay inputs")
+		}
+		if _, err := ReplayCandidate(*options.Replay, options.Circuit, options.CandidateDir); err != nil {
+			return nil, fmt.Errorf("release-signer independent replay: %w", err)
+		}
+	}
 	if options.SignatureKeyID != definition.ReleaseSigner.KeyID {
 		return nil, fmt.Errorf(
 			"release signature key id %q, want signed definition key id %q",
@@ -347,7 +457,11 @@ func SignRelease(options SignReleaseOptions) (*SignReleaseResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := validateReleaseChronology(options.ReleasedAt, latestAudit); err != nil {
+	candidateTime, err := time.Parse(time.RFC3339Nano, candidate.FinalizedAt)
+	if err != nil {
+		return nil, fmt.Errorf("candidate finalized_at: %w", err)
+	}
+	if err := validateReleaseChronology(options.ReleasedAt, candidateTime, latestAudit); err != nil {
 		return nil, err
 	}
 	operationalEvidence, err := verifyReleaseOperationalEvidence(
@@ -419,8 +533,8 @@ func SignRelease(options SignReleaseOptions) (*SignReleaseResult, error) {
 		return nil, errors.New("bundled operational evidence differs from verified release input")
 	}
 	transcript, err := NewFinalTranscript(FinalTranscript{
-		Schema:              FinalTranscriptSchema,
 		CeremonyID:          definition.CeremonyID,
+		AssurancePolicy:     cloneAssurancePolicy(definition.AssurancePolicy),
 		Definition:          definitionRef,
 		Circuit:             definition.Circuit,
 		Phase1:              candidate.Phase1,
@@ -598,7 +712,8 @@ func VerifyRelease(options VerifyReleaseOptions) (*VerifyReleaseResult, error) {
 		return nil, err
 	}
 	transcriptTime, _ := time.Parse(time.RFC3339Nano, transcript.FinalizedAt)
-	if err := validateReleaseChronology(transcriptTime, latestAudit); err != nil {
+	candidateTime, _ := time.Parse(time.RFC3339Nano, candidate.FinalizedAt)
+	if err := validateReleaseChronology(transcriptTime, candidateTime, latestAudit); err != nil {
 		return nil, fmt.Errorf("final transcript: %w", err)
 	}
 	operationalEvidence, err := verifyReleaseOperationalEvidence(
@@ -614,6 +729,7 @@ func VerifyRelease(options VerifyReleaseOptions) (*VerifyReleaseResult, error) {
 		return nil, fmt.Errorf("required operational evidence: %w", err)
 	}
 	if transcript.CeremonyID != definition.CeremonyID ||
+		!reflect.DeepEqual(transcript.AssurancePolicy, definition.AssurancePolicy) ||
 		transcript.Definition != definitionRef ||
 		!equalCircuitBinding(transcript.Circuit, definition.Circuit) ||
 		!reflect.DeepEqual(transcript.Phase1, candidate.Phase1) ||
@@ -686,6 +802,66 @@ func VerifyRelease(options VerifyReleaseOptions) (*VerifyReleaseResult, error) {
 		return nil, err
 	}
 	return &VerifyReleaseResult{Manifest: manifest, Transcript: transcript, Candidate: candidate, ManifestSHA256: manifestRef.Digest.SHA256}, nil
+}
+
+// VerifyFinalReleaseCheckpoint verifies the signed release and returns its
+// exact closed regular-file inventory relative to KeysDir. The caller may add
+// a storage prefix, but must not change names or digests.
+func VerifyFinalReleaseCheckpoint(options VerifyReleaseOptions) (*VerifyReleaseResult, []ArtifactRef, error) {
+	verified, err := VerifyRelease(options)
+	if err != nil {
+		return nil, nil, err
+	}
+	refs := []ArtifactRef{}
+	err = filepath.WalkDir(options.KeysDir, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == options.KeysDir {
+			return nil
+		}
+		if entry.Type()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("final release path is a symbolic link: %s", path)
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("final release entry is not a regular file: %s", path)
+		}
+		name, err := filepath.Rel(options.KeysDir, path)
+		if err != nil {
+			return err
+		}
+		ref, err := artifactRefForFile(filepath.ToSlash(name), path)
+		if err != nil {
+			return err
+		}
+		refs = append(refs, ref)
+		if len(refs) > MaxCheckpointArtifacts {
+			return fmt.Errorf("final release file count exceeds %d", MaxCheckpointArtifacts)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	slices.SortFunc(refs, func(a, b ArtifactRef) int { return strings.Compare(a.Name, b.Name) })
+	verifiedAgain, err := VerifyRelease(options)
+	if err != nil {
+		return nil, nil, fmt.Errorf("final release changed during closed-tree verification: %w", err)
+	}
+	if verified.ManifestSHA256 != verifiedAgain.ManifestSHA256 ||
+		!reflect.DeepEqual(verified.Transcript, verifiedAgain.Transcript) ||
+		!reflect.DeepEqual(verified.Candidate, verifiedAgain.Candidate) ||
+		!reflect.DeepEqual(verified.Manifest, verifiedAgain.Manifest) {
+		return nil, nil, errors.New("final release changed during closed-tree verification")
+	}
+	return verified, refs, nil
 }
 
 func verifyCandidate(
@@ -897,8 +1073,15 @@ func verifyPassingAudits(
 	candidate CandidateMetadata,
 	inputs []AuditArtifact,
 ) ([]ArtifactRef, time.Time, error) {
-	if len(inputs) < 1 {
-		return nil, time.Time{}, errors.New("at least one independently signed audit report is required")
+	minimum := 1
+	if definition.Schema == DefinitionSchema {
+		minimum = int(definition.AssurancePolicy.PassingCeremonyAudits)
+	}
+	if len(inputs) < minimum {
+		return nil, time.Time{}, fmt.Errorf("have %d passing ceremony audits, need %d", len(inputs), minimum)
+	}
+	if minimum == 0 && len(inputs) != 0 {
+		return nil, time.Time{}, errors.New("ceremony audit artifacts are forbidden when audits are disabled")
 	}
 	replayRoot, err := replayRootSHA256(candidate)
 	if err != nil {
@@ -988,8 +1171,11 @@ func verifyPassingAudits(
 	return refs, latestAudit, nil
 }
 
-func validateReleaseChronology(releasedAt, latestAudit time.Time) error {
-	if !releasedAt.After(latestAudit) {
+func validateReleaseChronology(releasedAt, candidateFinalizedAt, latestAudit time.Time) error {
+	if !releasedAt.After(candidateFinalizedAt) {
+		return errors.New("released_at must strictly postdate candidate finalization")
+	}
+	if !latestAudit.IsZero() && !releasedAt.After(latestAudit) {
 		return errors.New("released_at must strictly postdate every accepted independent audit")
 	}
 	return nil
@@ -1358,6 +1544,9 @@ func copyOperationalEvidence(
 // order exactly — so bundling in the caller's flag order would sign a release
 // for which no valid decision can ever exist.
 func bundleAuditArtifacts(inputs []AuditArtifact, stagingDir string) ([]AuditArtifact, error) {
+	if len(inputs) == 0 {
+		return []AuditArtifact{}, nil
+	}
 	auditDir := filepath.Join(stagingDir, "audits")
 	if err := os.Mkdir(auditDir, 0o700); err != nil {
 		return nil, err

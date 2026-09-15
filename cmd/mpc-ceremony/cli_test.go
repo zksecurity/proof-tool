@@ -13,6 +13,24 @@ import (
 	"testing"
 )
 
+var cliTestReplayFlags = []string{
+	"--transcript-root", "transcript",
+	"--phase1-chain", "transcript/phase1/chain.json",
+	"--phase1-chain-signature", "transcript/phase1/chain.sig",
+	"--phase1-close", "transcript/phase1/close.json",
+	"--phase1-close-signature", "transcript/phase1/close.sig",
+	"--phase1-beacon", "transcript/phase1/beacon.json",
+	"--phase1-beacon-signature", "transcript/phase1/beacon.sig",
+	"--phase1-seal", "transcript/phase1/seal.json",
+	"--phase1-seal-signature", "transcript/phase1/seal.sig",
+	"--phase2-chain", "transcript/phase2/chain.json",
+	"--phase2-chain-signature", "transcript/phase2/chain.sig",
+	"--phase2-close", "transcript/phase2/close.json",
+	"--phase2-close-signature", "transcript/phase2/close.sig",
+	"--phase2-beacon", "transcript/phase2/beacon.json",
+	"--phase2-beacon-signature", "transcript/phase2/beacon.sig",
+}
+
 func TestParseInvocationAcceptsRequiredCommandSurface(t *testing.T) {
 	t.Parallel()
 
@@ -46,23 +64,7 @@ func TestParseInvocationAcceptsRequiredCommandSurface(t *testing.T) {
 		"--coordinator-signing-key", "private/coordinator.key",
 		"--beacon-round", "12345",
 	}
-	replayFlags := []string{
-		"--transcript-root", "transcript",
-		"--phase1-chain", "transcript/phase1/chain.json",
-		"--phase1-chain-signature", "transcript/phase1/chain.sig",
-		"--phase1-close", "transcript/phase1/close.json",
-		"--phase1-close-signature", "transcript/phase1/close.sig",
-		"--phase1-beacon", "transcript/phase1/beacon.json",
-		"--phase1-beacon-signature", "transcript/phase1/beacon.sig",
-		"--phase1-seal", "transcript/phase1/seal.json",
-		"--phase1-seal-signature", "transcript/phase1/seal.sig",
-		"--phase2-chain", "transcript/phase2/chain.json",
-		"--phase2-chain-signature", "transcript/phase2/chain.sig",
-		"--phase2-close", "transcript/phase2/close.json",
-		"--phase2-close-signature", "transcript/phase2/close.sig",
-		"--phase2-beacon", "transcript/phase2/beacon.json",
-		"--phase2-beacon-signature", "transcript/phase2/beacon.sig",
-	}
+	replayFlags := cliTestReplayFlags
 
 	tests := []struct {
 		name    string
@@ -272,6 +274,7 @@ func TestParseInvocationAcceptsRequiredCommandSurface(t *testing.T) {
 			args: joinArgs(
 				[]string{"release", "sign"},
 				ceremonyTrust,
+				replayFlags,
 				[]string{
 					"--candidate-bundle", "candidate/release",
 					"--audit-report", "audits/auditor-01.json",
@@ -462,6 +465,32 @@ func TestParseInvocationAcceptsRequiredCommandSurface(t *testing.T) {
 			),
 			command: CommandInspectEnrollment,
 		},
+		{
+			name: "inspect checkpoint",
+			args: joinArgs(
+				[]string{"inspect", "checkpoint"},
+				ceremonyTrust,
+				[]string{
+					"--checkpoint", "state/checkpoint-0000.json",
+					"--checkpoint-signature", "state/checkpoint-0000.sig",
+				},
+			),
+			command: CommandInspectCheckpoint,
+		},
+		{
+			name: "inspect checkpoint transition",
+			args: joinArgs(
+				[]string{"inspect", "checkpoint-transition"},
+				ceremonyTrust,
+				[]string{
+					"--previous-checkpoint", "state/checkpoint-0000.json",
+					"--previous-checkpoint-signature", "state/checkpoint-0000.sig",
+					"--checkpoint", "state/checkpoint-0001.json",
+					"--checkpoint-signature", "state/checkpoint-0001.sig",
+				},
+			),
+			command: CommandInspectCheckpointTransition,
+		},
 	}
 
 	for _, test := range tests {
@@ -626,7 +655,7 @@ func TestParseInvocationRejectsStreamsURLsAndForce(t *testing.T) {
 func TestReleaseSignRequiresPairedIndependentAudits(t *testing.T) {
 	t.Parallel()
 
-	base := []string{
+	base := joinArgs([]string{
 		"release", "sign",
 		"--ceremony", "ceremony.json",
 		"--ceremony-signature", "ceremony.sig",
@@ -639,17 +668,15 @@ func TestReleaseSignRequiresPairedIndependentAudits(t *testing.T) {
 		"--signature-key-id", "release-2026",
 		"--released-at", "2026-07-28T12:00:00Z",
 		"--release-dir", "release",
+	}, cliTestReplayFlags)
+	if _, err := parseInvocation(base); err != nil {
+		t.Fatalf("zero audit flags must be parsed before the signed policy is loaded: %v", err)
 	}
 	tests := []struct {
 		name string
 		args []string
 		want string
 	}{
-		{
-			name: "zero audits",
-			args: append([]string(nil), base...),
-			want: "at least once",
-		},
 		{
 			name: "mismatched signatures",
 			args: append(append([]string(nil), base...),
@@ -957,6 +984,18 @@ func TestDiagnosticRedactionRecognizesInspectionAndReceiptCommands(t *testing.T)
 		{
 			name:         "enrollment inspection",
 			args:         []string{"inspect", "enrollment", "--enrollment", "enrollment.json"},
+			commandIndex: 0,
+			valueIndex:   3,
+		},
+		{
+			name:         "checkpoint inspection",
+			args:         []string{"inspect", "checkpoint", "--checkpoint", "checkpoint.json"},
+			commandIndex: 0,
+			valueIndex:   3,
+		},
+		{
+			name:         "checkpoint transition inspection",
+			args:         []string{"inspect", "checkpoint-transition", "--checkpoint", "checkpoint.json"},
 			commandIndex: 0,
 			valueIndex:   3,
 		},

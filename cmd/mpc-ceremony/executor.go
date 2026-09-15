@@ -107,6 +107,22 @@ func (workflowExecutor) Execute(ctx context.Context, invocation Invocation) (Com
 		return executeInspectParticipant(invocation.Options.(InspectParticipantOptions))
 	case CommandInspectEnrollment:
 		return executeInspectEnrollment(invocation.Options.(InspectEnrollmentOptions))
+	case CommandInspectCheckpoint:
+		return executeInspectCheckpoint(invocation.Options.(InspectCheckpointOptions))
+	case CommandInspectCheckpointTransition:
+		return executeInspectCheckpointTransition(invocation.Options.(InspectCheckpointTransitionOptions))
+	case CommandInspectSubmission:
+		return executeInspectSubmission(invocation.Options.(InspectSubmissionOptions))
+	case CommandInspectSubmissionAcknowledgement:
+		return executeInspectSubmissionAcknowledgement(invocation.Options.(InspectSubmissionAcknowledgementOptions))
+	case CommandCheckpointPrepare:
+		return executeCheckpointPrepare(invocation.Options.(CheckpointPrepareOptions))
+	case CommandCheckpointSign:
+		return executeCheckpointSign(invocation.Options.(CheckpointSignOptions))
+	case CommandCheckpointVerify:
+		return executeCheckpointVerify(invocation.Options.(CheckpointVerifyOptions))
+	case CommandCheckpointVerifyStored:
+		return executeCheckpointVerifyStored(invocation.Options.(CheckpointVerifyStoredOptions))
 	default:
 		return CommandResult{}, fmt.Errorf("%w: %s", errExecutorNotWired, invocation.Command)
 	}
@@ -120,6 +136,13 @@ func executeInit(options InitOptions) (CommandResult, error) {
 	policy, err := mpcceremony.LoadInitPolicy(options.PolicyPath)
 	if err != nil {
 		return CommandResult{}, err
+	}
+	assurancePolicy, err := policy.ResolvedAssurancePolicy(options.Mode)
+	if err != nil {
+		return CommandResult{}, fmt.Errorf("assurance policy: %w", err)
+	}
+	if err := assurancePolicy.Validate(options.Mode, len(participants.Auditors)); err != nil {
+		return CommandResult{}, fmt.Errorf("assurance policy: %w", err)
 	}
 	if participants.Coordinator.KeyID != options.CoordinatorKeyID {
 		return CommandResult{}, fmt.Errorf(
@@ -172,6 +195,7 @@ func executeInit(options InitOptions) (CommandResult, error) {
 			Phase1Policy:    policy.Phase1Policy,
 			Phase2Policy:    policy.Phase2Policy,
 			BeaconPolicy:    policy.BeaconPolicy,
+			AssurancePolicy: assurancePolicy,
 		},
 		CoordinatorPrivateKeyPath: options.CoordinatorSigningKey,
 	})
@@ -649,6 +673,14 @@ func executeReleaseSign(options ReleaseSignOptions) (CommandResult, error) {
 	if err != nil {
 		return CommandResult{}, err
 	}
+	compiled, err := compileCircuitForCeremony(trust)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	replayEvidence, err := replayPaths(trust, options.Replay)
+	if err != nil {
+		return CommandResult{}, err
+	}
 	result, err := mpcceremony.SignRelease(mpcceremony.SignReleaseOptions{
 		DefinitionPath:           options.CeremonyPath,
 		DefinitionSignaturePath:  options.CeremonySignaturePath,
@@ -662,6 +694,8 @@ func executeReleaseSign(options ReleaseSignOptions) (CommandResult, error) {
 		ReleaseSigningKey:        options.ReleaseSigningKey,
 		SignatureKeyID:           options.SignatureKeyID,
 		ReleasedAt:               releasedAt,
+		Replay:                   &replayEvidence,
+		Circuit:                  compiled,
 	})
 	if err != nil {
 		return CommandResult{}, err

@@ -56,10 +56,16 @@ Commands:
   decision prepare     Derive the canonical production GO/NO-GO record
   decision sign        Sign the canonical production GO/NO-GO record
   decision verify      Verify decision evidence and role threshold
+  checkpoint prepare   Re-derive a supported ceremony checkpoint from authenticated evidence
+  checkpoint sign      Re-derive and sign an exact reviewed ceremony checkpoint
+  checkpoint verify    Fully verify a signed ceremony checkpoint and its evidence
+  checkpoint verify-stored  Infer and fully verify a fetched checkpoint ancestry
   inspect definition   Authenticate and describe a ceremony definition
   inspect chain        Authenticate and describe an accepted chain
   inspect participant  Match an existing key to the participant roster
   inspect enrollment   Authenticate an operational enrollment
+  inspect checkpoint   Authenticate a storage-first workflow checkpoint
+  inspect checkpoint-transition  Authenticate one legal checkpoint edge
   ops prepare-enrollment  Derive your ceremony-bound public enrollment
   ops sign             Sign your reviewed enrollment or observation offline
   ops prepare-public-witness-receipt  Prepare witnessed closure bytes
@@ -145,25 +151,32 @@ never generated automatically. Private key bytes are never printed.
 `,
 	"rehearsal": `Usage:
   mpc-ceremony rehearsal init --created-at RFC3339 --out-dir FRESH_DIR \
-    [--beacon-lead-seconds N] [--allowed-binary FILE ...]
+    [--beacon-lead-seconds N] [--allowed-binary FILE ...] \
+    [--disable-optional-assurance]
 
 Rehearsal commands create same-host test identities and must never be used as
 production enrollment evidence.
 `,
 	"rehearsal init": `Usage:
   mpc-ceremony rehearsal init --created-at RFC3339 --out-dir FRESH_DIR \
-    [--beacon-lead-seconds N] [--allowed-binary FILE ...]
+    [--beacon-lead-seconds N] [--allowed-binary FILE ...] \
+    [--disable-optional-assurance]
 
 Creates fresh same-host identities and canonical configuration for exactly
 three participants, then initializes a signed rehearsal-tiny-v1 ceremony. The
 output is a functional test fixture, not production or independence evidence.
-The witness window defaults to 300 seconds. --beacon-lead-seconds may shorten
-it to at least 12 seconds for automated tests; the chosen non-production value
-is signed into the rehearsal definition and cannot change production policy.
+The beacon lead defaults to 300 seconds. --beacon-lead-seconds may shorten it
+to at least 12 seconds for automated tests. The chosen value is signed into
+the rehearsal definition. Production ceremonies configure the same field in
+their policy JSON; production tooling should recommend 24 hours and clearly
+warn before signing a shorter policy. With production witnesses enabled, the
+close also reserves the fixed witness-observation window.
+--disable-optional-assurance creates an explicit zero-witness, zero-mirror,
+zero-ceremony-audit rehearsal while retaining future drand verification.
 `,
 	"inspect": inspectHelp + `
 Authenticated record projections are also available as subcommands:
-  mpc-ceremony inspect <definition|chain|participant|enrollment> [flags]
+  mpc-ceremony inspect <definition|chain|participant|enrollment|checkpoint|checkpoint-transition> [flags]
 
 These subcommands are read-only and machine-readable. They perform no network
 access, replay, signing, or writes.
@@ -203,6 +216,106 @@ writes and never emits private-key bytes.
 Authenticates the exact canonical operational enrollment and its detached
 proof-of-possession signature, then reports an immutable public projection of
 the identity, role, role index, timestamp, and independence disclosure.
+`,
+	"inspect checkpoint": `Usage:
+  mpc-ceremony --format json inspect checkpoint --ceremony FILE \
+    --ceremony-signature FILE --coordinator-public-key-file KEY \
+    --checkpoint FILE --checkpoint-signature FILE
+
+Authenticates the exact canonical checkpoint against the independently trusted
+ceremony definition and coordinator key. Reports the bounded workflow state,
+submission slots, predecessor references, and artifact inventory. It does not
+fetch or replay the protocol artifacts referenced by the checkpoint.
+`,
+	"inspect checkpoint-transition": `Usage:
+  mpc-ceremony --format json inspect checkpoint-transition --ceremony FILE \
+    --ceremony-signature FILE --coordinator-public-key-file KEY \
+    --previous-checkpoint FILE --previous-checkpoint-signature FILE \
+    --checkpoint FILE --checkpoint-signature FILE
+
+Authenticates both exact signed checkpoints, verifies that the child binds the
+exact parent record and detached signature, and enforces the legal structural
+transition. It does not fetch or replay the protocol artifacts referenced by
+that transition.
+`,
+	"checkpoint": `Usage:
+  mpc-ceremony checkpoint <prepare|sign|verify|verify-stored> [flags]
+
+Guarded storage-first checkpoint operations. Every operation re-authenticates
+the exact signed definition, predecessor, both phase chains and all records
+that cause the transition. The authenticated lifecycle runs from initialization
+through both phases, the fully replayed final candidate, and the exact signed
+release tree. Candidate acceptance and finalization replay the contribution
+mathematics and cleanup evidence.
+`,
+	"checkpoint prepare": `Usage:
+  mpc-ceremony checkpoint prepare --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --relay-release-id ID --transition KIND --chain FILE \
+    --chain-signature FILE --head-payload FILE [transition flags] --out-dir DIR
+
+Re-derives a canonical supported ceremony checkpoint from authenticated evidence and
+writes canonical.json plus signing-request.json to a fresh directory.
+
+For phase1-outbound-published also supply the previous checkpoint pair, signed
+outbound handoff pair, --attempt-id, and --manifest-key. For
+phase1-receipt-accepted supply the previous checkpoint pair, signed submission
+envelope pair, signed acknowledgement pair, exact --manifest,
+--next-attempt-id, and --next-manifest-key.
+
+For phase1-candidate-accepted supply the previous checkpoint pair, fully
+verified next chain and head payload, candidate envelope pair, accepted
+acknowledgement pair, and exact manifest. Attempt scope is derived from the
+preallocated candidate slot.
+
+For phase1-closed supply the previous checkpoint pair and signed Phase 1 close
+record pair. For phase1-beacon-recorded supply the previous checkpoint pair
+and signed Phase 1 beacon record pair; the raw response named by the beacon
+record must exist under the artifact root.
+
+For phase1-sealed supply the previous checkpoint pair and signed Phase 1 seal
+record pair. Relay fully replays Phase 1 and requires the exact commons.bin
+named by that seal under the artifact root.
+
+Phase 2 uses the corresponding --phase2-* inputs. For
+final-candidate-recorded supply the canonical --candidate-dir final/candidate.
+For final-release-recorded supply the canonical --release-dir final/release;
+the complete release, including operational evidence and any required audits,
+is strictly verified and closed against extra files.
+`,
+	"checkpoint sign": `Usage:
+  mpc-ceremony checkpoint sign [all checkpoint prepare evidence flags] \
+    --checkpoint FILE --signing-request FILE \
+    --coordinator-signing-key KEY --out FRESH_FILE
+
+Re-derives the checkpoint from all exact evidence, requires byte-for-byte
+agreement with the reviewed checkpoint and signing request, checks that the
+private key belongs to the authenticated coordinator, then signs it.
+`,
+	"checkpoint verify": `Usage:
+  mpc-ceremony --format json checkpoint verify \
+    [all checkpoint prepare evidence flags] \
+    --checkpoint FILE --checkpoint-signature FILE
+
+Re-derives and authenticates the signed checkpoint and all transition-defining
+evidence within the supported lifecycle boundary. Its JSON projection sets fully_verified
+only after those checks pass. Structural inspect checkpoint output must not be
+used to advance Relay's trusted high-water state.
+`,
+	"checkpoint verify-stored": `Usage:
+  mpc-ceremony --format json checkpoint verify-stored \
+    --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE
+
+Walks the fetched checkpoint ancestry and derives every evidence path and
+transition input from the authenticated checkpoints themselves. Every
+supported ceremony edge is fully re-derived through the signed final release;
+candidate acceptance and finalization replay contribution mathematics and
+cleanup, while closure and beacon validation use the exact authenticated head
+and raw beacon response.
+Only this command (or checkpoint verify with explicit evidence) emits
+fully_verified=true. Structural inspect output is diagnostics-only.
 `,
 	"init": `Usage:
   mpc-ceremony init --key-version ownership-destination-v2 \
@@ -427,18 +540,21 @@ Release authenticity is separate from MPC contribution identity.
 	"release sign": `Usage:
   mpc-ceremony release sign --ceremony FILE --ceremony-signature FILE \
     --coordinator-public-key-file KEY --candidate-bundle DIR \
-	    --audit-report FILE --audit-signature FILE \
+	    [--audit-report FILE --audit-signature FILE]... \
 	    --operational-evidence-root DIR \
 	    --operational-bundle DIR/operational/evidence-bundle.json \
 	    --operational-bundle-signature DIR/operational/evidence-bundle.sig \
 	    --release-signing-key KEY --signature-key-id ID \
     --released-at RFC3339_UTC --release-dir FRESH_DIR
+` + replayFlagsHelp + `
 
-	Requires at least one enrolled auditor plus the coordinator-signed
-	Phase 1 and Phase 2 operational bundle. Each phase must contain a valid public
-	witness quorum and matching multi-relay beacon responses. The candidate is
+	Requires at least the signed minimum number of passing ceremony audits
+	assurance policy, plus the coordinator-signed Phase 1 and Phase 2 operational
+	bundle. Witness and mirror evidence likewise follows that signed policy;
+	multi-relay beacon evidence remains required. The candidate is
 	never mutated; all verified evidence is atomically published into a fresh
-	release directory.
+	release directory. For current ceremonies, the release signer independently
+	replays both phases even when the signed audit minimum is zero.
 `,
 	"release verify": `Usage:
   mpc-ceremony release verify --ceremony FILE --ceremony-signature FILE \
@@ -460,7 +576,8 @@ entropy quality, erasure, public witnessing, mirrors, or attendance.
   mpc-ceremony decision prepare --ceremony FILE --ceremony-signature FILE \
     --coordinator-public-key-file KEY --draft FILE --out FRESH_FILE
 
-Strictly parses a proof-tool-mpc-production-decision-draft-v1 record, derives
+Strictly parses a production decision draft matching the authenticated
+ceremony schema, derives
 the release_id and decision_id, and checks ceremony, source, exact K=21
 circuit, and signer-role bindings. The fresh output is the only byte string
 the accountable roles should sign.
@@ -582,8 +699,8 @@ Run ops verify afterwards; receipts require --related-record and bundles require
 `,
 	"ops prepare-bundle": `Usage:
   mpc-ceremony ops prepare-bundle --ceremony FILE --ceremony-signature FILE \
-    --coordinator-public-key-file KEY --evidence-root PUBLIC_DIR --out-dir PUBLIC_DIR/operational \
-    [--witness-quorum 1]
+    --coordinator-public-key-file KEY --evidence-root PUBLIC_DIR \
+    --out-dir PUBLIC_DIR/operational
 
 Discovers bounded public JSON and signatures; never point it at private keys or
 credentials. Reports missing or conflicting evidence by phase and turn. Keep
@@ -591,8 +708,8 @@ original relative paths when collecting public records from their owners.
 The operational directory may exist; existing evidence is preserved. Bundle,
 signature and signing-request files must not already exist. Interrupted output
 is retained for inspection, never automatically overwritten.
-Set witness-quorum to your agreed minimum per phase (1-32), not a lower value
-chosen to fit the available receipts.
+Witness and mirror requirements come from the authenticated ceremony
+definition; the operator cannot weaken them to fit the available evidence.
 If complete, independently verifies all referenced evidence and exports an
 UNSIGNED canonical bundle and signing request. It does not invent records,
 backdate observations, or sign for other roles. Release still requires the

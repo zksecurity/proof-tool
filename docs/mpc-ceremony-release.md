@@ -31,7 +31,7 @@ Protect `main` with required review, required CI checks, CODEOWNERS review for
 release workflows, no direct pushes, and no force pushes. GitHub Actions is
 therefore part of the trusted release boundary.
 
-New ceremony definitions use schema v2. The coordinator runs either released
+New ceremony definitions use schema v3. The coordinator runs either released
 binary and passes the other with repeated `--allowed-binary FILE` flags during
 `init` (or `rehearsal init`). Initialization reads the embedded Go build
 metadata and rejects different source commits, dependency versions, Go
@@ -101,3 +101,57 @@ inspection, and records the tested hashes in the kit's `compatibility.json`.
 That downstream gate may reject a proposed pairing without invalidating either
 independent release. Updating Relay never requires changing proof-tool's CI,
 and releasing proof-tool never requires selecting a Relay commit.
+
+## Experimental optional controls
+
+The storage-first design introduces definition v3 with a signed
+`assurance_policy`. Witnesses, mirrors, ceremony audits, and external security
+audit signoffs each have an explicit minimum and may independently be zero.
+The policy is repeated and checked across checkpoints, operational evidence,
+the final transcript, and the production decision. Legacy schemas retain their
+previous minimums. See [Optional ceremony controls](single-observer-minimum.md).
+
+The same signed definition contains the beacon lead. Rehearsal and production
+both accept a positive configured value; 300 seconds and 24 hours respectively
+are tooling defaults, not verifier-enforced mode floors. A shorter production
+lead reduces the time available for public observation and review, so the
+coordinator-facing tool must warn before signing it. When production witnesses
+are enabled, close validation also reserves the fixed witness-observation
+window in addition to the configured lead.
+
+Storage-first verification requires Relay to place the canonical accepted
+artifact tree in a private local staging directory and prevent other local
+processes from changing it during verification. Checkpoint metadata reads use
+descriptor-relative, no-follow access on Linux and macOS. The existing large
+transcript replay path still reopens files by pathname, so the system does not
+claim protection against a malicious local process or compromised host racing
+the verifier. Signed hashes and full replay continue to detect backend
+corruption and ordinary local changes.
+
+The signed checkpoint graph uses the same canonical Phase 1 paths consumed by
+Phase 2 (`phase1/chain-NNNN.*`, `phase1/closure/*`, `phase1/beacon/*`, and
+`phase1/sealed/*`). Checkpoint creation rejects alternate aliases, so a fully
+verified Phase 1 graph cannot depend on hidden duplicate files before Phase 2.
+The next checkpoint fully replays that sealed Phase 1 state and accepts only
+the deterministic zero-contribution Phase 2 tree at
+`phase2/chain-0000.json`, `phase2/chain-0000.sig`, and
+`phase2/genesis.bin`. Merely uploading files with those names is insufficient.
+Phase 2 participant checkpoints then use the same ordered
+outbound-handoff, signed-receipt, and accepted-candidate transitions as Phase 1.
+Each accepted candidate is fully replayed against the sealed Phase 1 commons.
+After the configured minimum is met, the graph accepts the canonical signed
+Phase 2 closure and then the canonical signed beacon record plus its raw drand
+response. Both edges preserve the exact Phase 1 seal, Phase 2 head, and all
+submission results; stored verification replays that complete ancestry.
+The next guarded edge independently replays both phases and accepts only the
+closed `final/candidate` tree: the coordinator-signed candidate, exact checksum
+inventory, final keys, Phase 2 seal, and public proof-verification evidence.
+Extra, missing, symbolic-link, nonregular or changed files are rejected.
+
+For current definitions, release signing also independently replays both
+phases on the release signer's machine even when ceremony audits are disabled.
+The following checkpoint accepts only the strictly verified closed
+`final/release` tree, including its release-signer manifest signature,
+operational evidence, explicit audit inventory, transcript, keys and checksums.
+It rejects missing, extra, symbolic-link, nonregular or changed entries.
+GO/NO-GO authorization and public publication remain later, separate states.

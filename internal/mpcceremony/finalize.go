@@ -410,6 +410,9 @@ func (c CandidateMetadata) Validate() error {
 			return fmt.Errorf("%s: %w", label, err)
 		}
 	}
+	if err := validateCandidateArtifactNames(c); err != nil {
+		return err
+	}
 	if err := validateID("coordinator_id", c.CoordinatorID); err != nil {
 		return err
 	}
@@ -417,6 +420,25 @@ func (c CandidateMetadata) Validate() error {
 		return err
 	}
 	return validateTimestamp("finalized_at", c.FinalizedAt)
+}
+
+func validateCandidateArtifactNames(c CandidateMetadata) error {
+	for label, value := range map[string]struct{ actual, expected string }{
+		"constraint_system":     {c.ConstraintSystem.Name, prover.DestinationConstraintSystemFile},
+		"proving_key":           {c.ProvingKey.Name, NativeProvingKeyFile},
+		"verifying_key":         {c.VerifyingKey.Name, NativeVerifyingKeyFile},
+		"cardano_verifying_key": {c.CardanoVerifyingKey.Name, CardanoVKBytesFile},
+		"cardano_vk_hex":        {c.CardanoVKHex.Name, CardanoVKHexFile},
+		"cardano_vk_format":     {c.CardanoVKFormat.Name, CardanoVKFormatFile},
+		"verification_report":   {c.VerificationReport.Name, VerificationReportFile},
+		"public_evidence":       {c.PublicEvidence.Name, PublicEvidenceFile},
+		"phase2_seal_record":    {c.Phase2SealRecord.Name, Phase2SealFile},
+	} {
+		if value.actual != value.expected {
+			return fmt.Errorf("%s artifact name %q, want %q", label, value.actual, value.expected)
+		}
+	}
+	return nil
 }
 
 func computeCandidateID(candidate CandidateMetadata) (string, error) {
