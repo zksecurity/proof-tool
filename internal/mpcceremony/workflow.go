@@ -512,6 +512,29 @@ func LoadSignedChainExact(trusted *TrustedCeremony, paths PhaseTranscriptPaths) 
 	return chain, refs, nil
 }
 
+// VerifyAcceptedPhase1Chain replays every Phase 1 transition and returns only
+// after the signed chain, contribution mathematics, participant attestations,
+// cleanup acknowledgements, and coordinator verification records agree. It is
+// read-only and is the checkpoint verifier's cp3 boundary.
+func VerifyAcceptedPhase1Chain(trust TrustPaths, circuit *CompiledCircuit, paths PhaseTranscriptPaths) (Chain, SignedArtifactRefs, error) {
+	trusted, err := loadOperationalCeremony(trust)
+	if err != nil {
+		return Chain{}, SignedArtifactRefs{}, err
+	}
+	if err := validateWorkflowCircuit(trusted, circuit); err != nil {
+		return Chain{}, SignedArtifactRefs{}, err
+	}
+	chain, err := loadVerifiedPhase1Files(trusted, circuit, paths)
+	if err != nil {
+		return Chain{}, SignedArtifactRefs{}, err
+	}
+	_, refs, err := LoadSignedChainExact(trusted, paths)
+	if err != nil {
+		return Chain{}, SignedArtifactRefs{}, err
+	}
+	return chain, refs, nil
+}
+
 // LoadReplayPhase1Files strictly reads all accepted evidence and replays every
 // native Phase 1 transition while retaining at most the states needed by gnark.
 func loadVerifiedPhase1Files(

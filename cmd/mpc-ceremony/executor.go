@@ -107,6 +107,22 @@ func (workflowExecutor) Execute(ctx context.Context, invocation Invocation) (Com
 		return executeInspectParticipant(invocation.Options.(InspectParticipantOptions))
 	case CommandInspectEnrollment:
 		return executeInspectEnrollment(invocation.Options.(InspectEnrollmentOptions))
+	case CommandInspectCheckpoint:
+		return executeInspectCheckpoint(invocation.Options.(InspectCheckpointOptions))
+	case CommandInspectCheckpointTransition:
+		return executeInspectCheckpointTransition(invocation.Options.(InspectCheckpointTransitionOptions))
+	case CommandInspectSubmission:
+		return executeInspectSubmission(invocation.Options.(InspectSubmissionOptions))
+	case CommandInspectSubmissionAcknowledgement:
+		return executeInspectSubmissionAcknowledgement(invocation.Options.(InspectSubmissionAcknowledgementOptions))
+	case CommandCheckpointPrepare:
+		return executeCheckpointPrepare(invocation.Options.(CheckpointPrepareOptions))
+	case CommandCheckpointSign:
+		return executeCheckpointSign(invocation.Options.(CheckpointSignOptions))
+	case CommandCheckpointVerify:
+		return executeCheckpointVerify(invocation.Options.(CheckpointVerifyOptions))
+	case CommandCheckpointVerifyStored:
+		return executeCheckpointVerifyStored(invocation.Options.(CheckpointVerifyStoredOptions))
 	default:
 		return CommandResult{}, fmt.Errorf("%w: %s", errExecutorNotWired, invocation.Command)
 	}

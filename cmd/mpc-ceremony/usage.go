@@ -56,10 +56,16 @@ Commands:
   decision prepare     Derive the canonical production GO/NO-GO record
   decision sign        Sign the canonical production GO/NO-GO record
   decision verify      Verify decision evidence and role threshold
+  checkpoint prepare   Re-derive a cp0-cp3 checkpoint from authenticated evidence
+  checkpoint sign      Re-derive and sign an exact reviewed cp0-cp3 checkpoint
+  checkpoint verify    Fully verify a signed cp0-cp3 checkpoint and its evidence
+  checkpoint verify-stored  Infer and fully verify a fetched cp0-cp3 ancestry
   inspect definition   Authenticate and describe a ceremony definition
   inspect chain        Authenticate and describe an accepted chain
   inspect participant  Match an existing key to the participant roster
   inspect enrollment   Authenticate an operational enrollment
+  inspect checkpoint   Authenticate a storage-first workflow checkpoint
+  inspect checkpoint-transition  Authenticate one legal checkpoint edge
   ops prepare-enrollment  Derive your ceremony-bound public enrollment
   ops sign             Sign your reviewed enrollment or observation offline
   ops prepare-public-witness-receipt  Prepare witnessed closure bytes
@@ -163,7 +169,7 @@ is signed into the rehearsal definition and cannot change production policy.
 `,
 	"inspect": inspectHelp + `
 Authenticated record projections are also available as subcommands:
-  mpc-ceremony inspect <definition|chain|participant|enrollment> [flags]
+  mpc-ceremony inspect <definition|chain|participant|enrollment|checkpoint|checkpoint-transition> [flags]
 
 These subcommands are read-only and machine-readable. They perform no network
 access, replay, signing, or writes.
@@ -203,6 +209,88 @@ writes and never emits private-key bytes.
 Authenticates the exact canonical operational enrollment and its detached
 proof-of-possession signature, then reports an immutable public projection of
 the identity, role, role index, timestamp, and independence disclosure.
+`,
+	"inspect checkpoint": `Usage:
+  mpc-ceremony --format json inspect checkpoint --ceremony FILE \
+    --ceremony-signature FILE --coordinator-public-key-file KEY \
+    --checkpoint FILE --checkpoint-signature FILE
+
+Authenticates the exact canonical checkpoint against the independently trusted
+ceremony definition and coordinator key. Reports the bounded workflow state,
+submission slots, predecessor references, and artifact inventory. It does not
+fetch or replay the protocol artifacts referenced by the checkpoint.
+`,
+	"inspect checkpoint-transition": `Usage:
+  mpc-ceremony --format json inspect checkpoint-transition --ceremony FILE \
+    --ceremony-signature FILE --coordinator-public-key-file KEY \
+    --previous-checkpoint FILE --previous-checkpoint-signature FILE \
+    --checkpoint FILE --checkpoint-signature FILE
+
+Authenticates both exact signed checkpoints, verifies that the child binds the
+exact parent record and detached signature, and enforces the legal structural
+transition. It does not fetch or replay the protocol artifacts referenced by
+that transition.
+`,
+	"checkpoint": `Usage:
+  mpc-ceremony checkpoint <prepare|sign|verify|verify-stored> [flags]
+
+Guarded storage-first checkpoint operations. Every operation re-authenticates
+the exact signed definition, predecessor, Phase 1 chain and head, and all
+transition-defining records. This implementation supports the initial,
+outbound-published, receipt-accepted and candidate-accepted checkpoints
+(cp0-cp3). Candidate acceptance replays the contribution mathematics and
+cleanup evidence.
+`,
+	"checkpoint prepare": `Usage:
+  mpc-ceremony checkpoint prepare --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --relay-release-id ID --transition KIND --chain FILE \
+    --chain-signature FILE --head-payload FILE [transition flags] --out-dir DIR
+
+Re-derives a canonical cp0-cp3 checkpoint from authenticated evidence and
+writes canonical.json plus signing-request.json to a fresh directory.
+
+For phase1-outbound-published also supply the previous checkpoint pair, signed
+outbound handoff pair, --attempt-id, and --manifest-key. For
+phase1-receipt-accepted supply the previous checkpoint pair, signed submission
+envelope pair, signed acknowledgement pair, exact --manifest,
+--next-attempt-id, and --next-manifest-key.
+
+For phase1-candidate-accepted supply the previous checkpoint pair, fully
+verified next chain and head payload, candidate envelope pair, accepted
+acknowledgement pair, and exact manifest. Attempt scope is derived from the
+preallocated candidate slot.
+`,
+	"checkpoint sign": `Usage:
+  mpc-ceremony checkpoint sign [all checkpoint prepare evidence flags] \
+    --checkpoint FILE --signing-request FILE \
+    --coordinator-signing-key KEY --out FRESH_FILE
+
+Re-derives the checkpoint from all exact evidence, requires byte-for-byte
+agreement with the reviewed checkpoint and signing request, checks that the
+private key belongs to the authenticated coordinator, then signs it.
+`,
+	"checkpoint verify": `Usage:
+  mpc-ceremony --format json checkpoint verify \
+    [all checkpoint prepare evidence flags] \
+    --checkpoint FILE --checkpoint-signature FILE
+
+Re-derives and authenticates the signed checkpoint and all transition-defining
+evidence within the cp0-cp3 boundary. Its JSON projection sets fully_verified
+only after those checks pass. Structural inspect checkpoint output must not be
+used to advance Relay's trusted high-water state.
+`,
+	"checkpoint verify-stored": `Usage:
+  mpc-ceremony --format json checkpoint verify-stored \
+    --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE
+
+Walks the fetched checkpoint ancestry and derives every evidence path and
+transition input from the authenticated checkpoints themselves. Each cp0-cp3
+edge is fully re-derived; cp3 replays contribution mathematics and cleanup.
+Only this command (or checkpoint verify with explicit evidence) emits
+fully_verified=true. Structural inspect output is diagnostics-only.
 `,
 	"init": `Usage:
   mpc-ceremony init --key-version ownership-destination-v2 \

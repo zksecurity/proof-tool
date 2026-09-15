@@ -462,6 +462,32 @@ func TestParseInvocationAcceptsRequiredCommandSurface(t *testing.T) {
 			),
 			command: CommandInspectEnrollment,
 		},
+		{
+			name: "inspect checkpoint",
+			args: joinArgs(
+				[]string{"inspect", "checkpoint"},
+				ceremonyTrust,
+				[]string{
+					"--checkpoint", "state/checkpoint-0000.json",
+					"--checkpoint-signature", "state/checkpoint-0000.sig",
+				},
+			),
+			command: CommandInspectCheckpoint,
+		},
+		{
+			name: "inspect checkpoint transition",
+			args: joinArgs(
+				[]string{"inspect", "checkpoint-transition"},
+				ceremonyTrust,
+				[]string{
+					"--previous-checkpoint", "state/checkpoint-0000.json",
+					"--previous-checkpoint-signature", "state/checkpoint-0000.sig",
+					"--checkpoint", "state/checkpoint-0001.json",
+					"--checkpoint-signature", "state/checkpoint-0001.sig",
+				},
+			),
+			command: CommandInspectCheckpointTransition,
+		},
 	}
 
 	for _, test := range tests {
@@ -957,6 +983,18 @@ func TestDiagnosticRedactionRecognizesInspectionAndReceiptCommands(t *testing.T)
 		{
 			name:         "enrollment inspection",
 			args:         []string{"inspect", "enrollment", "--enrollment", "enrollment.json"},
+			commandIndex: 0,
+			valueIndex:   3,
+		},
+		{
+			name:         "checkpoint inspection",
+			args:         []string{"inspect", "checkpoint", "--checkpoint", "checkpoint.json"},
+			commandIndex: 0,
+			valueIndex:   3,
+		},
+		{
+			name:         "checkpoint transition inspection",
+			args:         []string{"inspect", "checkpoint-transition", "--checkpoint", "checkpoint.json"},
 			commandIndex: 0,
 			valueIndex:   3,
 		},
