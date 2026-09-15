@@ -479,6 +479,11 @@ type CheckpointInspection struct {
 	Phase1Closure      *mpcceremony.SignedArtifactRefs        `json:"phase1_closure,omitempty"`
 	Phase1Beacon       *mpcceremony.SignedArtifactRefs        `json:"phase1_beacon,omitempty"`
 	Phase1Seal         *mpcceremony.SignedArtifactRefs        `json:"phase1_seal,omitempty"`
+	Phase2             *mpcceremony.CheckpointPhaseState      `json:"phase2,omitempty"`
+	Phase2Closure      *mpcceremony.SignedArtifactRefs        `json:"phase2_closure,omitempty"`
+	Phase2Beacon       *mpcceremony.SignedArtifactRefs        `json:"phase2_beacon,omitempty"`
+	FinalCandidate     *mpcceremony.SignedArtifactRefs        `json:"final_candidate,omitempty"`
+	FinalRelease       *mpcceremony.SignedArtifactRefs        `json:"final_release,omitempty"`
 	Submissions        []mpcceremony.CheckpointSubmissionSlot `json:"submissions"`
 	AcceptedArtifacts  []mpcceremony.ArtifactRef              `json:"accepted_artifacts"`
 }

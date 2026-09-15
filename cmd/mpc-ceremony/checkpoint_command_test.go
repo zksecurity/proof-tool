@@ -613,6 +613,13 @@ func TestCheckpointCommandFullLifecycleThroughPhase2Turn(t *testing.T) {
 		verified.CheckpointEvidenceInspection.TransitionKind != mpcceremony.CheckpointFinalReleaseRecorded {
 		t.Fatalf("cp14 stored verification = %#v", verified.CheckpointEvidenceInspection)
 	}
+	inspected := runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "inspect", "checkpoint"}, fixture.trustArgs...),
+		"--checkpoint", cp14.Outputs["checkpoint"], "--checkpoint-signature", cp14SignaturePath))
+	if inspected.CheckpointInspection == nil || inspected.CheckpointInspection.Phase2 == nil ||
+		inspected.CheckpointInspection.Phase2Closure == nil || inspected.CheckpointInspection.Phase2Beacon == nil ||
+		inspected.CheckpointInspection.FinalCandidate == nil || inspected.CheckpointInspection.FinalRelease == nil {
+		t.Fatalf("final checkpoint inspection omitted authenticated lifecycle state: %#v", inspected.CheckpointInspection)
+	}
 	workflowRoot := filepath.Dir(fixture.root)
 	alternateCandidate := filepath.Join(fixture.root, "final", "candidate-b")
 	replayCLIArgs := []string{

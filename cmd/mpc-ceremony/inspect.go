@@ -379,6 +379,11 @@ func inspectCheckpoint(checkpoint mpcceremony.Checkpoint, checkpointBytes []byte
 		Phase1Closure:      checkpoint.Phase1Closure,
 		Phase1Beacon:       checkpoint.Phase1Beacon,
 		Phase1Seal:         checkpoint.Phase1Seal,
+		Phase2:             checkpoint.Phase2,
+		Phase2Closure:      checkpoint.Phase2Closure,
+		Phase2Beacon:       checkpoint.Phase2Beacon,
+		FinalCandidate:     checkpoint.FinalCandidate,
+		FinalRelease:       checkpoint.FinalRelease,
 		Submissions:        append([]mpcceremony.CheckpointSubmissionSlot(nil), checkpoint.Submissions...),
 		AcceptedArtifacts:  append([]mpcceremony.ArtifactRef(nil), checkpoint.AcceptedArtifacts...),
 	}
