@@ -139,7 +139,11 @@ func (c CheckpointV4) Validate() error {
 			}
 		}
 	}
-	if err := validateV4ArtifactSet(c.AcceptedArtifacts, MaxCheckpointArtifacts); err != nil {
+	artifactLimit := MaxCheckpointArtifacts
+	if c.Transition.Kind == CheckpointFinalReleaseRecorded {
+		artifactLimit += 5
+	}
+	if err := validateV4ArtifactSet(c.AcceptedArtifacts, artifactLimit); err != nil {
 		return err
 	}
 	if err := ValidateDeliveryHistoryV2(c.Deliveries); err != nil {
@@ -325,7 +329,11 @@ func (t CheckpointTransitionV4) Validate() error {
 			if len(t.Evidence) != 1 {
 				return errors.New("lifecycle transition requires exactly one payload artifact")
 			}
-		case CheckpointFinalCandidateRecorded, CheckpointFinalReleaseRecorded:
+		case CheckpointFinalReleaseRecorded:
+			if err := validateFinalReleaseTransitionV4(t); err != nil {
+				return err
+			}
+		case CheckpointFinalCandidateRecorded:
 			if len(t.Evidence) == 0 {
 				return errors.New("final transition requires its closed file inventory")
 			}

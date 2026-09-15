@@ -81,6 +81,9 @@ func TestCheckpointV4RealContributionTurn(t *testing.T) {
 			if !strings.Contains(string(output), "V4 signed package passed: exact-only source") {
 				t.Fatal("real fixture did not complete V4 release package signing and verification")
 			}
+			if !strings.Contains(string(output), "V4 final release checkpoint passed: private package") {
+				t.Fatal("real fixture did not record and verify the complete private release package")
+			}
 			if scenario.name == "observers-disabled" {
 				testV4CoherentInvalidPublicProof(t, filepath.Join(outputRoot, "ceremony"))
 			}

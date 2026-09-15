@@ -338,6 +338,9 @@ func PrepareCheckpointV4(options CheckpointPreparationV4) ([]byte, error) {
 		} else if strings.HasSuffix(ref.Name, ".json") {
 			limit = maxSignedRecordBytes
 		}
+		if c.Transition.Kind == CheckpointFinalReleaseRecorded {
+			limit = finalReleaseArtifactLimitV4(ref)
+		}
 		if _, err := reader.read(ref, limit, false); err != nil {
 			return nil, err
 		}
@@ -453,6 +456,9 @@ func verifyCheckpointEvidenceV4(options CheckpointPreparationV4, trusted *Truste
 		return verifyCheckpointLifecycleV4(options, trusted, reader, *previous)
 	case CheckpointFinalCandidateRecorded:
 		return verifyFinalCandidateV4(options, trusted, reader, *previous)
+	case CheckpointFinalReleaseRecorded:
+		_, _, err := verifyFinalReleasePackageV4(options.Trust, reader.path, c)
+		return err
 	default:
 		return errors.New("real-artifact authoring for this v4 transition is not implemented yet")
 	}

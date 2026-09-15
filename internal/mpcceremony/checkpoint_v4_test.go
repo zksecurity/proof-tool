@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"proof-tool/internal/keybundle"
 )
 
 // These fixtures test structural guidance transitions, not contribution math.
@@ -142,6 +144,10 @@ func TestCheckpointV4FullStructuralLifecycle(t *testing.T) {
 		evidence := []ArtifactRef{}
 		if kind != CheckpointPhase1Closed && kind != CheckpointPhase2Closed {
 			evidence = append(evidence, checkpointArtifact("lifecycle/"+string(kind)+".bin", "payload"))
+		}
+		if kind == CheckpointFinalReleaseRecorded {
+			record = SignedArtifactRefs{Record: checkpointArtifact(FinalReleasePackagePrefixV4+keybundle.ManifestFile, "manifest"), Signature: checkpointArtifact(FinalReleasePackagePrefixV4+keybundle.ManifestSignatureFile, "signature")}
+			evidence = checkpointArtifacts(checkpointArtifact(FinalReleasePackagePrefixV4+FinalTranscriptFile, "transcript"), checkpointArtifact(FinalReleasePackagePrefixV4+ReleaseChecksumsFile, "checksums"), checkpointArtifact(FinalReleasePackagePrefixV4+keybundle.ManifestPublicKeyFile, "public key"))
 		}
 		next := nextCheckpointV4(t, c, CheckpointTransitionV4{Kind: kind, Record: &record, Evidence: evidence})
 		switch kind {

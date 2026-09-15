@@ -66,9 +66,17 @@ review, and destination verification also cover exact retries. The output must
 be outside the source tree. Transcript V3 alone has a dedicated 64 MiB bound;
 ordinary signed JSON remains limited to 16 MiB. Package time is not proof of
 upload, and package signing is not a production GO decision.
+Final-release checkpoint authoring verifies that complete package and binds its
+exact review predecessor. The checkpoint adds only five canonical bootstrap
+references under `final/release/`; a typed inventory returns all package-relative
+files separately from that prefix. `VerifyStoredCheckpointV4` remains structural
+inspection; `VerifyFinalReleaseCheckpointV4` additionally verifies package bytes.
+Recording this edge means a signed private package, not public publication or GO.
+Only this edge has five reserved artifact slots and the exact transcript and
+checksum size exceptions. Released checkpoint formats keep their limits.
 Normal initialization still emits V3. Do not release this slice alone: remaining
-final-release checkpoint authoring, production decision integration and normal
-CLI guidance are incomplete. These tests are not a complete user ceremony.
+production decision integration and normal CLI guidance are incomplete. These
+tests are not a complete user ceremony.
 
 - Reserve Definition V4, Checkpoint V4 and `storage-first-v2` for the changed
   trust and submission rules; do not emit them until the whole verifier path
