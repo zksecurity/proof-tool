@@ -80,7 +80,7 @@ func sortedSignedRefsV4(refs []SignedArtifactRefs) []SignedArtifactRefs {
 func deriveOperationalBundleV4(reader *checkpointReaderV4, trusted *TrustedCeremony, db []byte, a checkpointAncestryV4, at time.Time) (OperationalEvidenceBundle, error) {
 	p := a.head.Progress
 	d := trusted.Definition
-	if p.FinalCandidate == nil || p.FinalRelease != nil {
+	if p.FinalCandidate == nil || p.FinalRelease != nil || p.Terminal != nil {
 		return OperationalEvidenceBundle{}, errors.New("bundle preparation requires a frozen candidate before final release")
 	}
 	enrollments, err := loadCheckpointEnrollmentsV4(reader, d, db, a.enrollments)
@@ -138,6 +138,13 @@ func deriveOperationalBundleV4(reader *checkpointReaderV4, trusted *TrustedCerem
 	}
 	bundle := OperationalEvidenceBundle{Schema: OperationalEvidenceBundleSchema, CeremonyID: d.CeremonyID, AssurancePolicy: cloneAssurancePolicy(d.AssurancePolicy), Enrollments: sortedSignedRefsV4(a.enrollments), GovernanceRecords: []SignedArtifactRefs{}, CoordinatorID: d.Coordinator.ID, CoordinatorKeyID: d.Coordinator.KeyID, AssembledAt: at.Format(time.RFC3339Nano)}
 	used := 0
+	for _, incident := range a.incidents {
+		if _, err := verifyGovernanceRecordV4(reader, d, incident); err != nil {
+			return OperationalEvidenceBundle{}, err
+		}
+		bundle.GovernanceRecords = append(bundle.GovernanceRecords, *incident.Record)
+	}
+	bundle.GovernanceRecords = sortedSignedRefsV4(bundle.GovernanceRecords)
 	for _, phase := range []Phase{Phase1, Phase2} {
 		state := p.Phase1
 		close := p.Phase1Closure

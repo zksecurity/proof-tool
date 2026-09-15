@@ -134,6 +134,7 @@ type checkpointAncestryV4 struct {
 	witnesses                []SignedArtifactRefs
 	beaconEvidence           []SignedArtifactRefs
 	audits                   []SignedArtifactRefs
+	incidents                []CheckpointTransitionV4
 	accepted                 map[ContributionScope]SignedArtifactRefs
 	acceptedTransitions      map[ContributionScope]CheckpointTransitionV4
 	checkpoints              []SignedArtifactRefs // newest to oldest, including head
@@ -163,9 +164,21 @@ func loadCheckpointAncestryV4(reader *checkpointReaderV4, d CeremonyDefinition, 
 			if err := ValidateCheckpointTransitionV4(current, *child); err != nil {
 				return checkpointAncestryV4{}, err
 			}
+			// Check scoped governance while its exact authenticated predecessor
+			// is in hand. This also covers callers that signed a checkpoint
+			// without the normal preparation API, without retaining whole copies
+			// of every checkpoint's growing inventory in memory.
+			if isGovernanceTransitionV4(child.Transition.Kind) {
+				if err := verifyCheckpointGovernanceV4(reader, d, current, child.Transition); err != nil {
+					return checkpointAncestryV4{}, err
+				}
+			}
 		}
 		result.count++
 		result.checkpoints = append(result.checkpoints, refs)
+		if current.Transition.Kind == CheckpointIncidentRecorded {
+			result.incidents = append(result.incidents, current.Transition)
+		}
 		if current.Transition.Kind == CheckpointFinalCandidateRecorded {
 			pair := refs
 			result.finalCandidateCheckpoint = &pair
@@ -209,6 +222,7 @@ func loadCheckpointAncestryV4(reader *checkpointReaderV4, d CeremonyDefinition, 
 // VerifyStoredCheckpointV4 authenticates the exact signed checkpoint ancestry
 // and legal structural edges. It neither downloads nor hashes every historical
 // large payload, replays contribution mathematics, or claims global freshness.
+// Governance edges additionally recheck their bounded evidence and exact scope.
 // The delivery service selects the current root; callers supply its exact pair.
 func VerifyStoredCheckpointV4(trust TrustPaths, artifactRoot string, head SignedArtifactRefs) (CheckpointV4, error) {
 	trusted, err := LoadSignedDefinition(trust)
@@ -294,6 +308,17 @@ func PrepareCheckpointV4(options CheckpointPreparationV4) ([]byte, error) {
 		}
 	}
 	// Check every newly accepted byte before issuing any signable result.
+	if isGovernanceTransitionV4(c.Transition.Kind) {
+		// A stop must remain possible with missing unrelated payloads or
+		// incomplete enrollments. Verify only its exact authorizing evidence.
+		if previous == nil {
+			return nil, errors.New("governance requires an initialized ceremony")
+		}
+		if err := verifyCheckpointGovernanceV4(reader, d, *previous, c.Transition); err != nil {
+			return nil, err
+		}
+		return MarshalCanonical(c)
+	}
 	for _, ref := range c.AcceptedArtifacts {
 		if previous != nil && slices.Contains(previous.AcceptedArtifacts, ref) {
 			continue

@@ -19,6 +19,9 @@ const (
 	CheckpointWitnessRecorded        CheckpointTransitionKind = "witness-recorded"
 	CheckpointBeaconEvidenceRecorded CheckpointTransitionKind = "beacon-evidence-recorded"
 	CheckpointAuditRecorded          CheckpointTransitionKind = "audit-recorded"
+	CheckpointIncidentRecorded       CheckpointTransitionKind = "incident-recorded"
+	CheckpointAborted                CheckpointTransitionKind = "ceremony-aborted"
+	CheckpointRestarted              CheckpointTransitionKind = "ceremony-restarted"
 )
 
 // CheckpointProgressV4 is the protocol projection used for guidance. It is not
@@ -33,6 +36,15 @@ type CheckpointProgressV4 struct {
 	Phase2Beacon   *SignedArtifactRefs   `json:"phase2_beacon,omitempty"`
 	FinalCandidate *SignedArtifactRefs   `json:"final_candidate,omitempty"`
 	FinalRelease   *SignedArtifactRefs   `json:"final_release,omitempty"`
+	Terminal       *CheckpointTerminalV4 `json:"terminal,omitempty"`
+}
+
+// Restart is an old-side authorization, not a lineage claim by the new
+// definition. A caller relying on that lineage must retain this checkpoint.
+type CheckpointTerminalV4 struct {
+	Kind              GovernanceKind      `json:"kind"`
+	Record            SignedArtifactRefs  `json:"record"`
+	RestartDefinition *SignedArtifactRefs `json:"restart_definition,omitempty"`
 }
 
 type CheckpointTransitionV4 struct {
@@ -44,6 +56,7 @@ type CheckpointTransitionV4 struct {
 	Evidence           []ArtifactRef                   `json:"evidence"`
 	Contribution       *CandidateInventory             `json:"contribution,omitempty"`
 	ReplayVerification *CheckpointReplayVerificationV4 `json:"replay_verification,omitempty"`
+	RestartDefinition  *SignedArtifactRefs             `json:"restart_definition,omitempty"`
 }
 
 // This is the coordinator's authenticated replay claim, not a proof that an
@@ -168,6 +181,13 @@ func (c CheckpointV4) Validate() error {
 	}
 	refs = append(refs, signedArtifacts(c.Transition.Record)...)
 	refs = append(refs, c.Transition.Evidence...)
+	if terminal := c.Progress.Terminal; terminal != nil {
+		if c.Progress.FinalRelease != nil || (terminal.Kind != GovernanceAbort && terminal.Kind != GovernanceRestart) || terminal.Kind != governanceKindV4(c.Transition.Kind) || c.Transition.Record == nil || terminal.Record != *c.Transition.Record || !reflect.DeepEqual(terminal.RestartDefinition, c.Transition.RestartDefinition) {
+			return errors.New("terminal marker must match an abort/restart edge before release")
+		}
+	} else if c.Transition.Kind == CheckpointAborted || c.Transition.Kind == CheckpointRestarted {
+		return errors.New("abort/restart requires its terminal marker")
+	}
 	for _, ref := range refs {
 		if !slices.Contains(c.AcceptedArtifacts, ref) {
 			return errors.New("checkpoint references an artifact outside its accepted inventory")
@@ -178,7 +198,11 @@ func (c CheckpointV4) Validate() error {
 			return errors.New("delivery belongs to another ceremony")
 		}
 		if slot.Status == DeliveryAllocated {
-			if err := c.Progress.currentTurn(slot.Scope); err != nil {
+			// Termination retains unresolved history; it does not authorize use
+			// of those slots or wait for external credential expiry.
+			projection := c.Progress
+			projection.Terminal = nil
+			if err := projection.currentTurn(slot.Scope); err != nil {
 				return err
 			}
 		}
@@ -192,6 +216,16 @@ func (c CheckpointV4) Validate() error {
 }
 
 func (t CheckpointTransitionV4) Validate() error {
+	if t.Kind == CheckpointRestarted {
+		if t.RestartDefinition == nil {
+			return errors.New("restart requires the exact new signed definition")
+		}
+		if err := t.RestartDefinition.Validate(); err != nil {
+			return err
+		}
+	} else if t.RestartDefinition != nil {
+		return errors.New("only restart may name a new definition")
+	}
 	if t.Kind == CheckpointFinalCandidateRecorded {
 		if t.ReplayVerification == nil || t.ReplayVerification.Method != CoordinatorReplayReleaseV1 {
 			return errors.New("final candidate requires the explicit coordinator full replay claim")
@@ -263,6 +297,14 @@ func (t CheckpointTransitionV4) Validate() error {
 			return errors.New("lifecycle transition must not contain turn fields")
 		}
 		switch t.Kind {
+		case CheckpointIncidentRecorded, CheckpointAborted:
+			if len(t.Evidence) != 1 {
+				return errors.New("incident/abort requires exactly one public statement")
+			}
+		case CheckpointRestarted:
+			if len(t.Evidence) != 3 || !slices.Contains(t.Evidence, t.RestartDefinition.Record) || !slices.Contains(t.Evidence, t.RestartDefinition.Signature) {
+				return errors.New("restart requires only its public statement and exact new definition pair")
+			}
 		case CheckpointEnrollmentRecorded:
 			if len(t.Evidence) != 1 {
 				return errors.New("enrollment transition requires its disclosure artifact")
@@ -367,6 +409,9 @@ func validateCheckpointDefinitionBindingV4(d CeremonyDefinition, definitionBytes
 }
 
 func (p CheckpointProgressV4) currentTurn(scope ContributionScope) error {
+	if p.Terminal != nil {
+		return errors.New("ceremony is terminated")
+	}
 	state := p.Phase1
 	if scope.Phase == Phase1 {
 		if p.Phase1Closure != nil || p.Phase2 != nil {
@@ -410,6 +455,31 @@ func ValidateCheckpointTransitionV4(previous, next CheckpointV4) error {
 		return errors.New("accepted artifact inventory must remain append-only")
 	}
 	t := next.Transition
+	if previous.Progress.Terminal != nil {
+		return errors.New("no transition may follow ceremony termination")
+	}
+	if isGovernanceTransitionV4(t.Kind) {
+		if previous.Progress.FinalRelease != nil {
+			return errors.New("cannot record governance after final release")
+		}
+		want := previous.Progress
+		if t.Kind != CheckpointIncidentRecorded {
+			want.Terminal = &CheckpointTerminalV4{Kind: governanceKindV4(t.Kind), Record: *t.Record, RestartDefinition: t.RestartDefinition}
+		}
+		if !reflect.DeepEqual(want, next.Progress) || !reflect.DeepEqual(previous.Deliveries, next.Deliveries) {
+			return errors.New("governance changed unrelated progress or delivery history")
+		}
+		newRefs := []ArtifactRef{}
+		for _, ref := range append(signedArtifacts(t.Record), t.Evidence...) {
+			if !slices.Contains(previous.AcceptedArtifacts, ref) {
+				newRefs = append(newRefs, ref)
+			}
+		}
+		if !exactArtifactDelta(previous.AcceptedArtifacts, next.AcceptedArtifacts, newRefs...) {
+			return errors.New("governance changed unrelated artifacts")
+		}
+		return nil
+	}
 	if t.Kind == CheckpointEnrollmentRecorded || t.Kind == CheckpointMirrorRecorded || t.Kind == CheckpointWitnessRecorded || t.Kind == CheckpointBeaconEvidenceRecorded || t.Kind == CheckpointAuditRecorded {
 		if previous.Progress.FinalRelease != nil {
 			return errors.New("cannot add assurance evidence after final release")

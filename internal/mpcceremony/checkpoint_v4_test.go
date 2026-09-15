@@ -190,6 +190,22 @@ func TestCheckpointV4FullStructuralLifecycle(t *testing.T) {
 	if c.Progress.FinalRelease == nil {
 		t.Fatal("did not reach final release")
 	}
+	for _, kind := range []CheckpointTransitionKind{CheckpointIncidentRecorded, CheckpointAborted, CheckpointRestarted} {
+		pair := checkpointSigned("governance/after-release")
+		tx := CheckpointTransitionV4{Kind: kind, Record: &pair, Evidence: checkpointArtifacts(checkpointArtifact("governance/statement.txt", "public"))}
+		if kind == CheckpointRestarted {
+			fresh := checkpointSigned("restart/definition")
+			tx.RestartDefinition = &fresh
+			tx.Evidence = appendCheckpointArtifacts(tx.Evidence, fresh.Record, fresh.Signature)
+		}
+		next := nextCheckpointV4(t, c, tx)
+		if kind != CheckpointIncidentRecorded {
+			next.Progress.Terminal = &CheckpointTerminalV4{Kind: governanceKindV4(kind), Record: pair, RestartDefinition: tx.RestartDefinition}
+		}
+		if err := ValidateCheckpointTransitionV4(c, next); err == nil {
+			t.Fatalf("%s allowed after release", kind)
+		}
+	}
 }
 
 func TestCheckpointV4RejectsSkippedOrAlteredTurnEdges(t *testing.T) {

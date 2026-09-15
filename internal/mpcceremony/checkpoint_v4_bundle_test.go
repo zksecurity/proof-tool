@@ -10,6 +10,7 @@ func TestOperationalBundleV4RequiresUnreleasedFrozenCandidate(t *testing.T) {
 	for name, progress := range map[string]CheckpointProgressV4{
 		"no candidate":     {},
 		"already released": {FinalCandidate: &SignedArtifactRefs{}, FinalRelease: &SignedArtifactRefs{}},
+		"terminated":       {FinalCandidate: &SignedArtifactRefs{}, Terminal: &CheckpointTerminalV4{Kind: GovernanceAbort}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			// The gate must run before attempting any artifact access.

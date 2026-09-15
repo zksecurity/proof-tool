@@ -71,6 +71,9 @@ func TestCheckpointV4RealContributionTurn(t *testing.T) {
 			if !strings.Contains(string(output), "V4 operational bundle passed: deterministic checkpoint-only assembly") {
 				t.Fatalf("missing bundle completion: %s", output)
 			}
+			if !strings.Contains(string(output), "V4 terminal branch passed: authenticated abort") {
+				t.Fatalf("missing terminal completion: %s", output)
+			}
 		})
 	}
 }

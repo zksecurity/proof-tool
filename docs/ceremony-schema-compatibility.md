@@ -39,8 +39,14 @@ It runs the existing bundle verifier without signing or repeating mathematics.
 Its source-checkpoint metadata must be rebound at final release; it is not an
 extra field in the signed legacy bundle. Linux tests reject missing enrollments,
 loose uncommitted records and corrupted retained evidence.
+V4 governance uses the existing signed records with stricter explicit
+coordinator/current-head checks. Informational incidents enter the bundle;
+abort/restart are terminal and cannot prepare a release bundle. An authorized
+restart points to an exact signed V4 definition; the new definition alone does
+not establish lineage. Historical inspection rechecks these governance edges
+against their exact predecessor, not just the record signature.
 Normal initialization still emits V3. Do not release this slice alone: remaining
-governance evidence, final-release authoring and the new release/decision verification path
+final-release authoring and the new release/decision verification path
 are incomplete. These tests are not the normal CLI journey or a full ceremony.
 
 - Reserve Definition V4, Checkpoint V4 and `storage-first-v2` for the changed

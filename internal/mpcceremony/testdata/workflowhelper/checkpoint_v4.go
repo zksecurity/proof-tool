@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -95,7 +96,15 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 			refs = append(refs, tx.Record.Record, tx.Record.Signature)
 		}
 		refs = append(refs, tx.Evidence...)
-		c.AcceptedArtifacts = sorted(refs)
+		// Different signed records may name the same retained statement. Keep
+		// the inventory a set; a same-name/different-digest conflict still fails.
+		unique := make([]m.ArtifactRef, 0, len(refs))
+		for _, ref := range refs {
+			if !slices.Contains(unique, ref) {
+				unique = append(unique, ref)
+			}
+		}
+		c.AcceptedArtifacts = sorted(unique)
 	}
 	if err := commit(); err != nil {
 		return err

@@ -509,6 +509,45 @@ func runCheckpointV4Final(output, root string, trust m.TrustPaths, circuit *m.Co
 			return err
 		}
 	}
+	// Incidents are public, explicitly selected evidence, not automatic logs.
+	if err = os.MkdirAll(filepath.Join(root, "governance"), 0700); err != nil {
+		return err
+	}
+	if err = os.WriteFile(filepath.Join(root, "governance/statement.txt"), []byte("Single-process rehearsal fixture; no independent operators or erasure evidence.\n"), 0600); err != nil {
+		return err
+	}
+	statement, err := ref("governance/statement.txt")
+	if err != nil {
+		return err
+	}
+	incident := m.GovernanceRecord{Schema: m.GovernanceRecordSchema, Kind: m.GovernanceIncident, CeremonyID: d.CeremonyID, Phase: m.Phase2, Index: c.Progress.Phase2.AcceptedCount, HeadID: c.Progress.Phase2.HeadRecordID, Evidence: []m.ArtifactRef{statement}, ReasonCode: "fixture-notice", StatementSHA256: statement.Digest.SHA256, SignerID: d.Coordinator.ID, SignerKeyID: d.Coordinator.KeyID, RecordedAt: "2023-08-23T15:11:37.7Z"}
+	ir, err := writePair("governance/incident", incident, d.Coordinator.KeyID, coordinator)
+	if err != nil {
+		return err
+	}
+	beforeIncident := *c
+	wrongIncident := incident
+	wrongIncident.HeadID = c.Progress.Phase1.HeadRecordID
+	wrongPair, err := writePair("governance/wrong-head", wrongIncident, d.Coordinator.KeyID, coordinator)
+	if err != nil {
+		return err
+	}
+	next(m.CheckpointTransitionV4{Kind: m.CheckpointIncidentRecorded, Record: &wrongPair, Evidence: []m.ArtifactRef{statement}})
+	// Deliberately bypass PrepareCheckpointV4: later inspection and bundle
+	// preparation must still catch a signed but semantically wrong head.
+	wrongCheckpoint, err := writePair("governance/wrong-checkpoint", *c, d.Coordinator.KeyID, coordinator)
+	if err != nil {
+		return err
+	}
+	badBundle, rejected := m.PrepareOperationalBundleV4(trust, root, wrongCheckpoint, mustUTC("2023-08-23T15:11:38Z"))
+	if rejected == nil || !strings.Contains(rejected.Error(), "exact current phase and head") || badBundle.Bundle.Schema != "" {
+		return fmt.Errorf("signed wrong-head incident accepted: %v", rejected)
+	}
+	*c = beforeIncident
+	next(m.CheckpointTransitionV4{Kind: m.CheckpointIncidentRecorded, Record: &ir, Evidence: []m.ArtifactRef{statement}})
+	if err = commit(); err != nil {
+		return err
+	}
 	checkpoint, err := headRefs()
 	if err != nil {
 		return err
@@ -516,6 +555,9 @@ func runCheckpointV4Final(output, root string, trust m.TrustPaths, circuit *m.Co
 	prepared, err := m.PrepareOperationalBundleV4(trust, root, checkpoint, mustUTC("2023-08-23T15:11:38Z"))
 	if err != nil {
 		return err
+	}
+	if len(prepared.Bundle.GovernanceRecords) != 1 || prepared.Bundle.GovernanceRecords[0] != ir {
+		return fmt.Errorf("committed incident missing from bundle")
 	}
 	again, err := m.PrepareOperationalBundleV4(trust, root, checkpoint, mustUTC("2023-08-23T15:11:38Z"))
 	if err != nil {
@@ -574,5 +616,39 @@ func runCheckpointV4Final(output, root string, trust m.TrustPaths, circuit *m.Co
 		return err
 	}
 	fmt.Println("V4 operational bundle passed: deterministic checkpoint-only assembly, all roster enrollments, original bundle verifier, corruption rejected")
+	beforeStop := *c
+	stop := incident
+	stop.Kind = m.GovernanceAbort
+	stop.ReasonCode = "fixture-stop"
+	stopPair, err := writePair("governance/abort", stop, d.Coordinator.KeyID, coordinator)
+	if err != nil {
+		return err
+	}
+	next(m.CheckpointTransitionV4{Kind: m.CheckpointAborted, Record: &stopPair, Evidence: []m.ArtifactRef{statement}})
+	c.Progress.Terminal = &m.CheckpointTerminalV4{Kind: m.GovernanceAbort, Record: stopPair}
+	// Stopping must not require an unrelated retained contribution payload.
+	stopPayloadPath := path(c.Progress.Phase1.HeadPayload)
+	if err = os.Rename(stopPayloadPath, stopPayloadPath+".stop-test"); err != nil {
+		return err
+	}
+	_, stopErr := m.PrepareCheckpointV4(m.CheckpointPreparationV4{Trust: trust, ArtifactRoot: root, Proposal: *c, Circuit: circuit})
+	if err = os.Rename(stopPayloadPath+".stop-test", stopPayloadPath); err != nil {
+		return err
+	}
+	if stopErr != nil {
+		return fmt.Errorf("stop blocked by unrelated missing payload: %w", stopErr)
+	}
+	stopped, err := writePair("governance/terminal-checkpoint", *c, d.Coordinator.KeyID, coordinator)
+	if err != nil {
+		return err
+	}
+	if _, err = m.VerifyStoredCheckpointV4(trust, root, stopped); err != nil {
+		return err
+	}
+	if result, err := m.PrepareOperationalBundleV4(trust, root, stopped, mustUTC("2023-08-23T15:11:38Z")); err == nil || result.Bundle.Schema != "" {
+		return fmt.Errorf("terminal checkpoint allowed release bundle: %v", err)
+	}
+	*c = beforeStop
+	fmt.Println("V4 terminal branch passed: authenticated abort, missing unrelated payload, no release bundle")
 	return nil
 }
