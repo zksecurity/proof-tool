@@ -262,6 +262,8 @@ func TestFinalizationAuditAndReleaseCommandsAreWired(t *testing.T) {
 		{Command: CommandCheckpointPrepareV4, Options: CheckpointOptionsV4{}},
 		{Command: CommandCheckpointSignV4, Options: CheckpointOptionsV4{}},
 		{Command: CommandCheckpointVerifyStoredV4, Options: CheckpointOptionsV4{}},
+		{Command: CommandCheckpointInspectSignedV4, Options: CheckpointOptionsV4{}},
+		{Command: CommandInspectDefinitionProtocol, Options: InspectDefinitionOptions{}},
 		{Command: CommandOpsPrepareBundleV4, Options: EvidenceOptionsV4{}},
 		{Command: CommandOpsSignBundleV4, Options: EvidenceOptionsV4{}},
 		{Command: CommandReleaseReviewV4, Options: EvidenceOptionsV4{}},
@@ -279,6 +281,8 @@ func TestFinalizationAuditAndReleaseCommandsAreWired(t *testing.T) {
 
 func TestEveryCommandRejectsWalletAndWitnessSecretInputs(t *testing.T) {
 	commands := [][]string{
+		{"inspect", "definition-protocol"},
+		{"checkpoint", "inspect-signed-v4"},
 		{"init"},
 		{"identity", "generate"},
 		{"phase1", "contribute"},
