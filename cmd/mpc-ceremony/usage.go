@@ -242,11 +242,11 @@ that transition.
   mpc-ceremony checkpoint <prepare|sign|verify|verify-stored> [flags]
 
 Guarded storage-first checkpoint operations. Every operation re-authenticates
-the exact signed definition, predecessor, Phase 1 chain and head, and all
-transition-defining records. This implementation supports Phase 1 from the
-initial checkpoint through accepted participant turns, closure, verified
-beacon evidence, and the fully replayed Phase 1 seal. Candidate acceptance
-replays the contribution mathematics and cleanup evidence.
+the exact signed definition, predecessor, both phase chains and all records
+that cause the transition. The authenticated lifecycle runs from initialization
+through both phases, the fully replayed final candidate, and the exact signed
+release tree. Candidate acceptance and finalization replay the contribution
+mathematics and cleanup evidence.
 `,
 	"checkpoint prepare": `Usage:
   mpc-ceremony checkpoint prepare --ceremony FILE --ceremony-signature FILE \
@@ -276,6 +276,12 @@ record must exist under the artifact root.
 For phase1-sealed supply the previous checkpoint pair and signed Phase 1 seal
 record pair. Relay fully replays Phase 1 and requires the exact commons.bin
 named by that seal under the artifact root.
+
+Phase 2 uses the corresponding --phase2-* inputs. For
+final-candidate-recorded supply the canonical --candidate-dir final/candidate.
+For final-release-recorded supply the canonical --release-dir final/release;
+the complete release, including operational evidence and any required audits,
+is strictly verified and closed against extra files.
 `,
 	"checkpoint sign": `Usage:
   mpc-ceremony checkpoint sign [all checkpoint prepare evidence flags] \
@@ -304,9 +310,10 @@ used to advance Relay's trusted high-water state.
 
 Walks the fetched checkpoint ancestry and derives every evidence path and
 transition input from the authenticated checkpoints themselves. Every
-supported ceremony edge is fully re-derived; candidate acceptance replays
-contribution mathematics and cleanup, while closure and beacon validation use
-the exact authenticated head and raw beacon response.
+supported ceremony edge is fully re-derived through the signed final release;
+candidate acceptance and finalization replay contribution mathematics and
+cleanup, while closure and beacon validation use the exact authenticated head
+and raw beacon response.
 Only this command (or checkpoint verify with explicit evidence) emits
 fully_verified=true. Structural inspect output is diagnostics-only.
 `,
@@ -539,13 +546,15 @@ Release authenticity is separate from MPC contribution identity.
 	    --operational-bundle-signature DIR/operational/evidence-bundle.sig \
 	    --release-signing-key KEY --signature-key-id ID \
     --released-at RFC3339_UTC --release-dir FRESH_DIR
+` + replayFlagsHelp + `
 
 	Requires at least the signed minimum number of passing ceremony audits
 	assurance policy, plus the coordinator-signed Phase 1 and Phase 2 operational
 	bundle. Witness and mirror evidence likewise follows that signed policy;
 	multi-relay beacon evidence remains required. The candidate is
 	never mutated; all verified evidence is atomically published into a fresh
-	release directory.
+	release directory. For current ceremonies, the release signer independently
+	replays both phases even when the signed audit minimum is zero.
 `,
 	"release verify": `Usage:
   mpc-ceremony release verify --ceremony FILE --ceremony-signature FILE \

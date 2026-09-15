@@ -1242,6 +1242,7 @@ func parseReleaseSign(args []string) (ReleaseSignOptions, error) {
 	fs.StringVar(&options.SignatureKeyID, "signature-key-id", "", "release signing key identifier")
 	fs.StringVar(&options.ReleasedAt, "released-at", "", "release publication timestamp in RFC3339 UTC")
 	fs.StringVar(&options.ReleaseDir, "release-dir", "", "fresh release bundle directory distinct from the candidate")
+	addReplayFlags(fs, &options.Replay)
 	if err := parseFlags(fs, args); err != nil {
 		return options, err
 	}
@@ -1265,7 +1266,7 @@ func parseReleaseSign(args []string) (ReleaseSignOptions, error) {
 	if err := validateAuditArtifacts(options.AuditReportPaths, options.AuditSignaturePaths); err != nil {
 		return options, err
 	}
-	return options, nil
+	return options, validateReplayOptions(options.Replay)
 }
 
 func parseReleaseVerify(args []string) (ReleaseVerifyOptions, error) {

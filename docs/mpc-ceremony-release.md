@@ -146,4 +146,12 @@ submission results; stored verification replays that complete ancestry.
 The next guarded edge independently replays both phases and accepts only the
 closed `final/candidate` tree: the coordinator-signed candidate, exact checksum
 inventory, final keys, Phase 2 seal, and public proof-verification evidence.
-Extra, missing, linked, or changed files are rejected.
+Extra, missing, symbolic-link, nonregular or changed files are rejected.
+
+For current definitions, release signing also independently replays both
+phases on the release signer's machine even when ceremony audits are disabled.
+The following checkpoint accepts only the strictly verified closed
+`final/release` tree, including its release-signer manifest signature,
+operational evidence, explicit audit inventory, transcript, keys and checksums.
+It rejects missing, extra, symbolic-link, nonregular or changed entries.
+GO/NO-GO authorization and public publication remain later, separate states.

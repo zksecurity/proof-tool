@@ -66,6 +66,8 @@ type SignReleaseOptions struct {
 	ReleaseSigningKey        string
 	SignatureKeyID           string
 	ReleasedAt               time.Time
+	Replay                   *ReplayPaths
+	Circuit                  *CompiledCircuit
 }
 
 type SignReleaseResult struct {
@@ -428,6 +430,14 @@ func SignRelease(options SignReleaseOptions) (*SignReleaseResult, error) {
 	candidate, _, err := verifyCandidate(definition, definitionRef, options.CandidateDir)
 	if err != nil {
 		return nil, err
+	}
+	if definition.Schema == DefinitionSchema {
+		if options.Replay == nil || options.Circuit == nil {
+			return nil, errors.New("storage-first release signing requires independent two-phase replay inputs")
+		}
+		if _, err := ReplayCandidate(*options.Replay, options.Circuit, options.CandidateDir); err != nil {
+			return nil, fmt.Errorf("release-signer independent replay: %w", err)
+		}
 	}
 	if options.SignatureKeyID != definition.ReleaseSigner.KeyID {
 		return nil, fmt.Errorf(
@@ -792,6 +802,66 @@ func VerifyRelease(options VerifyReleaseOptions) (*VerifyReleaseResult, error) {
 		return nil, err
 	}
 	return &VerifyReleaseResult{Manifest: manifest, Transcript: transcript, Candidate: candidate, ManifestSHA256: manifestRef.Digest.SHA256}, nil
+}
+
+// VerifyFinalReleaseCheckpoint verifies the signed release and returns its
+// exact closed regular-file inventory relative to KeysDir. The caller may add
+// a storage prefix, but must not change names or digests.
+func VerifyFinalReleaseCheckpoint(options VerifyReleaseOptions) (*VerifyReleaseResult, []ArtifactRef, error) {
+	verified, err := VerifyRelease(options)
+	if err != nil {
+		return nil, nil, err
+	}
+	refs := []ArtifactRef{}
+	err = filepath.WalkDir(options.KeysDir, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == options.KeysDir {
+			return nil
+		}
+		if entry.Type()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("final release path is a symbolic link: %s", path)
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("final release entry is not a regular file: %s", path)
+		}
+		name, err := filepath.Rel(options.KeysDir, path)
+		if err != nil {
+			return err
+		}
+		ref, err := artifactRefForFile(filepath.ToSlash(name), path)
+		if err != nil {
+			return err
+		}
+		refs = append(refs, ref)
+		if len(refs) > MaxCheckpointArtifacts {
+			return fmt.Errorf("final release file count exceeds %d", MaxCheckpointArtifacts)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	slices.SortFunc(refs, func(a, b ArtifactRef) int { return strings.Compare(a.Name, b.Name) })
+	verifiedAgain, err := VerifyRelease(options)
+	if err != nil {
+		return nil, nil, fmt.Errorf("final release changed during closed-tree verification: %w", err)
+	}
+	if verified.ManifestSHA256 != verifiedAgain.ManifestSHA256 ||
+		!reflect.DeepEqual(verified.Transcript, verifiedAgain.Transcript) ||
+		!reflect.DeepEqual(verified.Candidate, verifiedAgain.Candidate) ||
+		!reflect.DeepEqual(verified.Manifest, verifiedAgain.Manifest) {
+		return nil, nil, errors.New("final release changed during closed-tree verification")
+	}
+	return verified, refs, nil
 }
 
 func verifyCandidate(

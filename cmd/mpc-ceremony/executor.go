@@ -673,6 +673,14 @@ func executeReleaseSign(options ReleaseSignOptions) (CommandResult, error) {
 	if err != nil {
 		return CommandResult{}, err
 	}
+	compiled, err := compileCircuitForCeremony(trust)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	replayEvidence, err := replayPaths(trust, options.Replay)
+	if err != nil {
+		return CommandResult{}, err
+	}
 	result, err := mpcceremony.SignRelease(mpcceremony.SignReleaseOptions{
 		DefinitionPath:           options.CeremonyPath,
 		DefinitionSignaturePath:  options.CeremonySignaturePath,
@@ -686,6 +694,8 @@ func executeReleaseSign(options ReleaseSignOptions) (CommandResult, error) {
 		ReleaseSigningKey:        options.ReleaseSigningKey,
 		SignatureKeyID:           options.SignatureKeyID,
 		ReleasedAt:               releasedAt,
+		Replay:                   &replayEvidence,
+		Circuit:                  compiled,
 	})
 	if err != nil {
 		return CommandResult{}, err

@@ -806,6 +806,40 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		if err := runTestCommand(completeArgs...); err != nil {
 			return fmt.Errorf("complete checkpoint finalization: %w", err)
 		}
+		if operationalEvidenceHelper != "" {
+			phase1Relays, err := writeRelayFixture(outputRoot, "checkpoint-phase1-relays", []byte(quicknetRound42), "2023-08-23T15:11:30Z")
+			if err != nil {
+				return err
+			}
+			phase2Relays, err := writeRelayFixture(outputRoot, "checkpoint-phase2-relays", []byte(quicknetRound43), "2023-08-23T15:11:33Z")
+			if err != nil {
+				return err
+			}
+			operationalCommand := exec.Command(operationalEvidenceHelper,
+				"--transcript-root", ceremonyRoot, "--keys-dir", keyDir,
+				"--coordinator-public-key-file", trustedCoordinatorPath,
+				"--phase1-relays", phase1Relays, "--phase2-relays", phase2Relays,
+				"--assembled-at", "2023-08-23T15:11:36Z", "--out-dir", filepath.Join(ceremonyRoot, "operational"))
+			if output, err := operationalCommand.CombinedOutput(); err != nil {
+				return fmt.Errorf("generate checkpoint operational evidence: %w\n%s", err, output)
+			}
+			releaseDir := filepath.Join(ceremonyRoot, "final", "release")
+			releaseArgs := []string{"release", "sign",
+				"--ceremony", initialized.DefinitionPath, "--ceremony-signature", initialized.DefinitionSignaturePath,
+				"--coordinator-public-key-file", trustedCoordinatorPath,
+			}
+			releaseArgs = append(releaseArgs, replayArgs...)
+			releaseArgs = append(releaseArgs,
+				"--candidate-bundle", candidateDir, "--operational-evidence-root", ceremonyRoot,
+				"--operational-bundle", filepath.Join(ceremonyRoot, mpcceremony.OperationalEvidenceBundleFile),
+				"--operational-bundle-signature", filepath.Join(ceremonyRoot, mpcceremony.OperationalEvidenceSignatureFile),
+				"--release-signing-key", releaseKeyPath, "--signature-key-id", releaseSigner.KeyID,
+				"--released-at", "2023-08-23T15:11:38Z", "--release-dir", releaseDir,
+			)
+			if err := runTestCommand(releaseArgs...); err != nil {
+				return fmt.Errorf("sign checkpoint release: %w", err)
+			}
+		}
 		return nil
 	}
 	_, err = mpcceremony.ClosePhaseFiles(mpcceremony.ClosePhaseFilesOptions{
@@ -1066,6 +1100,9 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	}
 
 	releaseDir := filepath.Join(outputRoot, "release")
+	if checkpointPhase2One {
+		releaseDir = filepath.Join(ceremonyRoot, "final", "release")
+	}
 	if _, err := mpcceremony.SignRelease(mpcceremony.SignReleaseOptions{
 		DefinitionPath:           initialized.DefinitionPath,
 		DefinitionSignaturePath:  initialized.DefinitionSignaturePath,
@@ -1079,6 +1116,8 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		ReleaseSigningKey:        releaseKeyPath,
 		SignatureKeyID:           releaseSigner.KeyID,
 		ReleasedAt:               mustUTC("2023-08-23T15:11:38Z"),
+		Replay:                   &replay,
+		Circuit:                  circuit,
 	}); err != nil {
 		return fmt.Errorf("sign release: %w", err)
 	}

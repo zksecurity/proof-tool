@@ -79,6 +79,7 @@ const (
 	CheckpointPhase2Closed            CheckpointTransitionKind = "phase2-closed"
 	CheckpointPhase2BeaconRecorded    CheckpointTransitionKind = "phase2-beacon-recorded"
 	CheckpointFinalCandidateRecorded  CheckpointTransitionKind = "final-candidate-recorded"
+	CheckpointFinalReleaseRecorded    CheckpointTransitionKind = "final-release-recorded"
 )
 
 type CheckpointSubmissionKind string
@@ -266,20 +267,20 @@ func (t CheckpointTransition) Validate() error {
 		}
 		return nil
 	}
-	if t.Kind == CheckpointFinalCandidateRecorded {
+	if t.Kind == CheckpointFinalCandidateRecorded || t.Kind == CheckpointFinalReleaseRecorded {
 		if t.Phase != "" || t.Index != 0 || t.ParticipantID != "" || t.AttemptID != "" ||
 			t.NextAttemptID != "" || t.Record == nil || t.Acknowledgement != nil || len(t.Evidence) < 1 {
-			return errors.New("final candidate transition requires only the signed candidate record and its closed file inventory")
+			return fmt.Errorf("%s transition requires only its signed primary record and closed file inventory", t.Kind)
 		}
 		if err := t.Record.Validate(); err != nil {
 			return fmt.Errorf("transition record: %w", err)
 		}
 		for index, ref := range t.Evidence {
 			if err := ref.Validate(); err != nil {
-				return fmt.Errorf("transition final candidate evidence %d: %w", index, err)
+				return fmt.Errorf("transition %s evidence %d: %w", t.Kind, index, err)
 			}
 			if index > 0 && t.Evidence[index-1].Name >= ref.Name {
-				return errors.New("transition final candidate evidence must be strictly sorted by unique name")
+				return fmt.Errorf("transition %s evidence must be strictly sorted by unique name", t.Kind)
 			}
 		}
 		return nil
@@ -392,6 +393,7 @@ type Checkpoint struct {
 	Phase2Closure      *SignedArtifactRefs        `json:"phase2_closure,omitempty"`
 	Phase2Beacon       *SignedArtifactRefs        `json:"phase2_beacon,omitempty"`
 	FinalCandidate     *SignedArtifactRefs        `json:"final_candidate,omitempty"`
+	FinalRelease       *SignedArtifactRefs        `json:"final_release,omitempty"`
 	AcceptedArtifacts  []ArtifactRef              `json:"accepted_artifacts"`
 	Submissions        []CheckpointSubmissionSlot `json:"submissions"`
 }
@@ -528,10 +530,21 @@ func (c Checkpoint) Validate() error {
 			return errors.New("final candidate must be present in accepted_artifacts")
 		}
 	}
+	if c.FinalRelease != nil {
+		if c.FinalCandidate == nil {
+			return errors.New("final release requires a committed final candidate")
+		}
+		if err := c.FinalRelease.Validate(); err != nil {
+			return fmt.Errorf("final_release: %w", err)
+		}
+		if !slices.Contains(c.AcceptedArtifacts, c.FinalRelease.Record) || !slices.Contains(c.AcceptedArtifacts, c.FinalRelease.Signature) {
+			return errors.New("final release must be present in accepted_artifacts")
+		}
+	}
 	if c.Transition.Phase == Phase2 && c.Phase2 == nil {
 		return errors.New("phase2 transition requires phase2 state")
 	}
-	if c.Sequence == 0 && (c.Phase1Closure != nil || c.Phase1Beacon != nil || c.Phase1Seal != nil || c.Phase2 != nil || c.Phase2Closure != nil || c.Phase2Beacon != nil || c.FinalCandidate != nil) {
+	if c.Sequence == 0 && (c.Phase1Closure != nil || c.Phase1Beacon != nil || c.Phase1Seal != nil || c.Phase2 != nil || c.Phase2Closure != nil || c.Phase2Beacon != nil || c.FinalCandidate != nil || c.FinalRelease != nil) {
 		return errors.New("initial checkpoint must not contain later lifecycle state")
 	}
 	if c.Sequence == 0 && (c.Phase1.AcceptedCount != 0 || len(c.Submissions) != 0) {
@@ -737,6 +750,8 @@ func ValidateCheckpointTransition(previous, next Checkpoint) error {
 		return validatePhase2BeaconTransition(previous, next)
 	case CheckpointFinalCandidateRecorded:
 		return validateFinalCandidateTransition(previous, next)
+	case CheckpointFinalReleaseRecorded:
+		return validateFinalReleaseTransition(previous, next)
 	case CheckpointPhase1Closed:
 		return validatePhase1ClosedTransition(previous, next)
 	case CheckpointPhase1BeaconRecorded:
@@ -748,6 +763,25 @@ func ValidateCheckpointTransition(previous, next Checkpoint) error {
 	default:
 		return fmt.Errorf("transition %q cannot follow another checkpoint", next.Transition.Kind)
 	}
+}
+
+func validateFinalReleaseTransition(previous, next Checkpoint) error {
+	if previous.FinalCandidate == nil || next.FinalCandidate == nil || *previous.FinalCandidate != *next.FinalCandidate || previous.FinalRelease != nil || next.FinalRelease == nil {
+		return errors.New("final release must be added exactly once after the final candidate")
+	}
+	if !phase1LifecyclePreserved(previous, next) || previous.Phase2Closure == nil || next.Phase2Closure == nil || *previous.Phase2Closure != *next.Phase2Closure ||
+		previous.Phase2Beacon == nil || next.Phase2Beacon == nil || *previous.Phase2Beacon != *next.Phase2Beacon ||
+		previous.Phase2 == nil || next.Phase2 == nil || !samePhaseState(*previous.Phase2, *next.Phase2) || !slotsEqual(previous.Submissions, next.Submissions) {
+		return errors.New("final release must preserve the completed ceremony and submission slots")
+	}
+	if next.Transition.Record == nil || *next.Transition.Record != *next.FinalRelease {
+		return errors.New("final release transition must name the committed release manifest")
+	}
+	expected := append(signedArtifacts(next.FinalRelease), next.Transition.Evidence...)
+	if !exactArtifactDelta(previous.AcceptedArtifacts, next.AcceptedArtifacts, expected...) {
+		return errors.New("final release accepted an unexpected artifact set")
+	}
+	return nil
 }
 
 func validateFinalCandidateTransition(previous, next Checkpoint) error {

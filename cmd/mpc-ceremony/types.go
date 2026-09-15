@@ -241,6 +241,7 @@ type ReleaseSignOptions struct {
 	SignatureKeyID           string
 	ReleasedAt               string
 	ReleaseDir               string
+	Replay                   ReplayOptions
 }
 
 type ReleaseVerifyOptions struct {
@@ -391,6 +392,7 @@ type CheckpointEvidenceOptions struct {
 	NextAttemptID                   string
 	NextManifestKey                 string
 	CandidateDir                    string
+	ReleaseDir                      string
 }
 
 type CheckpointPrepareOptions struct {

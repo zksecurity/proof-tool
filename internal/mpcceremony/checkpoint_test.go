@@ -661,6 +661,18 @@ func TestCheckpointPhase2ParticipantTurnSequence(t *testing.T) {
 	if err := ValidateCheckpointTransition(beaconed, finalized); err != nil {
 		t.Fatalf("valid final candidate: %v", err)
 	}
+	releaseRefs := checkpointSigned("final/release/manifest")
+	releaseEvidence := checkpointArtifacts(checkpointArtifact("final/release/checksums.sha256", "release checksums"))
+	released := cloneCheckpoint(t, finalized)
+	released.Sequence++
+	releasedParent := checkpointReference(t, finalized, "finalized")
+	released.PreviousCheckpoint = &releasedParent
+	released.Transition = CheckpointTransition{Kind: CheckpointFinalReleaseRecorded, Record: &releaseRefs, Evidence: releaseEvidence}
+	released.FinalRelease = &releaseRefs
+	released.AcceptedArtifacts = appendCheckpointArtifacts(released.AcceptedArtifacts, releaseRefs.Record, releaseRefs.Signature, releaseEvidence[0])
+	if err := ValidateCheckpointTransition(finalized, released); err != nil {
+		t.Fatalf("valid final release: %v", err)
+	}
 
 	allocated := cloneCheckpoint(t, candidate)
 	allocated.Submissions[phase2CandidateIndex].Status = CheckpointSubmissionAllocated
@@ -714,6 +726,19 @@ func TestCheckpointPhase2ParticipantTurnSequence(t *testing.T) {
 	if err := ValidateCheckpointTransition(beaconed, extraFinal); err == nil {
 		t.Fatal("final candidate accepted an extra artifact")
 	}
+	repeatedRelease := cloneCheckpoint(t, released)
+	repeatedRelease.Sequence++
+	repeatedReleaseParent := checkpointReference(t, released, "release-again")
+	repeatedRelease.PreviousCheckpoint = &repeatedReleaseParent
+	if err := ValidateCheckpointTransition(released, repeatedRelease); err == nil {
+		t.Fatal("final release accepted twice")
+	}
+	changedCandidate := cloneCheckpoint(t, released)
+	replacementCandidate := checkpointSigned("final/candidate/replacement")
+	changedCandidate.FinalCandidate = &replacementCandidate
+	if err := ValidateCheckpointTransition(finalized, changedCandidate); err == nil {
+		t.Fatal("final release accepted a changed final candidate")
+	}
 }
 
 func TestCheckpointOldSchemasRejectPhase2TurnTransition(t *testing.T) {
@@ -756,6 +781,20 @@ func TestCheckpointOldSchemasRejectPhase2TurnTransition(t *testing.T) {
 		checkpoint.AcceptedArtifacts = appendCheckpointArtifacts(checkpoint.AcceptedArtifacts, finalRefs.Record, finalRefs.Signature)
 		if err := checkpoint.Validate(); err == nil {
 			t.Fatalf("schema %s accepted final-candidate state", schema)
+		}
+	}
+	for _, schema := range []string{CheckpointSchemaV1, CheckpointSchemaV2} {
+		checkpoint := phase1CheckpointSequence(t)[0]
+		checkpoint.Schema = schema
+		if schema == CheckpointSchemaV1 {
+			checkpoint.AssurancePolicy = nil
+		}
+		releaseRefs := checkpointSigned("final/release/manifest")
+		checkpoint.Transition = CheckpointTransition{Kind: CheckpointFinalReleaseRecorded, Record: &releaseRefs}
+		checkpoint.FinalRelease = &releaseRefs
+		checkpoint.AcceptedArtifacts = appendCheckpointArtifacts(checkpoint.AcceptedArtifacts, releaseRefs.Record, releaseRefs.Signature)
+		if err := checkpoint.Validate(); err == nil {
+			t.Fatalf("schema %s accepted final-release state", schema)
 		}
 	}
 }

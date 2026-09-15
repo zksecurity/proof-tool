@@ -300,16 +300,20 @@ func buildPhase(
 	phase mpcceremony.Phase,
 	relayDir string,
 ) (phaseResult, error) {
-	policy, err := definition.PolicyForPhase(phase)
+	phaseName := string(phase)
+	closeName := phaseName + "/closure/record.json"
+	closeSignatureName := phaseName + "/closure/record.sig"
+	closeBytes, err := readRegular(filepath.Join(root, filepath.FromSlash(closeName)), 16<<20)
 	if err != nil {
 		return phaseResult{}, err
 	}
-	sequence := fmt.Sprintf("%04d", len(policy.Participants))
-	phaseName := string(phase)
+	var closeRecord mpcceremony.CloseRecord
+	if err := mpcceremony.UnmarshalCanonical(closeBytes, &closeRecord); err != nil {
+		return phaseResult{}, err
+	}
+	sequence := fmt.Sprintf("%04d", closeRecord.FinalIndex)
 	chainName := phaseName + "/chain-" + sequence + ".json"
 	chainSignatureName := phaseName + "/chain-" + sequence + ".sig"
-	closeName := phaseName + "/closure/record.json"
-	closeSignatureName := phaseName + "/closure/record.sig"
 	chainBytes, err := readRegular(filepath.Join(root, filepath.FromSlash(chainName)), 16<<20)
 	if err != nil {
 		return phaseResult{}, err
@@ -318,10 +322,6 @@ func buildPhase(
 		filepath.Join(root, filepath.FromSlash(chainSignatureName)),
 		16<<20,
 	)
-	if err != nil {
-		return phaseResult{}, err
-	}
-	closeBytes, err := readRegular(filepath.Join(root, filepath.FromSlash(closeName)), 16<<20)
 	if err != nil {
 		return phaseResult{}, err
 	}
@@ -334,10 +334,6 @@ func buildPhase(
 	}
 	var chain mpcceremony.Chain
 	if err := mpcceremony.UnmarshalCanonical(chainBytes, &chain); err != nil {
-		return phaseResult{}, err
-	}
-	var closeRecord mpcceremony.CloseRecord
-	if err := mpcceremony.UnmarshalCanonical(closeBytes, &closeRecord); err != nil {
 		return phaseResult{}, err
 	}
 	coordinator := signers[definition.Coordinator.ID]

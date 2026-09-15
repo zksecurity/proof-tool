@@ -83,6 +83,7 @@ func addCheckpointEvidenceFlags(fs *flag.FlagSet, options *CheckpointEvidenceOpt
 	fs.StringVar(&options.NextAttemptID, "next-attempt-id", "", "preallocated candidate attempt ID")
 	fs.StringVar(&options.NextManifestKey, "next-manifest-key", "", "preallocated candidate manifest key")
 	fs.StringVar(&options.CandidateDir, "candidate-dir", "", "exact closed finalized candidate directory")
+	fs.StringVar(&options.ReleaseDir, "release-dir", "", "exact closed signed final release directory")
 }
 
 func validateCheckpointEvidenceOptions(options CheckpointEvidenceOptions) error {
@@ -98,6 +99,9 @@ func validateCheckpointEvidenceOptions(options CheckpointEvidenceOptions) error 
 	kind := mpcceremony.CheckpointTransitionKind(options.TransitionKind)
 	if kind != mpcceremony.CheckpointFinalCandidateRecorded && options.CandidateDir != "" {
 		return errors.New("--candidate-dir is permitted only for final-candidate-recorded")
+	}
+	if kind != mpcceremony.CheckpointFinalReleaseRecorded && options.ReleaseDir != "" {
+		return errors.New("--release-dir is permitted only for final-release-recorded")
 	}
 	switch kind {
 	case mpcceremony.CheckpointInitial:
@@ -205,6 +209,13 @@ func validateCheckpointEvidenceOptions(options CheckpointEvidenceOptions) error 
 			return errors.New("final candidate checkpoint derives its record and inventory from candidate-dir and must not supply submission inputs")
 		}
 		return requireCheckpointPhase2TurnValues(options, pathValue("--candidate-dir", options.CandidateDir))
+	case mpcceremony.CheckpointFinalReleaseRecorded:
+		if options.TransitionRecordPath != "" || options.TransitionRecordSignaturePath != "" || options.AcknowledgementPath != "" ||
+			options.AcknowledgementSignaturePath != "" || options.ManifestPath != "" || options.AttemptID != "" || options.ManifestKey != "" ||
+			options.NextAttemptID != "" || options.NextManifestKey != "" || options.Phase2GenesisPath != "" {
+			return errors.New("final release checkpoint derives its record and inventory from release-dir and must not supply submission inputs")
+		}
+		return requireCheckpointPhase2TurnValues(options, pathValue("--release-dir", options.ReleaseDir))
 	default:
 		return fmt.Errorf("unsupported guarded checkpoint transition %q", kind)
 	}
@@ -229,7 +240,7 @@ func checkpointTransitionOnlyInputsPresent(options CheckpointEvidenceOptions) bo
 		options.AcknowledgementPath != "" || options.AcknowledgementSignaturePath != "" ||
 		options.ManifestPath != "" || options.AttemptID != "" || options.ManifestKey != "" ||
 		options.NextAttemptID != "" || options.NextManifestKey != "" || options.Phase2GenesisPath != "" ||
-		options.CandidateDir != "" ||
+		options.CandidateDir != "" || options.ReleaseDir != "" ||
 		checkpointPhase2TurnInputsPresent(options)
 }
 
@@ -416,6 +427,9 @@ func checkpointEvidenceBoundary(kind mpcceremony.CheckpointTransitionKind, store
 	if stored {
 		prefix = "complete fetched checkpoint ancestry"
 	}
+	if kind == mpcceremony.CheckpointFinalReleaseRecorded {
+		return prefix + " through the signed final release: every ceremony transition and the exact closed release tree are authenticated; publication and GO/NO-GO approval are separate"
+	}
 	if kind == mpcceremony.CheckpointFinalCandidateRecorded {
 		return prefix + " through the finalized candidate: every transition is re-derived from exact signed records; both phases, cleanup, closure, beacon, sealed commons, deterministic Phase 2 genesis, and the closed candidate file inventory are fully replayed"
 	}
@@ -531,6 +545,11 @@ func inferStoredCheckpointEvidence(options CheckpointVerifyStoredOptions, checkp
 			return CheckpointEvidenceOptions{}, errors.New("stored final candidate checkpoint has no final candidate")
 		}
 		evidence.CandidateDir = filepath.Dir(filepath.Join(options.ArtifactRoot, filepath.FromSlash(checkpoint.FinalCandidate.Record.Name)))
+	case mpcceremony.CheckpointFinalReleaseRecorded:
+		if checkpoint.FinalRelease == nil {
+			return CheckpointEvidenceOptions{}, errors.New("stored final release checkpoint has no final release")
+		}
+		evidence.ReleaseDir = filepath.Dir(filepath.Join(options.ArtifactRoot, filepath.FromSlash(checkpoint.FinalRelease.Record.Name)))
 	default:
 		return CheckpointEvidenceOptions{}, fmt.Errorf("stored checkpoint transition %q is outside the supported authenticated lifecycle boundary", checkpoint.Transition.Kind)
 	}
@@ -701,7 +720,7 @@ func buildCheckpointEvidenceWithParent(options CheckpointEvidenceOptions, verify
 	activePhase := mpcceremony.Phase1
 	activeState := phaseState
 	activeChain := chain
-	if kind == mpcceremony.CheckpointPhase2OutboundPublished || kind == mpcceremony.CheckpointPhase2ReceiptAccepted || kind == mpcceremony.CheckpointPhase2CandidateAccepted || kind == mpcceremony.CheckpointPhase2Closed || kind == mpcceremony.CheckpointPhase2BeaconRecorded || kind == mpcceremony.CheckpointFinalCandidateRecorded {
+	if kind == mpcceremony.CheckpointPhase2OutboundPublished || kind == mpcceremony.CheckpointPhase2ReceiptAccepted || kind == mpcceremony.CheckpointPhase2CandidateAccepted || kind == mpcceremony.CheckpointPhase2Closed || kind == mpcceremony.CheckpointPhase2BeaconRecorded || kind == mpcceremony.CheckpointFinalCandidateRecorded || kind == mpcceremony.CheckpointFinalReleaseRecorded {
 		if previous.Phase2 == nil || previous.Phase1Seal == nil {
 			return builtCheckpointEvidence{}, errors.New("phase2 turn requires an initialized phase2 checkpoint")
 		}
@@ -774,6 +793,8 @@ func buildCheckpointEvidenceWithParent(options CheckpointEvidenceOptions, verify
 		return buildPhaseBeaconCheckpoint(options, trusted, previous, previousRefs, activeState, mpcceremony.Phase2)
 	case mpcceremony.CheckpointFinalCandidateRecorded:
 		return buildFinalCandidateCheckpoint(options, trusted, previous, previousRefs, phaseState, activeState, circuit)
+	case mpcceremony.CheckpointFinalReleaseRecorded:
+		return buildFinalReleaseCheckpoint(options, trusted, previous, previousRefs, phaseState, activeState)
 	default:
 		return builtCheckpointEvidence{}, fmt.Errorf("unsupported guarded checkpoint transition %q", kind)
 	}
@@ -1056,6 +1077,90 @@ func buildFinalCandidateCheckpoint(options CheckpointEvidenceOptions, trusted *m
 	state := phase2State
 	checkpoint.Phase2 = &state
 	checkpoint.FinalCandidate = &recordRefs
+	checkpoint.AcceptedArtifacts = checkpointSortedArtifacts(append(append([]mpcceremony.ArtifactRef(nil), previous.AcceptedArtifacts...), prefixed...)...)
+	return finishTransitionCheckpoint(trusted, previous, checkpoint)
+}
+
+func buildFinalReleaseCheckpoint(options CheckpointEvidenceOptions, trusted *mpcceremony.TrustedCeremony, previous mpcceremony.Checkpoint, previousRefs mpcceremony.SignedArtifactRefs, phase1State, phase2State mpcceremony.CheckpointPhaseState) (builtCheckpointEvidence, error) {
+	if previous.FinalCandidate == nil || previous.Phase2Beacon == nil {
+		return builtCheckpointEvidence{}, errors.New("final release requires the authenticated final candidate checkpoint")
+	}
+	if previous.FinalRelease != nil {
+		return builtCheckpointEvidence{}, errors.New("final release is already recorded in the previous checkpoint")
+	}
+	rootAbs, err := filepath.Abs(options.ArtifactRoot)
+	if err != nil {
+		return builtCheckpointEvidence{}, err
+	}
+	releaseAbs, err := filepath.Abs(options.ReleaseDir)
+	if err != nil {
+		return builtCheckpointEvidence{}, err
+	}
+	if err := validateCheckpointPathComponents(rootAbs, releaseAbs); err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("final release directory: %w", err)
+	}
+	relativeRelease, err := filepath.Rel(rootAbs, releaseAbs)
+	if err != nil || filepath.ToSlash(relativeRelease) != "final/release" {
+		return builtCheckpointEvidence{}, errors.New("final release directory must be the canonical final/release path under artifact-root")
+	}
+	verified, releaseRefs, err := mpcceremony.VerifyFinalReleaseCheckpoint(mpcceremony.VerifyReleaseOptions{
+		DefinitionPath: options.CeremonyPath, DefinitionSignaturePath: options.CeremonySignaturePath,
+		CoordinatorPublicKeyHex: trusted.Definition.Coordinator.Ed25519PublicKeyHex,
+		KeysDir:                 options.ReleaseDir, TrustedPublicKeyHex: trusted.Definition.ReleaseSigner.Ed25519PublicKeyHex,
+		ExpectedSignatureKeyID: trusted.Definition.ReleaseSigner.KeyID, RequireProvingKey: true,
+	})
+	if err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("final release verification: %w", err)
+	}
+	prefixed := make([]mpcceremony.ArtifactRef, 0, len(releaseRefs))
+	for _, ref := range releaseRefs {
+		ref.Name = "final/release/" + ref.Name
+		prefixed = append(prefixed, ref)
+	}
+	prefixed = checkpointSortedArtifacts(prefixed...)
+	releaseCandidate := make(map[string]mpcceremony.ArtifactRef)
+	for _, ref := range prefixed {
+		suffix, ok := strings.CutPrefix(ref.Name, "final/release/")
+		if ok {
+			releaseCandidate[suffix] = ref
+		}
+	}
+	for _, frozen := range previous.AcceptedArtifacts {
+		suffix, ok := strings.CutPrefix(frozen.Name, "final/candidate/")
+		if !ok {
+			continue
+		}
+		copied, exists := releaseCandidate[suffix]
+		if !exists || copied.Digest != frozen.Digest {
+			return builtCheckpointEvidence{}, fmt.Errorf("final release candidate file %q differs from the checkpointed final candidate", suffix)
+		}
+	}
+	var releaseRecord mpcceremony.SignedArtifactRefs
+	evidence := make([]mpcceremony.ArtifactRef, 0, len(prefixed)-2)
+	for _, ref := range prefixed {
+		switch ref.Name {
+		case "final/release/" + keybundle.ManifestFile:
+			releaseRecord.Record = ref
+		case "final/release/" + keybundle.ManifestSignatureFile:
+			releaseRecord.Signature = ref
+		default:
+			evidence = append(evidence, ref)
+		}
+	}
+	if err := releaseRecord.Validate(); err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("final release manifest: %w", err)
+	}
+	if releaseRecord.Record.Digest.SHA256 != verified.ManifestSHA256 {
+		return builtCheckpointEvidence{}, errors.New("verified release manifest changed during checkpoint preparation")
+	}
+	checkpoint := previous
+	checkpoint.Sequence++
+	checkpoint.PreviousCheckpoint = &previousRefs
+	checkpoint.Transition = mpcceremony.CheckpointTransition{Kind: mpcceremony.CheckpointFinalReleaseRecorded, Record: &releaseRecord, Evidence: evidence}
+	checkpoint.Phase1 = phase1State
+	state := phase2State
+	checkpoint.Phase2 = &state
+	checkpoint.FinalRelease = &releaseRecord
 	checkpoint.AcceptedArtifacts = checkpointSortedArtifacts(append(append([]mpcceremony.ArtifactRef(nil), previous.AcceptedArtifacts...), prefixed...)...)
 	return finishTransitionCheckpoint(trusted, previous, checkpoint)
 }

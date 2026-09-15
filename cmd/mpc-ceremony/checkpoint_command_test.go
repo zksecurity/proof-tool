@@ -593,6 +593,75 @@ func TestCheckpointCommandFullLifecycleThroughPhase2Turn(t *testing.T) {
 	if verified.CheckpointEvidenceInspection == nil || !verified.CheckpointEvidenceInspection.FullyVerified || verified.CheckpointEvidenceInspection.Sequence != 13 {
 		t.Fatalf("cp13 stored verification = %#v", verified.CheckpointEvidenceInspection)
 	}
+	finalReleaseArgs := append(append([]string{}, fixture.trustArgs...),
+		"--artifact-root", fixture.root, "--relay-release-id", "role-images-test",
+		"--transition", string(mpcceremony.CheckpointFinalReleaseRecorded),
+		"--previous-checkpoint", cp13.Outputs["checkpoint"], "--previous-checkpoint-signature", cp13SignaturePath,
+		"--chain", chainPath, "--chain-signature", chainSignaturePath,
+		"--head-payload", filepath.Join(fixture.root, filepath.FromSlash(accepted.OutputPayload.Name)),
+		"--release-dir", filepath.Join(fixture.root, "final", "release"),
+	)
+	finalReleaseArgs = append(finalReleaseArgs, phase2ActiveArgs...)
+	cp14 := runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "prepare"}, finalReleaseArgs...), "--out-dir", filepath.Join(fixture.root, "prepared", "cp14")))
+	cp14SignaturePath := filepath.Join(fixture.root, "state", "signed-cp14.sig")
+	runCheckpointFixtureCommand(t, fixture, append(append([]string{"--format", "json", "checkpoint", "sign"}, finalReleaseArgs...),
+		"--checkpoint", cp14.Outputs["checkpoint"], "--signing-request", cp14.Outputs["signing_request"],
+		"--coordinator-signing-key", keyPath, "--out", cp14SignaturePath))
+	verified = runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "verify-stored"}, fixture.trustArgs...),
+		"--checkpoint", cp14.Outputs["checkpoint"], "--checkpoint-signature", cp14SignaturePath, "--artifact-root", fixture.root))
+	if verified.CheckpointEvidenceInspection == nil || !verified.CheckpointEvidenceInspection.FullyVerified || verified.CheckpointEvidenceInspection.Sequence != 14 ||
+		verified.CheckpointEvidenceInspection.TransitionKind != mpcceremony.CheckpointFinalReleaseRecorded {
+		t.Fatalf("cp14 stored verification = %#v", verified.CheckpointEvidenceInspection)
+	}
+	workflowRoot := filepath.Dir(fixture.root)
+	alternateCandidate := filepath.Join(fixture.root, "final", "candidate-b")
+	replayCLIArgs := []string{
+		"--transcript-root", fixture.root,
+		"--phase1-chain", chainPath, "--phase1-chain-signature", chainSignaturePath,
+		"--phase1-close", filepath.Join(fixture.root, "phase1", "closure", "record.json"),
+		"--phase1-close-signature", filepath.Join(fixture.root, "phase1", "closure", "record.sig"),
+		"--phase1-beacon", filepath.Join(fixture.root, "phase1", "beacon", "record.json"),
+		"--phase1-beacon-signature", filepath.Join(fixture.root, "phase1", "beacon", "record.sig"),
+		"--phase1-seal", filepath.Join(fixture.root, "phase1", "sealed", "seal.json"),
+		"--phase1-seal-signature", filepath.Join(fixture.root, "phase1", "sealed", "seal.sig"),
+		"--phase2-chain", phase2Chain1, "--phase2-chain-signature", phase2Chain1Signature,
+		"--phase2-close", filepath.Join(fixture.root, "phase2", "closure", "record.json"),
+		"--phase2-close-signature", filepath.Join(fixture.root, "phase2", "closure", "record.sig"),
+		"--phase2-beacon", filepath.Join(fixture.root, "phase2", "beacon", "record.json"),
+		"--phase2-beacon-signature", filepath.Join(fixture.root, "phase2", "beacon", "record.sig"),
+	}
+	alternateFinalizeArgs := append(append([]string{"--format", "json", "finalize", "complete"}, fixture.trustArgs...), replayCLIArgs...)
+	alternateFinalizeArgs = append(alternateFinalizeArgs,
+		"--coordinator-signing-key", keyPath,
+		"--public-evidence", filepath.Join(workflowRoot, "checkpoint-public-finalization-evidence.json"),
+		"--finalized-at", "2023-08-23T15:11:35.5Z", "--out-dir", alternateCandidate)
+	runCheckpointCommandExecutable(t, fixture.executable, alternateFinalizeArgs)
+	alternateRelease := filepath.Join(fixture.root, "final", "release-b")
+	alternateReleaseArgs := append(append([]string{"--format", "json", "release", "sign"}, fixture.trustArgs...), replayCLIArgs...)
+	alternateReleaseArgs = append(alternateReleaseArgs,
+		"--candidate-bundle", alternateCandidate, "--operational-evidence-root", fixture.root,
+		"--operational-bundle", filepath.Join(fixture.root, "operational", "evidence-bundle.json"),
+		"--operational-bundle-signature", filepath.Join(fixture.root, "operational", "evidence-bundle.sig"),
+		"--release-signing-key", filepath.Join(workflowRoot, "identity-keys", "release-signer.ed25519.private.hex"),
+		"--signature-key-id", fixture.definition.ReleaseSigner.KeyID,
+		"--released-at", "2023-08-23T15:11:38.5Z", "--release-dir", alternateRelease)
+	runCheckpointCommandExecutable(t, fixture.executable, alternateReleaseArgs)
+	canonicalRelease := filepath.Join(fixture.root, "final", "release")
+	originalRelease := filepath.Join(fixture.root, "final", "release-a.test-backup")
+	if err := os.Rename(canonicalRelease, originalRelease); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(alternateRelease, canonicalRelease); err != nil {
+		t.Fatal(err)
+	}
+	assertCheckpointExecutableFails(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "prepare"}, finalReleaseArgs...),
+		"--out-dir", filepath.Join(fixture.root, "prepared", "cp14-different-valid-candidate")), "differs from the checkpointed final candidate")
+	if err := os.Rename(canonicalRelease, alternateRelease); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(originalRelease, canonicalRelease); err != nil {
+		t.Fatal(err)
+	}
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, phase2Args, "phase2/genesis.bin", "phase2-genesis")
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, phase2Args, "phase2/chain-0000.json", "phase2-chain")
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, phase2Args, "phase2/chain-0000.sig", "phase2-chain-signature")
@@ -614,6 +683,33 @@ func TestCheckpointCommandFullLifecycleThroughPhase2Turn(t *testing.T) {
 		{"final/candidate/public-finalization-evidence.json", "public-evidence"},
 	} {
 		assertChangedCheckpointEvidenceFails(t, fixture.executable, finalCandidateArgs, testCase.path, "final-candidate-"+testCase.label)
+	}
+	for _, testCase := range []struct{ path, label string }{
+		{"final/release/manifest.json", "manifest"},
+		{"final/release/manifest.sig", "manifest-signature"},
+		{"final/release/setup-transcript.json", "transcript"},
+		{"final/release/checksums.sha256", "checksums"},
+		{"final/release/operational/evidence-bundle.json", "operational-evidence"},
+	} {
+		assertChangedCheckpointEvidenceFails(t, fixture.executable, finalReleaseArgs, testCase.path, "final-release-"+testCase.label)
+	}
+	releaseDir := filepath.Join(fixture.root, "final", "release")
+	releaseMissing := filepath.Join(releaseDir, "manifest-public-key.hex")
+	releaseBackup := releaseMissing + ".test-backup"
+	if err := os.Rename(releaseMissing, releaseBackup); err != nil {
+		t.Fatal(err)
+	}
+	assertCheckpointExecutableFails(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "prepare"}, finalReleaseArgs...),
+		"--out-dir", filepath.Join(fixture.root, "prepared", "cp14-missing")), "")
+	if err := os.Rename(releaseBackup, releaseMissing); err != nil {
+		t.Fatal(err)
+	}
+	releaseExtra := filepath.Join(releaseDir, "unexpected.bin")
+	writeDecisionTestFile(t, releaseExtra, []byte("unexpected"), 0o600)
+	assertCheckpointExecutableFails(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "prepare"}, finalReleaseArgs...),
+		"--out-dir", filepath.Join(fixture.root, "prepared", "cp14-extra")), "")
+	if err := os.Remove(releaseExtra); err != nil {
+		t.Fatal(err)
 	}
 	candidateDir := filepath.Join(fixture.root, "final", "candidate")
 	missingPath := filepath.Join(candidateDir, "ownership.vk")
@@ -856,12 +952,21 @@ func writeWorkflowCheckpointCLIFixture(t *testing.T) (checkpointCLIFixture, ed25
 		t.Fatal(err)
 	}
 	helperPath := os.Getenv("MPC_WORKFLOW_HELPER")
+	operationalHelperPath := os.Getenv("MPC_OPERATIONAL_HELPER")
 	if helperPath == "" {
 		helperPath = filepath.Join(t.TempDir(), "mpc-workflow-helper")
 		build := exec.Command("go", "build", "-o", helperPath, "./internal/mpcceremony/testdata/workflowhelper")
 		build.Dir = filepath.Clean(filepath.Join(repoRoot, "..", ".."))
 		if output, buildErr := build.CombinedOutput(); buildErr != nil {
 			t.Fatalf("build workflow helper: %v\n%s", buildErr, output)
+		}
+	}
+	if operationalHelperPath == "" {
+		operationalHelperPath = filepath.Join(t.TempDir(), "mpc-operational-helper")
+		build := exec.Command("go", "build", "-o", operationalHelperPath, "./scripts/mpc-rehearsal-operational-evidence")
+		build.Dir = filepath.Clean(filepath.Join(repoRoot, "..", ".."))
+		if output, buildErr := build.CombinedOutput(); buildErr != nil {
+			t.Fatalf("build operational helper: %v\n%s", buildErr, output)
 		}
 	}
 	commandPath := filepath.Join(t.TempDir(), "mpc-ceremony")
@@ -871,11 +976,12 @@ func writeWorkflowCheckpointCLIFixture(t *testing.T) (checkpointCLIFixture, ed25
 		t.Fatalf("build mpc-ceremony command: %v\n%s", buildErr, output)
 	}
 	workflowRoot := filepath.Join(t.TempDir(), "workflow")
-	run := exec.Command(helperPath, workflowRoot)
+	run := exec.Command(helperPath, workflowRoot, operationalHelperPath)
 	run.Dir = filepath.Clean(filepath.Join(repoRoot, "..", ".."))
 	run.Env = append(os.Environ(),
 		"MPC_CEREMONY_TEST_BINARY="+commandPath,
 		"MPC_WORKFLOW_PHASE2_ONE=1",
+		"PROOF_TOOL_TEST_ZERO_ASSURANCE=1",
 	)
 	if output, runErr := run.CombinedOutput(); runErr != nil {
 		t.Fatalf("run workflow helper: %v\n%s", runErr, output)
