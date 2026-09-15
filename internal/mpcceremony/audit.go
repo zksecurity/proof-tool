@@ -234,6 +234,12 @@ func VerifyFinalCandidateCheckpoint(paths ReplayPaths, circuit *CompiledCircuit,
 	if err := verifyCandidateReplay(circuit, &replay, paths, candidate, candidateDir); err != nil {
 		return CandidateMetadata{}, nil, err
 	}
+	return verifyCandidateClosedTree(replay.definition, replay.definitionRef, candidateDir, candidate, candidateRef)
+}
+
+// Shared exact-file check. The caller decides whether its versioned trust
+// model requires contribution replay; this helper never performs that replay.
+func verifyCandidateClosedTree(definition CeremonyDefinition, definitionRef ArtifactRef, candidateDir string, candidate CandidateMetadata, candidateRef ArtifactRef) (CandidateMetadata, []ArtifactRef, error) {
 	names := append(candidateChecksumNames(), CandidateChecksumsFile)
 	expected := make(map[string]struct{}, len(names))
 	for _, name := range names {
@@ -272,7 +278,7 @@ func VerifyFinalCandidateCheckpoint(paths ReplayPaths, circuit *CompiledCircuit,
 			return CandidateMetadata{}, nil, errors.New("finalized candidate record changed during verification")
 		}
 	}
-	verifiedAgain, candidateRefAgain, err := verifyCandidate(replay.definition, replay.definitionRef, candidateDir)
+	verifiedAgain, candidateRefAgain, err := verifyCandidate(definition, definitionRef, candidateDir)
 	if err != nil {
 		return CandidateMetadata{}, nil, fmt.Errorf("finalized candidate changed during closed-tree verification: %w", err)
 	}
@@ -369,6 +375,25 @@ func compareCandidateToReplay(
 	if _, err := readCanonicalFile(filepath.Join(dir, candidate.VerificationReport.Name), &candidateReport); err != nil {
 		return err
 	}
+	if err := validateCandidatePublicReport(candidateReport, cardanoVK, format); err != nil {
+		return err
+	}
+	if err := verifyPublicFinalizationEvidence(dir, candidate, candidateReport); err != nil {
+		return err
+	}
+	if _, _, _, err := loadAndVerifyPublicEvidence(
+		filepath.Join(dir, candidate.PublicEvidence.Name),
+		replay.definition.CeremonyID,
+		vk,
+		cardanoVK,
+		candidate.CardanoVerifyingKey,
+	); err != nil {
+		return fmt.Errorf("independent native public-evidence verification: %w", err)
+	}
+	return nil
+}
+
+func validateCandidatePublicReport(candidateReport VerificationReport, cardanoVK []byte, format string) error {
 	if candidateReport.CardanoVKRawDigest != NewDigest(cardanoVK) ||
 		candidateReport.CardanoVKBytes != len(cardanoVK) ||
 		candidateReport.CardanoVKFormat != format ||
@@ -383,18 +408,6 @@ func compareCandidateToReplay(
 		!candidateReport.ProofTruncationRejected ||
 		!candidateReport.ProofAppendRejected {
 		return errors.New("candidate verification report is not reproduced by independent evidence")
-	}
-	if err := verifyPublicFinalizationEvidence(dir, candidate, candidateReport); err != nil {
-		return err
-	}
-	if _, _, _, err := loadAndVerifyPublicEvidence(
-		filepath.Join(dir, candidate.PublicEvidence.Name),
-		replay.definition.CeremonyID,
-		vk,
-		cardanoVK,
-		candidate.CardanoVerifyingKey,
-	); err != nil {
-		return fmt.Errorf("independent native public-evidence verification: %w", err)
 	}
 	return nil
 }
@@ -783,14 +796,7 @@ func VerifyRelease(options VerifyReleaseOptions) (*VerifyReleaseResult, error) {
 		len(manifest.ArtifactURLs) != 0 {
 		return nil, errors.New("manifest does not exactly bind candidate key artifacts and signed provenance")
 	}
-	if _, err := ReadR1CSFile(filepath.Join(options.KeysDir, candidate.ConstraintSystem.Name), definition.Circuit); err != nil {
-		return nil, err
-	}
-	vk, err := prover.LoadVK(filepath.Join(options.KeysDir, NativeVerifyingKeyFile))
-	if err != nil {
-		return nil, err
-	}
-	if err := verifyCardanoFiles(options.KeysDir, candidate, vk); err != nil {
+	if _, err := verifyCandidateKeyExports(definition, candidate, options.KeysDir); err != nil {
 		return nil, err
 	}
 	if err := verifyChecksumsExact(

@@ -40,7 +40,8 @@ func TestCheckpointV4RealContributionTurn(t *testing.T) {
 		{name: "missing-beacon-evidence", mirrorMode: "0", extra: "MPC_WORKFLOW_SKIP_BEACON_EVIDENCE=1", rejection: "multi-relay beacon evidence is required"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
-			run := exec.Command(helper, filepath.Join(t.TempDir(), "ceremony-run"))
+			outputRoot := filepath.Join(t.TempDir(), "ceremony-run")
+			run := exec.Command(helper, outputRoot)
 			run.Dir = repo
 			for _, entry := range os.Environ() {
 				if strings.HasPrefix(entry, "MPC_WORKFLOW_") || strings.HasPrefix(entry, "MPC_CEREMONY_TEST_") || strings.HasPrefix(entry, "PROOF_TOOL_TEST_") {
@@ -73,6 +74,12 @@ func TestCheckpointV4RealContributionTurn(t *testing.T) {
 			}
 			if !strings.Contains(string(output), "V4 terminal branch passed: authenticated abort") {
 				t.Fatalf("missing terminal completion: %s", output)
+			}
+			if !strings.Contains(string(output), "V4 final review passed: no contribution replay input") {
+				t.Fatalf("missing final review completion: %s", output)
+			}
+			if scenario.name == "observers-disabled" {
+				testV4CoherentInvalidPublicProof(t, filepath.Join(outputRoot, "ceremony"))
 			}
 		})
 	}

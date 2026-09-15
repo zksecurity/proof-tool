@@ -45,6 +45,11 @@ abort/restart are terminal and cannot prepare a release bundle. An authorized
 restart points to an exact signed V4 definition; the new definition alone does
 not establish lineage. Historical inspection rechecks these governance edges
 against their exact predecessor, not just the record signature.
+The read-only V4 final-review API now binds an exact review checkpoint,
+coordinator replay checkpoint, closed candidate inventory, signed/rederived
+bundle and checkpoint-derived audit quorum. It authenticates lifecycle records,
+verifies key exports and the public proof, but does not replay contributions or
+regenerate keys. Existing V1–V3 replay/verification gates are unchanged.
 Normal initialization still emits V3. Do not release this slice alone: remaining
 final-release authoring and the new release/decision verification path
 are incomplete. These tests are not the normal CLI journey or a full ceremony.
