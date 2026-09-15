@@ -305,7 +305,7 @@ func executeCheckpointVerify(options CheckpointVerifyOptions) (CommandResult, er
 		Schema: checkpointEvidenceInspectionSchema, CeremonyID: built.checkpoint.CeremonyID,
 		Sequence: built.checkpoint.Sequence, CheckpointDigest: mpcceremony.NewDigest(checkpointBytes),
 		TransitionKind: built.checkpoint.Transition.Kind, FullyVerified: true,
-		VerifiedEvidenceBoundary: "phase1 checkpoint through closure: exact definition, ancestry, chain/head, transition records, submission payloads and acknowledgements; candidate acceptance includes full contribution and cleanup replay",
+		VerifiedEvidenceBoundary: "phase1 checkpoint through beacon: exact definition, ancestry, chain/head, transition records, submission payloads and acknowledgements; candidate acceptance includes full contribution and cleanup replay; closure and beacon bind the exact accepted head and raw response",
 	}
 	return CommandResult{
 		CeremonyID:                   built.checkpoint.CeremonyID,
@@ -323,7 +323,7 @@ func executeCheckpointVerifyStored(options CheckpointVerifyStoredOptions) (Comma
 		Schema: checkpointEvidenceInspectionSchema, CeremonyID: checkpoint.CeremonyID,
 		Sequence: checkpoint.Sequence, CheckpointDigest: mpcceremony.NewDigest(checkpointBytes),
 		TransitionKind: checkpoint.Transition.Kind, FullyVerified: true,
-		VerifiedEvidenceBoundary: "complete fetched Phase 1 ancestry through closure; every edge is re-derived from exact signed records, with full contribution and cleanup replay for candidate acceptance",
+		VerifiedEvidenceBoundary: "complete fetched Phase 1 ancestry through beacon; every edge is re-derived from exact signed records, with full contribution and cleanup replay for candidate acceptance and exact raw-response verification for the beacon",
 	}
 	return CommandResult{
 		CeremonyID:                   checkpoint.CeremonyID,
@@ -622,13 +622,9 @@ func buildPhase1BeaconCheckpoint(options CheckpointEvidenceOptions, trusted *mpc
 		return builtCheckpointEvidence{}, fmt.Errorf("phase1 closure signature: %w", err)
 	}
 
-	beaconBytes, beaconRefs, err := checkpointSignedBytes(options.ArtifactRoot, options.TransitionRecordPath, options.TransitionRecordSignaturePath)
+	beaconBytes, beaconSignature, beaconRefs, err := checkpointSignedBytes(options.ArtifactRoot, options.TransitionRecordPath, options.TransitionRecordSignaturePath)
 	if err != nil {
 		return builtCheckpointEvidence{}, fmt.Errorf("phase1 beacon: %w", err)
-	}
-	beaconSignature, err := readRegularOperationalFile(options.TransitionRecordSignaturePath, 4096)
-	if err != nil {
-		return builtCheckpointEvidence{}, err
 	}
 	var beacon mpcceremony.BeaconRecord
 	if err := mpcceremony.VerifySignedRecord(beaconBytes, beaconSignature, &beacon, trusted.Definition.Coordinator.KeyID, publicKey); err != nil {
@@ -667,13 +663,9 @@ func buildPhase1ClosedCheckpoint(options CheckpointEvidenceOptions, trusted *mpc
 	if previous.Phase1Closure != nil {
 		return builtCheckpointEvidence{}, errors.New("phase1 is already closed in the previous checkpoint")
 	}
-	closeBytes, closeRefs, err := checkpointSignedBytes(options.ArtifactRoot, options.TransitionRecordPath, options.TransitionRecordSignaturePath)
+	closeBytes, closeSignature, closeRefs, err := checkpointSignedBytes(options.ArtifactRoot, options.TransitionRecordPath, options.TransitionRecordSignaturePath)
 	if err != nil {
 		return builtCheckpointEvidence{}, fmt.Errorf("phase1 closure: %w", err)
-	}
-	closeSignature, err := readRegularOperationalFile(options.TransitionRecordSignaturePath, 4096)
-	if err != nil {
-		return builtCheckpointEvidence{}, err
 	}
 	publicKey, err := keybundle.DecodePublicKeyHex(trusted.Definition.Coordinator.Ed25519PublicKeyHex)
 	if err != nil {
@@ -747,7 +739,7 @@ func buildOutboundCheckpoint(options CheckpointEvidenceOptions, trusted *mpccere
 }
 
 func buildReceiptCheckpoint(options CheckpointEvidenceOptions, trusted *mpcceremony.TrustedCeremony, previous mpcceremony.Checkpoint, previousRefs mpcceremony.SignedArtifactRefs, phaseState mpcceremony.CheckpointPhaseState) (builtCheckpointEvidence, error) {
-	envelopeBytes, envelopeRefs, err := checkpointSignedBytes(options.ArtifactRoot, options.TransitionRecordPath, options.TransitionRecordSignaturePath)
+	envelopeBytes, envelopeSignatureBytes, envelopeRefs, err := checkpointSignedBytes(options.ArtifactRoot, options.TransitionRecordPath, options.TransitionRecordSignaturePath)
 	if err != nil {
 		return builtCheckpointEvidence{}, fmt.Errorf("receipt submission envelope: %w", err)
 	}
@@ -756,10 +748,6 @@ func buildReceiptCheckpoint(options CheckpointEvidenceOptions, trusted *mpccerem
 		return builtCheckpointEvidence{}, fmt.Errorf("receipt submission envelope: %w", err)
 	}
 	slot, err := findAllocatedSubmission(previous, untrustedEnvelope)
-	if err != nil {
-		return builtCheckpointEvidence{}, err
-	}
-	envelopeSignatureBytes, err := readRegularOperationalFile(options.TransitionRecordSignaturePath, 4096)
 	if err != nil {
 		return builtCheckpointEvidence{}, err
 	}
@@ -773,21 +761,13 @@ func buildReceiptCheckpoint(options CheckpointEvidenceOptions, trusted *mpccerem
 	if err := verifyReceiptEnvelopePayloads(options.ArtifactRoot, trusted, previous, envelope); err != nil {
 		return builtCheckpointEvidence{}, err
 	}
-	manifest, err := checkpointArtifactRef(options.ArtifactRoot, options.ManifestPath)
+	manifestBytes, manifest, err := checkpointArtifactBytes(options.ArtifactRoot, options.ManifestPath, maxOperationalRecordBytes)
 	if err != nil {
 		return builtCheckpointEvidence{}, fmt.Errorf("submission manifest: %w", err)
 	}
-	manifestBytes, err := readRegularOperationalFile(options.ManifestPath, maxOperationalRecordBytes)
-	if err != nil {
-		return builtCheckpointEvidence{}, err
-	}
-	ackBytes, ackRefs, err := checkpointSignedBytes(options.ArtifactRoot, options.AcknowledgementPath, options.AcknowledgementSignaturePath)
+	ackBytes, ackSignatureBytes, ackRefs, err := checkpointSignedBytes(options.ArtifactRoot, options.AcknowledgementPath, options.AcknowledgementSignaturePath)
 	if err != nil {
 		return builtCheckpointEvidence{}, fmt.Errorf("submission acknowledgement: %w", err)
-	}
-	ackSignatureBytes, err := readRegularOperationalFile(options.AcknowledgementSignaturePath, 4096)
-	if err != nil {
-		return builtCheckpointEvidence{}, err
 	}
 	ack, err := mpcceremony.VerifySignedSubmissionAcknowledgement(
 		trusted.Definition, previous, slot,
@@ -834,7 +814,7 @@ func buildCandidateCheckpoint(options CheckpointEvidenceOptions, trusted *mpccer
 	if phaseState.AcceptedCount != previous.Phase1.AcceptedCount+1 || len(chain.Records) == 0 {
 		return builtCheckpointEvidence{}, errors.New("candidate checkpoint chain must advance the previous head by exactly one record")
 	}
-	envelopeBytes, envelopeRefs, err := checkpointSignedBytes(options.ArtifactRoot, options.TransitionRecordPath, options.TransitionRecordSignaturePath)
+	envelopeBytes, envelopeSignatureBytes, envelopeRefs, err := checkpointSignedBytes(options.ArtifactRoot, options.TransitionRecordPath, options.TransitionRecordSignaturePath)
 	if err != nil {
 		return builtCheckpointEvidence{}, fmt.Errorf("candidate submission envelope: %w", err)
 	}
@@ -849,10 +829,6 @@ func buildCandidateCheckpoint(options CheckpointEvidenceOptions, trusted *mpccer
 	if slot.Kind != mpcceremony.CheckpointSubmissionCandidate {
 		return builtCheckpointEvidence{}, errors.New("candidate-accepted checkpoint requires a candidate submission slot")
 	}
-	envelopeSignatureBytes, err := readRegularOperationalFile(options.TransitionRecordSignaturePath, 4096)
-	if err != nil {
-		return builtCheckpointEvidence{}, err
-	}
 	envelope, err := mpcceremony.VerifySignedSubmissionEnvelope(trusted.Definition, previous, slot, envelopeBytes, envelopeSignatureBytes)
 	if err != nil {
 		return builtCheckpointEvidence{}, err
@@ -865,21 +841,13 @@ func buildCandidateCheckpoint(options CheckpointEvidenceOptions, trusted *mpccer
 	if err := verifyCandidateEnvelopePayloads(options.ArtifactRoot, envelope, acceptedRecord); err != nil {
 		return builtCheckpointEvidence{}, err
 	}
-	manifest, err := checkpointArtifactRef(options.ArtifactRoot, options.ManifestPath)
+	manifestBytes, manifest, err := checkpointArtifactBytes(options.ArtifactRoot, options.ManifestPath, maxOperationalRecordBytes)
 	if err != nil {
 		return builtCheckpointEvidence{}, fmt.Errorf("candidate manifest: %w", err)
 	}
-	manifestBytes, err := readRegularOperationalFile(options.ManifestPath, maxOperationalRecordBytes)
-	if err != nil {
-		return builtCheckpointEvidence{}, err
-	}
-	ackBytes, ackRefs, err := checkpointSignedBytes(options.ArtifactRoot, options.AcknowledgementPath, options.AcknowledgementSignaturePath)
+	ackBytes, ackSignatureBytes, ackRefs, err := checkpointSignedBytes(options.ArtifactRoot, options.AcknowledgementPath, options.AcknowledgementSignaturePath)
 	if err != nil {
 		return builtCheckpointEvidence{}, fmt.Errorf("candidate acknowledgement: %w", err)
-	}
-	ackSignatureBytes, err := readRegularOperationalFile(options.AcknowledgementSignaturePath, 4096)
-	if err != nil {
-		return builtCheckpointEvidence{}, err
 	}
 	ack, err := mpcceremony.VerifySignedSubmissionAcknowledgement(
 		trusted.Definition, previous, slot,
@@ -1009,6 +977,9 @@ func loadSignedOperationalPair(options CheckpointEvidenceOptions, kind mpcceremo
 		return nil, nil, mpcceremony.SignedArtifactRefs{}, err
 	}
 	refs, err := checkpointPairRefs(options.ArtifactRoot, recordPath, signaturePath)
+	if err == nil && (refs.Record.Digest != mpcceremony.NewDigest(canonical) || refs.Signature.Digest != mpcceremony.NewDigest(signatureBytes)) {
+		return nil, nil, mpcceremony.SignedArtifactRefs{}, errors.New("signed operational record changed during validation")
+	}
 	return canonical, record, refs, err
 }
 
@@ -1098,13 +1069,47 @@ func findAllocatedSubmission(checkpoint mpcceremony.Checkpoint, envelope mpccere
 	return mpcceremony.CheckpointSubmissionSlot{}, errors.New("submission envelope does not match an allocated checkpoint slot")
 }
 
-func checkpointSignedBytes(root, recordPath, signaturePath string) ([]byte, mpcceremony.SignedArtifactRefs, error) {
-	recordBytes, err := readRegularOperationalFile(recordPath, maxOperationalRecordBytes)
+func checkpointSignedBytes(root, recordPath, signaturePath string) ([]byte, []byte, mpcceremony.SignedArtifactRefs, error) {
+	recordBytes, recordRef, err := checkpointArtifactBytes(root, recordPath, maxOperationalRecordBytes)
 	if err != nil {
-		return nil, mpcceremony.SignedArtifactRefs{}, err
+		return nil, nil, mpcceremony.SignedArtifactRefs{}, err
 	}
-	refs, err := checkpointPairRefs(root, recordPath, signaturePath)
-	return recordBytes, refs, err
+	signatureBytes, signatureRef, err := checkpointArtifactBytes(root, signaturePath, 4096)
+	if err != nil {
+		return nil, nil, mpcceremony.SignedArtifactRefs{}, err
+	}
+	refs := mpcceremony.SignedArtifactRefs{Record: recordRef, Signature: signatureRef}
+	return recordBytes, signatureBytes, refs, nil
+}
+
+// checkpointArtifactBytes binds validation bytes and checkpoint references to
+// the same opened file. Callers must not separately reopen a mutable path for
+// semantic verification after committing the returned reference.
+func checkpointArtifactBytes(root, path string, limit int64) ([]byte, mpcceremony.ArtifactRef, error) {
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return nil, mpcceremony.ArtifactRef{}, err
+	}
+	pathAbs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, mpcceremony.ArtifactRef{}, err
+	}
+	rel, err := filepath.Rel(rootAbs, pathAbs)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) {
+		return nil, mpcceremony.ArtifactRef{}, errors.New("artifact path escapes artifact root")
+	}
+	if err := validateCheckpointPathComponents(rootAbs, pathAbs); err != nil {
+		return nil, mpcceremony.ArtifactRef{}, err
+	}
+	data, err := readRegularOperationalFile(pathAbs, limit)
+	if err != nil {
+		return nil, mpcceremony.ArtifactRef{}, err
+	}
+	ref := mpcceremony.ArtifactRef{Name: filepath.ToSlash(rel), Digest: mpcceremony.NewDigest(data)}
+	if err := ref.Validate(); err != nil {
+		return nil, mpcceremony.ArtifactRef{}, err
+	}
+	return data, ref, nil
 }
 
 func checkpointPairRefs(root, recordPath, signaturePath string) (mpcceremony.SignedArtifactRefs, error) {
@@ -1167,10 +1172,17 @@ func validateCheckpointPathComponents(root, path string) error {
 }
 
 func checkpointBytesForRef(root string, ref mpcceremony.ArtifactRef, limit int64) ([]byte, error) {
-	if err := checkCustodyFile(root, ref); err != nil {
+	if err := ref.Validate(); err != nil {
 		return nil, err
 	}
-	return readRegularOperationalFile(filepath.Join(root, filepath.FromSlash(ref.Name)), limit)
+	data, actual, err := checkpointArtifactBytes(root, filepath.Join(root, filepath.FromSlash(ref.Name)), limit)
+	if err != nil {
+		return nil, err
+	}
+	if actual != ref {
+		return nil, errors.New("retained file differs from checkpoint digest")
+	}
+	return data, nil
 }
 
 func checkpointSortedArtifacts(values ...mpcceremony.ArtifactRef) []mpcceremony.ArtifactRef {

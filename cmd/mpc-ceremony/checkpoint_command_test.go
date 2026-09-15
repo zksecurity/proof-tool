@@ -59,6 +59,34 @@ func TestCheckpointPrepareSignAndFullyVerifyInitial(t *testing.T) {
 	}
 }
 
+func TestCheckpointArtifactBytesRemainBoundAcrossPathReplacement(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "record.json")
+	writeDecisionTestFile(t, path, []byte(`{"version":"A"}`), 0o600)
+	data, ref, err := checkpointArtifactBytes(root, path, maxOperationalRecordBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement := filepath.Join(root, "replacement.json")
+	writeDecisionTestFile(t, replacement, []byte(`{"version":"B"}`), 0o600)
+	if err := os.Rename(replacement, path); err != nil {
+		t.Fatal(err)
+	}
+	if ref.Digest != mpcceremony.NewDigest(data) {
+		t.Fatal("returned checkpoint reference is not bound to the returned validation bytes")
+	}
+	current, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Digest == mpcceremony.NewDigest(current) {
+		t.Fatal("test replacement did not change the path contents")
+	}
+}
+
 func TestCheckpointSignRejectsArbitraryValidLookingCheckpoint(t *testing.T) {
 	fixture := writeCheckpointCLIFixture(t)
 	packet := filepath.Join(fixture.root, "prepared", "cp0")

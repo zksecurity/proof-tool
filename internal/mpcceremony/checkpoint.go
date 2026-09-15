@@ -10,7 +10,8 @@ import (
 
 const (
 	CheckpointSchemaV1               = "proof-tool-mpc-checkpoint-v1"
-	CheckpointSchema                 = "proof-tool-mpc-checkpoint-v2"
+	CheckpointSchemaV2               = "proof-tool-mpc-checkpoint-v2"
+	CheckpointSchema                 = "proof-tool-mpc-checkpoint-v3"
 	StorageFirstWorkflowV1           = "storage-first-v1"
 	CheckpointSigningRequestSchemaV1 = "proof-tool-mpc-checkpoint-signing-request-v1"
 	// A full 255-participant Phase 1 retains roughly twenty immutable public
@@ -324,16 +325,16 @@ type Checkpoint struct {
 
 func (c Checkpoint) Validate() error {
 	switch c.Schema {
-	case CheckpointSchema:
+	case CheckpointSchema, CheckpointSchemaV2:
 		if c.AssurancePolicy == nil {
-			return errors.New("checkpoint v2 requires assurance_policy")
+			return fmt.Errorf("checkpoint %q requires assurance_policy", c.Schema)
 		}
 	case CheckpointSchemaV1:
 		if c.AssurancePolicy != nil {
 			return errors.New("checkpoint v1 must not contain assurance_policy")
 		}
 	default:
-		return fmt.Errorf("checkpoint schema %q, want %q or %q", c.Schema, CheckpointSchemaV1, CheckpointSchema)
+		return fmt.Errorf("checkpoint schema %q, want %q, %q or %q", c.Schema, CheckpointSchemaV1, CheckpointSchemaV2, CheckpointSchema)
 	}
 	if c.Workflow != StorageFirstWorkflowV1 {
 		return fmt.Errorf("checkpoint workflow %q, want %q", c.Workflow, StorageFirstWorkflowV1)
@@ -364,6 +365,10 @@ func (c Checkpoint) Validate() error {
 	}
 	if err := c.Transition.Validate(); err != nil {
 		return fmt.Errorf("transition: %w", err)
+	}
+	if c.Schema != CheckpointSchema && (c.Phase1Closure != nil || c.Phase1Beacon != nil ||
+		c.Transition.Kind == CheckpointPhase1Closed || c.Transition.Kind == CheckpointPhase1BeaconRecorded) {
+		return errors.New("phase1 closure and beacon require checkpoint v3")
 	}
 	if err := c.Phase1.Validate(); err != nil {
 		return fmt.Errorf("phase1: %w", err)
@@ -524,8 +529,8 @@ func VerifySignedCheckpoint(definition CeremonyDefinition, definitionBytes, defi
 
 func validateCheckpointDefinitionVersion(definition CeremonyDefinition, checkpoint Checkpoint) error {
 	if definition.Schema == DefinitionSchema {
-		if checkpoint.Schema != CheckpointSchema || checkpoint.AssurancePolicy == nil || *checkpoint.AssurancePolicy != *definition.AssurancePolicy {
-			return errors.New("definition v3 requires a checkpoint v2 with exactly matching assurance_policy")
+		if (checkpoint.Schema != CheckpointSchema && checkpoint.Schema != CheckpointSchemaV2) || checkpoint.AssurancePolicy == nil || *checkpoint.AssurancePolicy != *definition.AssurancePolicy {
+			return errors.New("definition v3 requires a checkpoint v2 or v3 with exactly matching assurance_policy")
 		}
 		return nil
 	}
@@ -610,6 +615,9 @@ func validatePhase1ClosedTransition(previous, next Checkpoint) error {
 	if !samePhaseState(previous.Phase1, next.Phase1) || !slotsEqual(previous.Submissions, next.Submissions) {
 		return errors.New("phase1 closure must preserve the accepted head and submission slots")
 	}
+	if hasAllocatedSubmission(previous.Submissions) {
+		return errors.New("phase1 cannot close while a submission attempt is still allocated")
+	}
 	if next.Transition.Record == nil || *next.Transition.Record != *next.Phase1Closure {
 		return errors.New("phase1 closure transition must name the committed closure")
 	}
@@ -617,6 +625,12 @@ func validatePhase1ClosedTransition(previous, next Checkpoint) error {
 		return errors.New("phase1 closure accepted an unexpected artifact set")
 	}
 	return nil
+}
+
+func hasAllocatedSubmission(slots []CheckpointSubmissionSlot) bool {
+	return slices.ContainsFunc(slots, func(slot CheckpointSubmissionSlot) bool {
+		return slot.Status == CheckpointSubmissionAllocated
+	})
 }
 
 func artifactSubset(previous, next []ArtifactRef) bool {
@@ -662,6 +676,9 @@ func validateOutboundTransition(previous, next Checkpoint) error {
 	t := next.Transition
 	if previous.Phase1Closure != nil || next.Phase1Closure != nil {
 		return errors.New("phase1 turn cannot advance after closure")
+	}
+	if hasAllocatedSubmission(previous.Submissions) {
+		return errors.New("a new phase1 turn cannot open while another submission attempt is allocated")
 	}
 	if !samePhaseState(previous.Phase1, next.Phase1) || t.Index != previous.Phase1.AcceptedCount+1 {
 		return errors.New("outbound publication must preserve the head and target the next index")

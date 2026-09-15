@@ -56,10 +56,10 @@ Commands:
   decision prepare     Derive the canonical production GO/NO-GO record
   decision sign        Sign the canonical production GO/NO-GO record
   decision verify      Verify decision evidence and role threshold
-  checkpoint prepare   Re-derive a cp0-cp3 checkpoint from authenticated evidence
-  checkpoint sign      Re-derive and sign an exact reviewed cp0-cp3 checkpoint
-  checkpoint verify    Fully verify a signed cp0-cp3 checkpoint and its evidence
-  checkpoint verify-stored  Infer and fully verify a fetched cp0-cp3 ancestry
+  checkpoint prepare   Re-derive a supported Phase 1 checkpoint from authenticated evidence
+  checkpoint sign      Re-derive and sign an exact reviewed Phase 1 checkpoint
+  checkpoint verify    Fully verify a signed Phase 1 checkpoint and its evidence
+  checkpoint verify-stored  Infer and fully verify a fetched Phase 1 checkpoint ancestry
   inspect definition   Authenticate and describe a ceremony definition
   inspect chain        Authenticate and describe an accepted chain
   inspect participant  Match an existing key to the participant roster
@@ -243,10 +243,10 @@ that transition.
 
 Guarded storage-first checkpoint operations. Every operation re-authenticates
 the exact signed definition, predecessor, Phase 1 chain and head, and all
-transition-defining records. This implementation supports the initial,
-outbound-published, receipt-accepted and candidate-accepted checkpoints
-(cp0-cp3). Candidate acceptance replays the contribution mathematics and
-cleanup evidence.
+transition-defining records. This implementation supports Phase 1 from the
+initial checkpoint through accepted participant turns, closure, and verified
+beacon evidence. Candidate acceptance replays the contribution mathematics
+and cleanup evidence.
 `,
 	"checkpoint prepare": `Usage:
   mpc-ceremony checkpoint prepare --ceremony FILE --ceremony-signature FILE \
@@ -254,7 +254,7 @@ cleanup evidence.
     --relay-release-id ID --transition KIND --chain FILE \
     --chain-signature FILE --head-payload FILE [transition flags] --out-dir DIR
 
-Re-derives a canonical cp0-cp3 checkpoint from authenticated evidence and
+Re-derives a canonical supported Phase 1 checkpoint from authenticated evidence and
 writes canonical.json plus signing-request.json to a fresh directory.
 
 For phase1-outbound-published also supply the previous checkpoint pair, signed
@@ -267,6 +267,11 @@ For phase1-candidate-accepted supply the previous checkpoint pair, fully
 verified next chain and head payload, candidate envelope pair, accepted
 acknowledgement pair, and exact manifest. Attempt scope is derived from the
 preallocated candidate slot.
+
+For phase1-closed supply the previous checkpoint pair and signed Phase 1 close
+record pair. For phase1-beacon-recorded supply the previous checkpoint pair
+and signed Phase 1 beacon record pair; the raw response named by the beacon
+record must exist under the artifact root.
 `,
 	"checkpoint sign": `Usage:
   mpc-ceremony checkpoint sign [all checkpoint prepare evidence flags] \
@@ -283,7 +288,7 @@ private key belongs to the authenticated coordinator, then signs it.
     --checkpoint FILE --checkpoint-signature FILE
 
 Re-derives and authenticates the signed checkpoint and all transition-defining
-evidence within the cp0-cp3 boundary. Its JSON projection sets fully_verified
+evidence within the supported Phase 1 boundary. Its JSON projection sets fully_verified
 only after those checks pass. Structural inspect checkpoint output must not be
 used to advance Relay's trusted high-water state.
 `,
@@ -294,8 +299,10 @@ used to advance Relay's trusted high-water state.
     --checkpoint FILE --checkpoint-signature FILE
 
 Walks the fetched checkpoint ancestry and derives every evidence path and
-transition input from the authenticated checkpoints themselves. Each cp0-cp3
-edge is fully re-derived; cp3 replays contribution mathematics and cleanup.
+transition input from the authenticated checkpoints themselves. Every
+supported Phase 1 edge is fully re-derived; candidate acceptance replays
+contribution mathematics and cleanup, while closure and beacon validation use
+the exact authenticated head and raw beacon response.
 Only this command (or checkpoint verify with explicit evidence) emits
 fully_verified=true. Structural inspect output is diagnostics-only.
 `,

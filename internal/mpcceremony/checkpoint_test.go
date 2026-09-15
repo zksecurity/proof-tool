@@ -2,6 +2,7 @@ package mpcceremony
 
 import (
 	"bytes"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -13,6 +14,11 @@ func TestCheckpointSchemasPreserveLegacyAndForbidCrossVersionUse(t *testing.T) {
 	current.AssurancePolicy = cloneAssurancePolicy(currentDefinition.AssurancePolicy)
 	if err := validateCheckpointDefinitionVersion(currentDefinition, current); err != nil {
 		t.Fatal(err)
+	}
+	previousCurrent := current
+	previousCurrent.Schema = CheckpointSchemaV2
+	if err := validateCheckpointDefinitionVersion(currentDefinition, previousCurrent); err != nil {
+		t.Fatalf("existing checkpoint v2 rejected: %v", err)
 	}
 
 	legacyCheckpoint := current
@@ -42,7 +48,7 @@ func TestCheckpointSchemasPreserveLegacyAndForbidCrossVersionUse(t *testing.T) {
 	}
 	legacyDefinition.CeremonyID = legacyID
 	if err := validateCheckpointDefinitionVersion(legacyDefinition, current); err == nil {
-		t.Fatal("legacy definition accepted checkpoint v2")
+		t.Fatal("legacy definition accepted checkpoint v3")
 	}
 	if err := validateCheckpointDefinitionVersion(legacyDefinition, legacyCheckpoint); err != nil {
 		t.Fatalf("legacy definition/checkpoint pairing rejected: %v", err)
@@ -63,6 +69,27 @@ func TestCheckpointSchemasPreserveLegacyAndForbidCrossVersionUse(t *testing.T) {
 	next.PreviousCheckpoint = &SignedArtifactRefs{}
 	if err := ValidateCheckpointTransition(current, next); err == nil {
 		t.Fatal("checkpoint transition switched schema versions")
+	}
+}
+
+func TestCheckpointV2CannotClaimPhase1ClosureOrBeacon(t *testing.T) {
+	previous := phase1CheckpointSequence(t)[3]
+	previous.Schema = CheckpointSchemaV2
+	closed := phase1ClosedCheckpoint(t, previous)
+	closed.Schema = CheckpointSchemaV2
+	if err := closed.Validate(); err == nil || !strings.Contains(err.Error(), "require checkpoint v3") {
+		t.Fatalf("checkpoint v2 closure err=%v", err)
+	}
+
+	closed.Schema = CheckpointSchema
+	beacon := cloneCheckpoint(t, closed)
+	beacon.Schema = CheckpointSchemaV2
+	beacon.Phase1Beacon = func() *SignedArtifactRefs { value := checkpointSigned("legacy-beacon"); return &value }()
+	beacon.Transition = CheckpointTransition{Kind: CheckpointPhase1BeaconRecorded, Phase: Phase1, Record: beacon.Phase1Beacon,
+		Evidence: []ArtifactRef{checkpointArtifact("legacy-raw.json", "raw")}}
+	beacon.AcceptedArtifacts = appendCheckpointArtifacts(beacon.AcceptedArtifacts, beacon.Phase1Beacon.Record, beacon.Phase1Beacon.Signature, beacon.Transition.Evidence[0])
+	if err := beacon.Validate(); err == nil || !strings.Contains(err.Error(), "require checkpoint v3") {
+		t.Fatalf("checkpoint v2 beacon err=%v", err)
 	}
 }
 
@@ -249,7 +276,8 @@ func TestCheckpointPhase1LegalSequence(t *testing.T) {
 }
 
 func TestCheckpointPhase1ClosureIsOneWayAndExact(t *testing.T) {
-	previous := phase1CheckpointSequence(t)[3]
+	sequence := phase1CheckpointSequence(t)
+	previous := sequence[3]
 	next := phase1ClosedCheckpoint(t, previous)
 	if err := ValidateCheckpointTransition(previous, next); err != nil {
 		t.Fatalf("valid phase1 closure: %v", err)
@@ -287,6 +315,39 @@ func TestCheckpointPhase1ClosureIsOneWayAndExact(t *testing.T) {
 	if err := validateOutboundTransition(next, afterClose); err == nil || !strings.Contains(err.Error(), "after closure") {
 		t.Fatalf("phase1 turn after closure err=%v", err)
 	}
+
+	for _, index := range []int{1, 2} {
+		t.Run(fmt.Sprintf("allocated slot at checkpoint %d", index), func(t *testing.T) {
+			pending := sequence[index]
+			closure := phase1ClosedCheckpoint(t, pending)
+			if err := ValidateCheckpointTransition(pending, closure); err == nil || !strings.Contains(err.Error(), "still allocated") {
+				t.Fatalf("closure with allocated submission err=%v", err)
+			}
+		})
+	}
+
+	t.Run("second outbound while turn pending", func(t *testing.T) {
+		pending := sequence[1]
+		duplicate := cloneCheckpoint(t, pending)
+		duplicate.Sequence++
+		previousRef := checkpointReference(t, pending, "duplicate-outbound-parent")
+		duplicate.PreviousCheckpoint = &previousRef
+		record := checkpointSigned("duplicate-outbound")
+		duplicate.Transition = CheckpointTransition{
+			Kind: CheckpointPhase1OutboundPublished, Phase: Phase1, Index: 1,
+			ParticipantID: "participant-01", AttemptID: strings.Repeat("f", 32), Record: &record,
+		}
+		duplicate.AcceptedArtifacts = appendCheckpointArtifacts(duplicate.AcceptedArtifacts, record.Record, record.Signature)
+		duplicate.Submissions = append(duplicate.Submissions, CheckpointSubmissionSlot{
+			Kind: CheckpointSubmissionReceipt, Phase: Phase1, Index: 1,
+			IdentityID: "participant-01", AttemptID: strings.Repeat("f", 32),
+			ManifestKey: "submissions/duplicate/manifest.json", BasisCheckpointSHA256: previousRef.Record.Digest.SHA256,
+			ParentHeadID: pending.Phase1.HeadRecordID, Status: CheckpointSubmissionAllocated,
+		})
+		if err := ValidateCheckpointTransition(pending, duplicate); err == nil || !strings.Contains(err.Error(), "another submission attempt") {
+			t.Fatalf("duplicate outbound err=%v", err)
+		}
+	})
 }
 
 func phase1ClosedCheckpoint(t *testing.T, previous Checkpoint) Checkpoint {
