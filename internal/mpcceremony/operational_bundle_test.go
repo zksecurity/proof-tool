@@ -256,6 +256,31 @@ func TestVerifyOperationalEvidenceBundleEndToEndAndNegatives(t *testing.T) {
 			t.Fatal("tampered accepted output payload unexpectedly accepted")
 		}
 	})
+	for _, which := range []string{"genesis", "contribution"} {
+		t.Run("v3 missing "+which+" payload", func(t *testing.T) {
+			f := newOperationalBundleFixtureWithAssurance(t, &AssurancePolicy{})
+			if f.definition.Schema != DefinitionSchemaV3 {
+				t.Fatalf("test must retain released v3 semantics, got %s", f.definition.Schema)
+			}
+			if err := verify(f); err != nil {
+				t.Fatal(err)
+			}
+			var chain Chain
+			if _, err := readCanonicalFile(filepath.Join(f.root, f.bundle.Phase1.AcceptedChain.Record.Name), &chain); err != nil {
+				t.Fatal(err)
+			}
+			ref := chain.Genesis
+			if which == "contribution" {
+				ref = chain.Records[0].OutputPayload
+			}
+			if err := os.Remove(filepath.Join(f.root, ref.Name)); err != nil {
+				t.Fatal(err)
+			}
+			if err := verify(f); err == nil {
+				t.Fatal("v3 accepted missing historical payload")
+			}
+		})
+	}
 	t.Run("actor overlap witness", func(t *testing.T) {
 		f := newOperationalBundleFixture(t)
 		pair := f.bundle.Phase1.PublicWitnessReceipts[0]

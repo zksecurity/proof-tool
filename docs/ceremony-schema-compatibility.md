@@ -50,6 +50,14 @@ coordinator replay checkpoint, closed candidate inventory, signed/rederived
 bundle and checkpoint-derived audit quorum. It authenticates lifecycle records,
 verifies key exports and the public proof, but does not replay contributions or
 regenerate keys. Existing V1–V3 replay/verification gates are unchanged.
+V4 operational verification checks historical payload references through signed
+records rather than requiring the large genesis/contribution bytes themselves.
+It still checks all required custody, cleanup, enrollment, observer and beacon
+evidence. The final-review gate separately requires the coordinator replay claim;
+checking an operational bundle alone does not establish that replay. V1–V3
+continue requiring and hashing every historical payload. The review's sorted
+dependency list is tested by copying only those files and re-verifying from the
+copied definition and signature, without historical contribution binaries.
 Normal initialization still emits V3. Do not release this slice alone: remaining
 final-release authoring and the new release/decision verification path
 are incomplete. These tests are not the normal CLI journey or a full ceremony.

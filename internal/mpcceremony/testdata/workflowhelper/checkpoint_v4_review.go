@@ -34,6 +34,84 @@ func runCheckpointV4Review(root string, trust m.TrustPaths, d m.CeremonyDefiniti
 	if !bytes.Equal(rb, ab) || review.ReviewCheckpoint != headRefs || len(review.Audits) != int(d.AssurancePolicy.PassingCeremonyAudits) {
 		return fmt.Errorf("final review is not deterministic or exactly bound")
 	}
+	// Copy only the declared review dependencies, not the ceremony workspace.
+	// The real tiny fixture must still verify without its contribution payloads.
+	snapshot, err := os.MkdirTemp(filepath.Dir(root), "review-dependencies-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(snapshot)
+	for _, ref := range review.RequiredArtifacts {
+		raw, err := os.ReadFile(filepath.Join(root, ref.Name))
+		if err != nil {
+			return err
+		}
+		if m.NewDigest(raw) != ref.Digest {
+			return fmt.Errorf("review dependency has wrong bytes: %s", ref.Name)
+		}
+		destination := filepath.Join(snapshot, ref.Name)
+		if err := os.MkdirAll(filepath.Dir(destination), 0700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(destination, raw, 0600); err != nil {
+			return err
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(snapshot, d.Phase1Genesis.Name)); !os.IsNotExist(err) {
+		return fmt.Errorf("review dependency snapshot unexpectedly contains genesis payload: %v", err)
+	}
+	snapshotTrust := trust
+	snapshotTrust.DefinitionPath = filepath.Join(snapshot, head.Definition.Record.Name)
+	snapshotTrust.DefinitionSignaturePath = filepath.Join(snapshot, head.Definition.Signature.Name)
+	snapshotReview, err := m.VerifyReleaseReviewV4(snapshotTrust, snapshot, headRefs, bundle, at)
+	if err != nil {
+		return fmt.Errorf("exact dependency snapshot review: %w", err)
+	}
+	snapshotBytes, err := m.MarshalCanonical(snapshotReview)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(rb, snapshotBytes) {
+		return fmt.Errorf("dependency-only snapshot changed review")
+	}
+	var phase1 m.Chain
+	chainBytes, err := os.ReadFile(filepath.Join(snapshot, head.Progress.Phase1.Chain.Record.Name))
+	if err != nil {
+		return err
+	}
+	if err := m.UnmarshalCanonical(chainBytes, &phase1); err != nil {
+		return err
+	}
+	for _, record := range phase1.Records {
+		if _, err := os.Lstat(filepath.Join(snapshot, record.OutputPayload.Name)); !os.IsNotExist(err) {
+			return fmt.Errorf("snapshot unexpectedly contains historical contribution: %v", err)
+		}
+	}
+	var bundleRecord m.OperationalEvidenceBundle
+	bundleBytes, err := os.ReadFile(filepath.Join(snapshot, bundle.Record.Name))
+	if err != nil {
+		return err
+	}
+	if err := m.UnmarshalCanonical(bundleBytes, &bundleRecord); err != nil {
+		return err
+	}
+	for _, ref := range []m.ArtifactRef{headRefs.Signature, head.Definition.Record, head.Definition.Signature, bundle.Signature, phase1.Records[0].Attestation, phase1.Records[0].Erasure, bundleRecord.Phase1.AcceptedHeads[0].OutboundReceipt.Record, bundleRecord.Phase1.RawBeaconResponses[0]} {
+		file := filepath.Join(snapshot, ref.Name)
+		original, err := os.ReadFile(file)
+		if err != nil {
+			return err
+		}
+		if err := os.Remove(file); err != nil {
+			return err
+		}
+		_, rejected := m.VerifyReleaseReviewV4(snapshotTrust, snapshot, headRefs, bundle, at)
+		if err := os.WriteFile(file, original, 0600); err != nil {
+			return err
+		}
+		if rejected == nil {
+			return fmt.Errorf("missing dependency accepted in snapshot: %s", ref.Name)
+		}
+	}
 	renamedTrust := trust
 	renamedTrust.DefinitionPath = filepath.Join(root, "renamed-trusted-definition.json")
 	definitionBytes, err := os.ReadFile(trust.DefinitionPath)

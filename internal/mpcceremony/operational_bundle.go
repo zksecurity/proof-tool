@@ -133,7 +133,9 @@ func (p PhaseOperationalEvidence) Validate() error {
 // OperationalEvidenceBundle is the one canonical release input for
 // independently witnessed pre-beacon publication and multi-relay beacon
 // retrieval in both phases. Every referenced byte string is content-addressed
-// and resolved below one caller-supplied evidence root.
+// and resolved below one caller-supplied evidence root. Definition V4 verifies
+// historical payload references through signed records, not payload bytes;
+// its final review separately requires the coordinator's full-replay claim.
 type OperationalEvidenceBundle struct {
 	Schema            string                   `json:"schema"`
 	CeremonyID        string                   `json:"ceremony_id"`
@@ -282,6 +284,8 @@ type VerifiedOperationalEvidence struct {
 // authenticated close records, witness signatures/quorum/timing, every raw
 // relay response, the pinned drand verification policy, and contribution-bound
 // signed cleanup claims. These claims do not establish physical erasure.
+// V4 checks historical payload bindings, not presence or hashes of their bytes.
+// V1–V3 continue to require and hash every genesis/contribution payload.
 func VerifyOperationalEvidenceBundle(options VerifyOperationalEvidenceOptions) (VerifiedOperationalEvidence, error) {
 	if err := options.Definition.Validate(); err != nil {
 		return VerifiedOperationalEvidence{}, err
@@ -609,15 +613,20 @@ func verifyPhaseOperationalEvidence(
 		return nil, fmt.Errorf("accepted chain/close coherence: %w", err)
 	}
 	payloadRefs := make([]ArtifactRef, 0, len(chain.Records)+1)
-	if err := verifyLargeOperationalArtifact(root, chain.Genesis); err != nil {
-		return nil, fmt.Errorf("accepted chain genesis: %w", err)
-	}
-	payloadRefs = append(payloadRefs, chain.Genesis)
-	for index, record := range chain.Records {
-		if err := verifyLargeOperationalArtifact(root, record.OutputPayload); err != nil {
-			return nil, fmt.Errorf("accepted head %d output payload: %w", index+1, err)
+	// Only the signed V4 trust model delegates full contribution replay to the
+	// coordinator. All signed metadata and custody checks below still apply.
+	// This is not a caller-selectable option and does not relax legacy formats.
+	if definition.Schema != DefinitionSchemaV4 {
+		if err := verifyLargeOperationalArtifact(root, chain.Genesis); err != nil {
+			return nil, fmt.Errorf("accepted chain genesis: %w", err)
 		}
-		payloadRefs = append(payloadRefs, record.OutputPayload)
+		payloadRefs = append(payloadRefs, chain.Genesis)
+		for index, record := range chain.Records {
+			if err := verifyLargeOperationalArtifact(root, record.OutputPayload); err != nil {
+				return nil, fmt.Errorf("accepted head %d output payload: %w", index+1, err)
+			}
+			payloadRefs = append(payloadRefs, record.OutputPayload)
+		}
 	}
 	acceptedHeadIDs := make([]string, len(chain.Records))
 	for index, record := range chain.Records {

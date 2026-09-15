@@ -19,6 +19,7 @@ type ReleaseReviewV4 struct {
 	ReviewCheckpoint         SignedArtifactRefs             `json:"review_checkpoint"`
 	FinalCandidateCheckpoint SignedArtifactRefs             `json:"final_candidate_checkpoint"`
 	CandidateArtifacts       []ArtifactRef                  `json:"candidate_artifacts"`
+	RequiredArtifacts        []ArtifactRef                  `json:"required_artifacts"`
 	OperationalBundle        SignedArtifactRefs             `json:"operational_bundle"`
 	Audits                   []SignedArtifactRefs           `json:"audits"`
 	ReplayVerification       CheckpointReplayVerificationV4 `json:"replay_verification"`
@@ -39,6 +40,12 @@ func (r ReleaseReviewV4) Validate() error {
 	}
 	if len(r.CandidateArtifacts) == 0 {
 		return errors.New("review requires exact candidate files")
+	}
+	if len(r.RequiredArtifacts) == 0 {
+		return errors.New("review requires exact dependency files")
+	}
+	if err := validateV4ArtifactSet(r.RequiredArtifacts, maxReleaseReviewArtifactsV4); err != nil {
+		return err
 	}
 	if r.Audits == nil {
 		return errors.New("review requires explicit audits")
@@ -164,7 +171,8 @@ func VerifyReleaseReviewV4(trust TrustPaths, artifactRoot string, head, bundleRe
 	if !bytes.Equal(canonical, bb) {
 		return ReleaseReviewV4{}, errors.New("signed bundle does not match the exact review checkpoint")
 	}
-	if _, err := verifyReleaseOperationalEvidence(d, trusted.CoordinatorPublicKey, candidate, reader.path, filepath.Join(reader.path, bundleRefs.Record.Name), filepath.Join(reader.path, bundleRefs.Signature.Name), releasedAt); err != nil {
+	operational, err := verifyReleaseOperationalEvidence(d, trusted.CoordinatorPublicKey, candidate, reader.path, filepath.Join(reader.path, bundleRefs.Record.Name), filepath.Join(reader.path, bundleRefs.Signature.Name), releasedAt)
+	if err != nil {
 		return ReleaseReviewV4{}, err
 	}
 	enrollments, err := loadCheckpointEnrollmentsV4(reader, d, db, a.enrollments)
@@ -181,6 +189,10 @@ func VerifyReleaseReviewV4(trust TrustPaths, artifactRoot string, head, bundleRe
 		return ReleaseReviewV4{}, err
 	}
 	result := ReleaseReviewV4{CeremonyID: d.CeremonyID, ReviewCheckpoint: head, FinalCandidateCheckpoint: *a.finalCandidateCheckpoint, CandidateArtifacts: inventory, OperationalBundle: bundleRefs, Audits: audits, ReplayVerification: *final.Transition.ReplayVerification, ReleasedAt: releasedAt.Format(time.RFC3339Nano)}
+	result.RequiredArtifacts, err = releaseReviewDependenciesV4(reader, a, inventory, bundleRefs, operational.Verified.ReferencedArtifacts, audits)
+	if err != nil {
+		return ReleaseReviewV4{}, err
+	}
 	if err := result.Validate(); err != nil {
 		return ReleaseReviewV4{}, err
 	}
