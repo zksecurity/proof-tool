@@ -271,16 +271,16 @@ command:
 			"contribute": {}, "help": {}, "init": {}, "verify": {},
 		},
 		"decision":   {"help": {}, "prepare": {}, "sign": {}, "verify": {}},
-		"checkpoint": {"help": {}, "prepare": {}, "sign": {}, "verify": {}, "verify-stored": {}, "prepare-v4": {}, "sign-v4": {}, "verify-stored-v4": {}},
+		"checkpoint": {"help": {}, "prepare": {}, "sign": {}, "verify": {}, "verify-stored": {}, "prepare-v4": {}, "sign-v4": {}, "verify-stored-v4": {}, "verify-release-v4": {}},
 		"inspect": {
 			"chain": {}, "checkpoint": {}, "checkpoint-transition": {}, "definition": {}, "enrollment": {}, "help": {}, "participant": {},
 		},
 		"ops": {
 			"export-signing": {}, "help": {}, "import-signature": {}, "sign": {}, "prepare-enrollment": {}, "prepare-handoff": {}, "prepare-receipt": {},
-			"prepare-mirror-receipt": {}, "prepare-public-witness-receipt": {}, "prepare-bundle": {}, "verify": {},
+			"prepare-mirror-receipt": {}, "prepare-public-witness-receipt": {}, "prepare-bundle": {}, "prepare-bundle-v4": {}, "sign-bundle-v4": {}, "verify": {},
 		},
 		"finalize":  {"prepare": {}, "complete": {}, "rehearsal-evidence": {}},
-		"release":   {"help": {}, "sign": {}, "verify": {}},
+		"release":   {"help": {}, "sign": {}, "verify": {}, "review-v4": {}},
 		"rehearsal": {"help": {}, "init": {}},
 	}
 	allowed, hasSubcommands := subcommands[args[index]]
@@ -348,7 +348,7 @@ func markOperationalGrammar(args []string, safe map[int]struct{}) {
 	for index, arg := range args {
 		switch arg {
 		case "--related-record", "--record-type", "--reviewed-sha256", "--evidence-root",
-			"--release-verification", "--review-checkpoint", "--review-checkpoint-signature", "--proposal", "--rejected-candidate-dir":
+			"--release-verification", "--review-checkpoint", "--review-checkpoint-signature", "--proposal", "--rejected-candidate-dir", "--assembled-at", "--inventory-out":
 			safe[index] = struct{}{}
 		}
 		if index > 0 && args[index-1] == "--record-type" {

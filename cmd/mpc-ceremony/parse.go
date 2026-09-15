@@ -576,6 +576,11 @@ func parseOps(invocation Invocation, args []string) (Invocation, error) {
 		options, err := parseOpsPrepareBundle(args[1:])
 		invocation.Command, invocation.Options = CommandOpsPrepareBundle, options
 		return invocation, wrapCommandError(err, "ops", "prepare-bundle")
+	case "prepare-bundle-v4", "sign-bundle-v4":
+		invocation.Command = Command("ops " + args[0])
+		options, err := parseEvidenceV4(invocation.Command, args[1:])
+		invocation.Options = options
+		return invocation, wrapCommandError(err, "ops", args[0])
 	case "prepare-public-witness-receipt":
 		options, err := parseOpsPreparePublicWitnessReceipt(args[1:])
 		invocation.Command, invocation.Options = CommandOpsPreparePublicWitnessReceipt, options
@@ -829,6 +834,10 @@ func parseRelease(invocation Invocation, args []string) (Invocation, error) {
 		return Invocation{}, &helpRequest{topic: append([]string{"release"}, args[1:]...)}
 	}
 	switch args[0] {
+	case "review-v4":
+		options, err := parseEvidenceV4(CommandReleaseReviewV4, args[1:])
+		invocation.Command, invocation.Options = CommandReleaseReviewV4, options
+		return invocation, wrapCommandError(err, "release", args[0])
 	case "sign":
 		options, err := parseReleaseSign(args[1:])
 		invocation.Command, invocation.Options = CommandReleaseSign, options

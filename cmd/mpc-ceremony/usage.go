@@ -269,9 +269,20 @@ Authenticates retained checkpoint ancestry and legal metadata transitions.
 This does not verify every referenced artifact, the final release package,
 contribution mathematics, or whether a newer head exists on the delivery service.
 `,
+	"checkpoint verify-release-v4": `Usage:
+  mpc-ceremony checkpoint verify-release-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE --inventory-out FRESH_FILE
+
+Verifies the exact final-release checkpoint and complete private package, including
+required evidence and the coordinator replay binding. The bounded inventory is an
+unsigned local report with package-relative names, not a trusted download list.
+No contribution replay, global freshness, production approval or publication is
+performed. Keep the report outside final/candidate and final/release.
+`,
 	"checkpoint": `Usage:
   mpc-ceremony checkpoint <prepare|sign|verify|verify-stored> [flags]
-  mpc-ceremony checkpoint <prepare-v4|sign-v4|verify-stored-v4> [flags]
+  mpc-ceremony checkpoint <prepare-v4|sign-v4|verify-stored-v4|verify-release-v4> [flags]
 
 Legacy storage-first checkpoint operations re-authenticate
 the exact signed definition, predecessor, both phase chains and all records
@@ -603,9 +614,23 @@ two-phase replay. It emits a signed passing record only after reproducing the
 candidate's native keys, Cardano export, and coherence evidence.
 `,
 	"release": `Usage:
-  mpc-ceremony release <sign|verify> [flags]
+  mpc-ceremony release <sign|verify|review-v4> [flags]
 
 Release authenticity is separate from MPC contribution identity.
+`,
+	"release review-v4": `Usage:
+  mpc-ceremony release review-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE \
+    --operational-bundle DIR/operational/evidence-bundle.json \
+    --operational-bundle-signature DIR/operational/evidence-bundle.sig \
+    --released-at RFC3339_UTC --out FRESH_FILE
+
+Checks the exact unreleased checkpoint, candidate, bundle, required evidence and
+coordinator replay binding. Writes an unsigned bounded local review report;
+release sign does not accept this report as input and recomputes the review.
+No contribution replay or publication occurs. Keep the report outside the
+closed final/candidate and final/release directories. Parent must exist.
 `,
 	"release sign": `Usage:
   mpc-ceremony release sign --ceremony FILE --ceremony-signature FILE \
@@ -701,6 +726,7 @@ proof that the reported real-world actions happened.
 `,
 	"ops": `Usage:
   mpc-ceremony ops <prepare-public-witness-receipt|prepare-mirror-receipt|export-signing|import-signature|verify> [flags]
+  mpc-ceremony ops <prepare-bundle-v4|sign-bundle-v4> [flags]
 
 Operational records cover proof-of-possession enrollment, transfers and
 receipts, immutable mirrors, pre-beacon public witnesses, multi-operator relay
@@ -786,6 +812,31 @@ The reviewed hash binds signing to bytes previously shown by a helper. It is
 required for handoff, receipt, beacon-evidence and evidence-bundle signing.
 Run ops verify afterwards; receipts require --related-record and bundles require
 --evidence-root. A signature alone does not verify a complete ceremony.
+Definition V4 evidence bundles require ops sign-bundle-v4 instead.
+`,
+	"ops prepare-bundle-v4": `Usage:
+  mpc-ceremony ops prepare-bundle-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE --assembled-at RFC3339_UTC \
+    --out DIR/operational/evidence-bundle.json
+
+Derives an unsigned bundle only from this exact authenticated V4 checkpoint and
+verifies its required operational evidence. The operational directory must exist
+and be real; output must be fresh. Keep the exact checkpoint pair for signing.
+No contribution replay, release approval or publication occurs.
+`,
+	"ops sign-bundle-v4": `Usage:
+  mpc-ceremony ops sign-bundle-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE \
+    --operational-bundle DIR/operational/evidence-bundle.json \
+    --coordinator-signing-key KEY --reviewed --reviewed-sha256 HEX \
+    --out DIR/operational/evidence-bundle.sig
+
+Review the canonical bundle first. Before loading the coordinator key, rederives
+the bundle against this exact checkpoint and its saved assembly time, and requires
+identical reviewed bytes. The signature output must be fresh in the existing real
+operational directory. This is not final release approval or global freshness.
 `,
 	"ops prepare-bundle": `Usage:
   mpc-ceremony ops prepare-bundle --ceremony FILE --ceremony-signature FILE \
@@ -804,6 +855,7 @@ If complete, independently verifies all referenced evidence and exports an
 UNSIGNED canonical bundle and signing request. It does not invent records,
 backdate observations, or sign for other roles. Release still requires the
 coordinator's bundle signature and successful signed-bundle verification.
+Definition V4 requires ops prepare-bundle-v4 with an exact checkpoint instead.
 `,
 	"ops export-signing": `Usage:
   mpc-ceremony ops export-signing --record-type TYPE --record FILE \
@@ -812,6 +864,8 @@ coordinator's bundle signature and successful signed-bundle verification.
 
 Strictly verifies the canonical record and ceremony binding, then exports
 canonical.json and signing-request.json. No private signing key is read.
+Definition V4 evidence bundles must use ops sign-bundle-v4; this legacy export
+does not bind an exact checkpoint.
 `,
 	"ops import-signature": `Usage:
   mpc-ceremony ops import-signature --record-type TYPE --canonical FILE \
@@ -822,6 +876,7 @@ canonical.json and signing-request.json. No private signing key is read.
 Accepts 64 raw signature bytes or 128 lowercase hex characters, verifies the
 offline Ed25519 signature over exact canonical bytes and signer identity, then
 writes the repository detached-signature format without replacement.
+Definition V4 evidence bundles require ops sign-bundle-v4 with an exact checkpoint.
 `,
 	"ops verify": `Usage:
   mpc-ceremony ops verify --record-type TYPE --record FILE --signature FILE \
@@ -832,7 +887,9 @@ writes the repository detached-signature format without replacement.
 Authenticates canonical bytes, immutable ceremony fields, enrolled signer, and
 detached signature. Receipt verification requires the exact related handoff.
 Evidence-bundle verification requires the complete local evidence root and
-validates both authenticated chains, every custody transfer, independent
-mirrors and public witnesses, and at least two distinct beacon relay operators.
+validates both authenticated chains, required custody, mirror and witness records,
+and the required beacon relay evidence. It does not prove independent operators.
+For V4 it does not establish equivalence to a particular checkpoint or authorize
+release; use release review-v4 for the exact pre-release review.
 `,
 }

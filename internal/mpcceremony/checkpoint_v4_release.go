@@ -24,6 +24,26 @@ func (i FinalReleaseInventoryV4) PackagePrefix() string { return i.prefix }
 // Artifacts returns a copy; callers cannot change the verified membership.
 func (i FinalReleaseInventoryV4) Artifacts() []ArtifactRef { return slices.Clone(i.artifacts) }
 
+// ValidateFinalReleaseInventoryArtifactsV4 checks a package-relative inventory's
+// shape only. It does not authenticate any files or turn a report into authority.
+func ValidateFinalReleaseInventoryArtifactsV4(artifacts []ArtifactRef) error {
+	if len(artifacts) == 0 {
+		return errors.New("final release inventory must not be empty")
+	}
+	if err := validateV4ArtifactSet(artifacts, maxReleaseReviewArtifactsV4+5); err != nil {
+		return err
+	}
+	for _, ref := range artifacts {
+		if err := validatePortableStorageName(ref.Name); err != nil {
+			return err
+		}
+		if strings.HasPrefix(ref.Name, FinalReleasePackagePrefixV4) {
+			return errors.New("release inventory must use package-relative artifact names")
+		}
+	}
+	return nil
+}
+
 // Location returns the ceremony-relative location only for an exact inventory
 // member. The transport must additionally enforce its own object-key limit.
 func (i FinalReleaseInventoryV4) Location(ref ArtifactRef) (string, error) {
@@ -162,6 +182,9 @@ func verifyFinalReleasePackageV4(trust TrustPaths, root string, c CheckpointV4) 
 		}
 	}
 	if err := verifyExactReleaseFiles(dir, names, true); err != nil {
+		return nil, empty, err
+	}
+	if err := ValidateFinalReleaseInventoryArtifactsV4(inventory.artifacts); err != nil {
 		return nil, empty, err
 	}
 	return result, inventory, nil

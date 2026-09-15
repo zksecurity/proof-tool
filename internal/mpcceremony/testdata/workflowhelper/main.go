@@ -104,6 +104,16 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		}
 	}
 
+	// Test-only companion CLI: a distinct architecture variant lets integration
+	// tests exercise the real command executable without changing this helper's
+	// own approved identity. All normal allowlist checks still apply.
+	if binary := os.Getenv("MPC_WORKFLOW_ALLOWED_CLI"); binary != "" {
+		software, err = mpcceremony.SoftwareBindingWithAllowedBinaryFiles(software, prover.ProofToolVersion, mpcceremony.ModeRehearsal, []string{binary})
+		if err != nil {
+			return fmt.Errorf("bind test companion CLI: %w", err)
+		}
+	}
+
 	if err := os.Mkdir(outputRoot, 0o700); err != nil {
 		return err
 	}

@@ -118,6 +118,26 @@ including symlink aliases. Private rejected candidates must be disjoint from
 the public artifact root. Existing output files are retained for inspection.
 These tests are not a complete user ceremony.
 
+The explicit V4 evidence commands bind bundle preparation and signing to an
+exact checkpoint pair; signing rederives the reviewed canonical bytes before
+loading the coordinator key. Outputs use the canonical operational bundle paths,
+and legacy bundle preparation/signing rejects V4. `release review-v4` writes a
+bounded unsigned local report; signing recomputes the review and does not accept
+that report as authority. `checkpoint verify-release-v4` verifies the complete
+private package and exports a bounded, package-relative inventory report. That
+report is not a trusted download list or a production authorization. The delivery
+tool must use authenticated bootstrap files and rerun verification after download.
+Both reports stay outside the closed candidate and release trees. Ordinary record
+and signature bounds remain 16 MiB and 4 KiB; only these large local reports use
+64 MiB. The Linux ARM64 integration invokes the actual approved CLI against real
+tiny artifacts, using a helper and command binary with distinct approved ARM64
+feature variants. A modified command executable fails before output or key access.
+The test uses known local keys and historical beacon responses, not independent
+operators or a live storage journey. Legacy bundle export/import also rejects V4;
+generic bundle verification explicitly does not establish exact-head equivalence.
+Inventory reports have strict canonical shape/claim validation, which does not
+make them trusted authority. A full released CLI journey is still required.
+
 - Reserve Definition V4, Checkpoint V4 and `storage-first-v2` for the changed
   trust and submission rules; do not emit them until the whole verifier path
   exists and has negative tests.

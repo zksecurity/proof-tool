@@ -54,6 +54,11 @@ func TestReleaseV4ExecutableAuthenticatesBeforeDispatch(t *testing.T) {
 	v4args := append(append([]string{}, common...), "--review-checkpoint", filepath.Join(root, "head.json"), "--review-checkpoint-signature", filepath.Join(root, "head.sig"))
 	writeDefinition(false)
 	assertCheckpointExecutableFails(t, executable, v4args, "requires definition v4")
+	for _, command := range []Command{CommandOpsPrepareBundleV4, CommandOpsSignBundleV4, CommandReleaseReviewV4, CommandCheckpointVerifyReleaseV4} {
+		args := evidenceArgsV4(command)
+		copy(args[:6], trust)
+		assertCheckpointExecutableFails(t, executable, append(strings.Split(string(command), " "), args...), "require definition v4")
+	}
 	legacy := append(append([]string{}, common...), "--candidate-bundle", root)
 	for _, flag := range []string{"--transcript-root", "--phase1-chain", "--phase1-chain-signature", "--phase1-close", "--phase1-close-signature", "--phase1-beacon", "--phase1-beacon-signature", "--phase1-seal", "--phase1-seal-signature", "--phase2-chain", "--phase2-chain-signature", "--phase2-close", "--phase2-close-signature", "--phase2-beacon", "--phase2-beacon-signature"} {
 		legacy = append(legacy, flag, root)

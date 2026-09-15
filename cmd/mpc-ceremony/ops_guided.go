@@ -152,6 +152,9 @@ func executeOpsSign(o OpsSignOptions) (CommandResult, error) {
 		return CommandResult{}, errors.New("record changed since owner review")
 	}
 	if bundle, ok := record.(*mpcceremony.OperationalEvidenceBundle); ok {
+		if trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+			return CommandResult{}, errors.New("definition v4 requires ops sign-bundle-v4 with an exact checkpoint pair")
+		}
 		if err := verifyBundleDraft(trusted, o.EvidenceRoot, canonical, *bundle); err != nil {
 			return CommandResult{}, fmt.Errorf("bundle evidence must verify before accessing the signing key: %w", err)
 		}

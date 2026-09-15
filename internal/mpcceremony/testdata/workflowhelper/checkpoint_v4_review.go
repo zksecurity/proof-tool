@@ -40,7 +40,11 @@ func runCheckpointV4Review(root string, trust m.TrustPaths, d m.CeremonyDefiniti
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(snapshot)
+	// Command integration tests may retain this public-only verified branch in
+	// their own temporary workspace. Normal helper runs still remove it.
+	if os.Getenv("MPC_WORKFLOW_RETAIN_REVIEW") != "1" {
+		defer os.RemoveAll(snapshot)
+	}
 	for _, ref := range review.RequiredArtifacts {
 		raw, err := os.ReadFile(filepath.Join(root, ref.Name))
 		if err != nil {

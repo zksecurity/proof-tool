@@ -39,11 +39,14 @@ const (
 	CommandReplay                           Command = "replay"
 	CommandReleaseSign                      Command = "release sign"
 	CommandReleaseVerify                    Command = "release verify"
+	CommandReleaseReviewV4                  Command = "release review-v4"
 	CommandOpsPrepareMirrorReceipt          Command = "ops prepare-mirror-receipt"
 	CommandOpsPreparePublicWitnessReceipt   Command = "ops prepare-public-witness-receipt"
 	CommandOpsExportSigning                 Command = "ops export-signing"
 	CommandOpsPrepareEnrollment             Command = "ops prepare-enrollment"
 	CommandOpsPrepareBundle                 Command = "ops prepare-bundle"
+	CommandOpsPrepareBundleV4               Command = "ops prepare-bundle-v4"
+	CommandOpsSignBundleV4                  Command = "ops sign-bundle-v4"
 	CommandOpsSign                          Command = "ops sign"
 	CommandOpsImportSig                     Command = "ops import-signature"
 	CommandOpsVerify                        Command = "ops verify"
@@ -67,6 +70,7 @@ const (
 	CommandCheckpointPrepareV4              Command = "checkpoint prepare-v4"
 	CommandCheckpointSignV4                 Command = "checkpoint sign-v4"
 	CommandCheckpointVerifyStoredV4         Command = "checkpoint verify-stored-v4"
+	CommandCheckpointVerifyReleaseV4        Command = "checkpoint verify-release-v4"
 )
 
 type SubmissionSignOptions struct {
@@ -651,6 +655,7 @@ type CommandResult struct {
 	CheckpointTransitionInspection      *CheckpointTransitionInspection      `json:"checkpoint_transition_inspection,omitempty"`
 	CheckpointEvidenceInspection        *CheckpointEvidenceInspection        `json:"checkpoint_evidence_inspection,omitempty"`
 	CheckpointInspectionV4              *CheckpointInspectionV4              `json:"checkpoint_inspection_v4,omitempty"`
+	EvidenceInspectionV4                *EvidenceInspectionV4                `json:"evidence_inspection_v4,omitempty"`
 	SubmissionInspection                *SubmissionInspection                `json:"submission_inspection,omitempty"`
 	SubmissionAcknowledgementInspection *SubmissionAcknowledgementInspection `json:"submission_acknowledgement_inspection,omitempty"`
 	JourneyInspection                   *JourneyInspection                   `json:"journey_inspection,omitempty"`
