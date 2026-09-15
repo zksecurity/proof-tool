@@ -603,13 +603,17 @@ entropy quality, erasure, public witnessing, mirrors, or attendance.
 `,
 	"decision prepare": `Usage:
   mpc-ceremony decision prepare --ceremony FILE --ceremony-signature FILE \
-    --coordinator-public-key-file KEY --draft FILE --out FRESH_FILE
+    --coordinator-public-key-file KEY --draft FILE --out FRESH_FILE \
+    [--evidence-root DIR]
 
 Strictly parses a production decision draft matching the authenticated
 ceremony schema, derives
 the release_id and decision_id, and checks ceremony, source, exact K=21
 circuit, and signer-role bindings. The fresh output is the only byte string
 the accountable roles should sign.
+Definition V4 requires --evidence-root and verifies its complete local release
+package and decision evidence before writing. Keep --out outside final/release.
+Older definitions do not accept this preparation flag.
 `,
 	"decision sign": `Usage:
   mpc-ceremony decision sign --ceremony FILE --ceremony-signature FILE \
@@ -623,9 +627,10 @@ A GO record requires the coordinator, every auditor named by the record,
 and the distinct release signer to sign the same bytes — one signature per
 named auditor, so a ceremony with three auditors needs five signatures. Before loading a GO
 signing key, the command hashes and semantically verifies the full local
-evidence set. Evidence verification is optional for a NO-GO record so an
-accountable role can sign a fail-closed decision that reports unavailable
-evidence.
+evidence set. Definition V4 requires verified evidence for both GO and post-package
+NO-GO; use the authenticated abort procedure for an earlier stop without a package.
+Keep --out outside final/release. Older definitions retain optional evidence
+verification for NO-GO records reporting unavailable evidence.
 `,
 	"decision verify": `Usage:
   mpc-ceremony decision verify --ceremony FILE --ceremony-signature FILE \
@@ -635,8 +640,12 @@ evidence.
 
 Strictly parses the record and detached role signatures, hashes every local
 evidence artifact, checks release/candidate/transcript/operational/audit
-coherence, and fail-closes GO unless all gates PASS and all four roles signed.
-Evidence URIs are content bindings only; the command performs no network fetch.
+coherence. GO requires every applicable gate to PASS and signatures from the
+coordinator, release signer and every required ceremony auditor. Disabled optional
+gates must explicitly be NOT_REQUIRED. V4 evidence uses local logical names;
+legacy evidence URIs are content bindings only. No network fetch or publication
+occurs. Verification of external reports binds reviewed claims, not independent
+proof that the reported real-world actions happened.
 `,
 	"ops": `Usage:
   mpc-ceremony ops <prepare-public-witness-receipt|prepare-mirror-receipt|export-signing|import-signature|verify> [flags]

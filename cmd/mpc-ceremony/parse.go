@@ -472,9 +472,15 @@ func parseDecisionPrepare(args []string) (DecisionPrepareOptions, error) {
 		&options.CoordinatorPublicKeyFile,
 	)
 	fs.StringVar(&options.DraftPath, "draft", "", "canonical production-decision draft JSON")
+	fs.StringVar(&options.EvidenceRoot, "evidence-root", "", "required local evidence root for definition v4")
 	fs.StringVar(&options.OutPath, "out", "", "fresh canonical content-addressed decision output")
 	if err := parseFlags(fs, args); err != nil {
 		return options, err
+	}
+	if options.EvidenceRoot != "" {
+		if err := validatePathValue("--evidence-root", options.EvidenceRoot); err != nil {
+			return options, err
+		}
 	}
 	return options, requireValues(
 		pathValue("--ceremony", options.CeremonyPath),

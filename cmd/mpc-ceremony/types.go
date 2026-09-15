@@ -586,6 +586,7 @@ type DecisionPrepareOptions struct {
 	CeremonySignaturePath    string
 	CoordinatorPublicKeyFile string
 	DraftPath                string
+	EvidenceRoot             string
 	OutPath                  string
 }
 

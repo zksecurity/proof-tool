@@ -87,8 +87,15 @@ definition exactly. Legacy decision structs, gates and hash domains are unchange
 Current tests cover the new record/binding/signature/evidence rules and reject a
 missing package. A full public-API positive with a real K21 package is pending;
 these tests do not establish an actual production GO or operational assurances.
+Decision prepare/sign/verify now dispatch from the authenticated definition.
+V4 requires a local evidence root even for post-package NO-GO, checks evidence
+before loading the signing key, and keeps decision outputs outside the immutable
+release package. Early stops use the existing authenticated abort procedure.
+Old decision behavior remains unchanged; only V4 accepts evidence-root during
+preparation. CLI tests cover signed format dispatch, missing roots, evidence
+failure before key loading, and output containment including symlink aliases.
 Normal initialization still emits V3. Do not release this slice alone: remaining
-production decision CLI/integration and normal CLI guidance are incomplete.
+production integration and normal storage-first CLI guidance are incomplete.
 These tests are not a complete user ceremony.
 
 - Reserve Definition V4, Checkpoint V4 and `storage-first-v2` for the changed
