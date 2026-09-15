@@ -287,29 +287,45 @@ func VerifySignedCheckpointV4(d CeremonyDefinition, definitionBytes, definitionS
 	if err := VerifySignedRecord(checkpointBytes, signature, &c, d.Coordinator.KeyID, key); err != nil {
 		return CheckpointV4{}, err
 	}
+	if err := validateCheckpointDefinitionBindingV4(d, definitionBytes, definitionSignature, c); err != nil {
+		return CheckpointV4{}, err
+	}
+	return c, nil
+}
+
+func validateCheckpointDefinitionBindingV4(d CeremonyDefinition, definitionBytes, definitionSignature []byte, c CheckpointV4) error {
+	if err := d.Validate(); err != nil {
+		return err
+	}
+	if d.Schema != DefinitionSchemaV4 {
+		return errors.New("checkpoint v4 requires definition v4")
+	}
+	if err := c.Validate(); err != nil {
+		return err
+	}
 	if c.CeremonyID != d.CeremonyID || c.Definition.Record.Digest != NewDigest(definitionBytes) || c.Definition.Signature.Digest != NewDigest(definitionSignature) || !reflect.DeepEqual(c.AssurancePolicy, d.AssurancePolicy) || c.ReleaseVerification != d.ReleaseVerification {
-		return CheckpointV4{}, errors.New("checkpoint changed its exact definition or signed policy")
+		return errors.New("checkpoint changed its exact definition or signed policy")
 	}
 	for _, slot := range c.Deliveries {
 		if err := slot.Scope.ValidateAssignment(d); err != nil {
-			return CheckpointV4{}, err
+			return err
 		}
 	}
 	if c.Transition.Scope != nil {
 		if err := c.Transition.Scope.ValidateAssignment(d); err != nil {
-			return CheckpointV4{}, err
+			return err
 		}
 	}
 	if int(c.Progress.Phase1.AcceptedCount) > len(d.Phase1Policy.Participants) || c.Progress.Phase2 != nil && int(c.Progress.Phase2.AcceptedCount) > len(d.Phase2Policy.Participants) {
-		return CheckpointV4{}, errors.New("checkpoint contribution count exceeds signed schedule")
+		return errors.New("checkpoint contribution count exceeds signed schedule")
 	}
 	if c.Progress.Phase1Closure != nil && c.Progress.Phase1.AcceptedCount < d.Phase1Policy.Minimum || c.Progress.Phase2Closure != nil && c.Progress.Phase2.AcceptedCount < d.Phase2Policy.Minimum {
-		return CheckpointV4{}, errors.New("closure precedes required contribution minimum")
+		return errors.New("closure precedes required contribution minimum")
 	}
 	if c.Sequence == 0 && c.Progress.Phase1.HeadPayload != d.Phase1Genesis {
-		return CheckpointV4{}, errors.New("initial checkpoint changed definition genesis payload")
+		return errors.New("initial checkpoint changed definition genesis payload")
 	}
-	return c, nil
+	return nil
 }
 
 func (p CheckpointProgressV4) currentTurn(scope ContributionScope) error {
