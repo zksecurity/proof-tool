@@ -416,6 +416,47 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 		return err
 	}
 	raw := filepath.Join(output, "quicknet-v4-42.json")
+	if d.AssurancePolicy.PublicWitnessesPerPhase > 0 {
+		witnessKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0xa1}, 32))
+		witness, err := m.NewIdentity("witness-01", "Fixture witness", "witness-key", witnessKey.Public().(ed25519.PublicKey))
+		if err != nil {
+			return err
+		}
+		if err = os.MkdirAll(filepath.Join(root, "enrollments/witness-01"), 0700); err != nil {
+			return err
+		}
+		wdName := "enrollments/witness-01/disclosure.txt"
+		if err = os.WriteFile(filepath.Join(root, wdName), []byte("One-process witness fixture, not independent observation.\n"), 0600); err != nil {
+			return err
+		}
+		wd, err := ref(wdName)
+		if err != nil {
+			return err
+		}
+		wr, err := m.NewEnrollmentRecord(d, db, witness, m.EnrollmentPublicWitness, 1, wd, "2023-08-23T15:00:32Z")
+		if err != nil {
+			return err
+		}
+		wrRefs, err := writePair("enrollments/witness-01/record", wr, witness.KeyID, witnessKey)
+		if err != nil {
+			return err
+		}
+		next(m.CheckpointTransitionV4{Kind: m.CheckpointEnrollmentRecorded, Record: &wrRefs, Evidence: []m.ArtifactRef{wd}})
+		if err = commit(); err != nil {
+			return err
+		}
+		receipt := m.PublicWitnessReceipt{Schema: m.PublicWitnessReceiptSchema, CeremonyID: d.CeremonyID, Phase: m.Phase1, CloseID: closure.CloseID, ChainHeadID: closure.ChainHeadID, Closure: closureRefs.Record, BeaconRound: 42, BeaconScheduledAt: roundTime.Format(time.RFC3339Nano), PublicationLocationSHA: m.NewDigest([]byte("fixture publication")).SHA256, Witness: witness, ObservedAt: "2023-08-23T15:06:30Z"}
+		wrRefs, err = writePair("witnesses/phase1", receipt, witness.KeyID, witnessKey)
+		if err != nil {
+			return err
+		}
+		if os.Getenv("MPC_WORKFLOW_SKIP_WITNESS") != "1" {
+			next(m.CheckpointTransitionV4{Kind: m.CheckpointWitnessRecorded, Record: &wrRefs, Evidence: []m.ArtifactRef{}})
+			if err = commit(); err != nil {
+				return err
+			}
+		}
+	}
 	if err = os.WriteFile(raw, []byte(quicknetRound42), 0600); err != nil {
 		return err
 	}
@@ -444,6 +485,33 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 	c.Progress.Phase1Beacon = &beaconRefs
 	if err = commit(); err != nil {
 		return err
+	}
+	beaconEvidence := m.MultiRelayBeaconEvidence{Schema: m.MultiRelayBeaconEvidenceSchema, CeremonyID: d.CeremonyID, Phase: m.Phase1, CloseID: closure.CloseID, BeaconRound: 42, Provider: d.BeaconPolicy.Provider, Network: d.BeaconPolicy.Network, CoordinatorID: d.Coordinator.ID, CoordinatorKeyID: d.Coordinator.KeyID, RecordedAt: "2023-08-23T15:11:30Z"}
+	rawRefs := []m.ArtifactRef{}
+	for _, id := range []string{"fixture-a", "fixture-b"} {
+		name := "phase1/beacon-evidence/" + id + ".json"
+		if err = os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0700); err != nil {
+			return err
+		}
+		if err = os.WriteFile(filepath.Join(root, name), []byte(quicknetRound42), 0600); err != nil {
+			return err
+		}
+		rr, err := ref(name)
+		if err != nil {
+			return err
+		}
+		rawRefs = append(rawRefs, rr)
+		beaconEvidence.Observations = append(beaconEvidence.Observations, m.RelayObservation{RelayID: id, OperatorID: id, EndpointSHA256: m.NewDigest([]byte(id)).SHA256, RawResponse: rr, RetrievedAt: "2023-08-23T15:11:30Z", VerifiedRandomness: beacon.Beacon.RandomnessHex})
+	}
+	beRefs, err := writePair("phase1/beacon-evidence/record", beaconEvidence, d.Coordinator.KeyID, coordinator)
+	if err != nil {
+		return err
+	}
+	if os.Getenv("MPC_WORKFLOW_SKIP_BEACON_EVIDENCE") != "1" {
+		next(m.CheckpointTransitionV4{Kind: m.CheckpointBeaconEvidenceRecorded, Record: &beRefs, Evidence: sorted(rawRefs)})
+		if err = commit(); err != nil {
+			return err
+		}
 	}
 	seal, err := m.SealPhase1Files(m.SealPhase1FilesOptions{Trust: trust, Circuit: circuit, TranscriptRoot: root, ClosePath: filepath.Join(root, closureRefs.Record.Name), CloseSignaturePath: filepath.Join(root, closureRefs.Signature.Name), BeaconPath: beacon.BeaconPath, BeaconSignaturePath: beacon.SignaturePath, CoordinatorPrivateKeyPath: coordinatorPath, OutputDir: filepath.Join(root, "phase1/sealed")})
 	if err != nil {

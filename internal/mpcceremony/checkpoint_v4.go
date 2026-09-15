@@ -8,14 +8,16 @@ import (
 )
 
 const (
-	CheckpointSchemaV4                                      = "proof-tool-mpc-checkpoint-v4"
-	StorageFirstWorkflowV2                                  = "storage-first-v2"
-	MaxCheckpointSequenceV4                                 = 16384
-	CheckpointDeliveryRetired      CheckpointTransitionKind = "delivery-retired"
-	CheckpointContributionRejected CheckpointTransitionKind = "contribution-rejected"
-	CheckpointDeliveryReallocated  CheckpointTransitionKind = "delivery-reallocated"
-	CheckpointEnrollmentRecorded   CheckpointTransitionKind = "enrollment-recorded"
-	CheckpointMirrorRecorded       CheckpointTransitionKind = "mirror-recorded"
+	CheckpointSchemaV4                                        = "proof-tool-mpc-checkpoint-v4"
+	StorageFirstWorkflowV2                                    = "storage-first-v2"
+	MaxCheckpointSequenceV4                                   = 16384
+	CheckpointDeliveryRetired        CheckpointTransitionKind = "delivery-retired"
+	CheckpointContributionRejected   CheckpointTransitionKind = "contribution-rejected"
+	CheckpointDeliveryReallocated    CheckpointTransitionKind = "delivery-reallocated"
+	CheckpointEnrollmentRecorded     CheckpointTransitionKind = "enrollment-recorded"
+	CheckpointMirrorRecorded         CheckpointTransitionKind = "mirror-recorded"
+	CheckpointWitnessRecorded        CheckpointTransitionKind = "witness-recorded"
+	CheckpointBeaconEvidenceRecorded CheckpointTransitionKind = "beacon-evidence-recorded"
 )
 
 // CheckpointProgressV4 is the protocol projection used for guidance. It is not
@@ -246,9 +248,13 @@ func (t CheckpointTransitionV4) Validate() error {
 			if len(t.Evidence) != 1 {
 				return errors.New("enrollment transition requires its disclosure artifact")
 			}
-		case CheckpointMirrorRecorded:
+		case CheckpointMirrorRecorded, CheckpointWitnessRecorded:
 			if len(t.Evidence) != 0 {
-				return errors.New("mirror edge adds only its signed receipt")
+				return errors.New("observer evidence edge adds only its signed receipt")
+			}
+		case CheckpointBeaconEvidenceRecorded:
+			if len(t.Evidence) < 2 || len(t.Evidence) > 16 {
+				return errors.New("beacon evidence edge requires two to sixteen raw responses")
 			}
 		case CheckpointPhase1Closed, CheckpointPhase2Closed:
 			if len(t.Evidence) != 0 {
@@ -382,7 +388,7 @@ func ValidateCheckpointTransitionV4(previous, next CheckpointV4) error {
 		return errors.New("accepted artifact inventory must remain append-only")
 	}
 	t := next.Transition
-	if t.Kind == CheckpointEnrollmentRecorded || t.Kind == CheckpointMirrorRecorded {
+	if t.Kind == CheckpointEnrollmentRecorded || t.Kind == CheckpointMirrorRecorded || t.Kind == CheckpointWitnessRecorded || t.Kind == CheckpointBeaconEvidenceRecorded {
 		if previous.Progress.FinalRelease != nil {
 			return errors.New("cannot add assurance evidence after final release")
 		}

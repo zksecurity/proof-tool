@@ -32,8 +32,13 @@ func TestCheckpointV4RealContributionTurn(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, output)
 	}
-	for _, mirrorMode := range []string{"0", "1"} {
-		t.Run("mirrors-"+mirrorMode, func(t *testing.T) {
+	for _, scenario := range []struct{ name, mirrorMode, extra, rejection string }{
+		{name: "observers-disabled", mirrorMode: "0"},
+		{name: "observers-enabled", mirrorMode: "1"},
+		{name: "missing-witness", mirrorMode: "1", extra: "MPC_WORKFLOW_SKIP_WITNESS=1", rejection: "signed witness minimum"},
+		{name: "missing-beacon-evidence", mirrorMode: "0", extra: "MPC_WORKFLOW_SKIP_BEACON_EVIDENCE=1", rejection: "multi-relay beacon evidence is required"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
 			run := exec.Command(helper, filepath.Join(t.TempDir(), "ceremony-run"))
 			run.Dir = repo
 			for _, entry := range os.Environ() {
@@ -42,8 +47,17 @@ func TestCheckpointV4RealContributionTurn(t *testing.T) {
 				}
 				run.Env = append(run.Env, entry)
 			}
-			run.Env = append(run.Env, "MPC_WORKFLOW_CHECKPOINT_V4=1", "PROOF_TOOL_TEST_ZERO_ASSURANCE=1", "MPC_WORKFLOW_V4_MIRROR="+mirrorMode)
+			run.Env = append(run.Env, "MPC_WORKFLOW_CHECKPOINT_V4=1", "PROOF_TOOL_TEST_ZERO_ASSURANCE=1", "MPC_WORKFLOW_V4_MIRROR="+scenario.mirrorMode)
+			if scenario.extra != "" {
+				run.Env = append(run.Env, scenario.extra)
+			}
 			output, err := run.CombinedOutput()
+			if scenario.rejection != "" {
+				if err == nil || !strings.Contains(string(output), scenario.rejection) {
+					t.Fatalf("expected %s: %v\n%s", scenario.rejection, err, output)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("real checkpoint turn: %v\n%s", err, output)
 			}
