@@ -1,6 +1,7 @@
 package mpcceremony
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -36,14 +37,23 @@ func verifyCandidatePublicOutputsV4(d CeremonyDefinition, candidate CandidateMet
 		return err
 	}
 	var report VerificationReport
-	if _, err := readCanonicalFile(filepath.Join(dir, candidate.VerificationReport.Name), &report); err != nil {
+	reportRef, err := readCanonicalFile(filepath.Join(dir, candidate.VerificationReport.Name), &report)
+	if err != nil {
 		return err
+	}
+	reportRef.Name = candidate.VerificationReport.Name
+	if reportRef != candidate.VerificationReport || report.PublicEvidence != candidate.PublicEvidence {
+		return errors.New("V4 public report differs from candidate references")
 	}
 	if err := validateCandidatePublicReport(report, cardano, format); err != nil {
 		return err
 	}
-	if _, _, _, err := loadAndVerifyPublicEvidence(filepath.Join(dir, candidate.PublicEvidence.Name), d.CeremonyID, vk, cardano, candidate.CardanoVerifyingKey); err != nil {
+	_, evidenceBytes, _, err := loadAndVerifyPublicEvidence(filepath.Join(dir, candidate.PublicEvidence.Name), d.CeremonyID, vk, cardano, candidate.CardanoVerifyingKey)
+	if err != nil {
 		return fmt.Errorf("V4 public proof verification: %w", err)
+	}
+	if NewDigest(evidenceBytes) != candidate.PublicEvidence.Digest {
+		return errors.New("V4 verified public evidence differs from candidate reference")
 	}
 	return nil
 }

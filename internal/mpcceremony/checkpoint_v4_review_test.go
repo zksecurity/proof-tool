@@ -28,6 +28,34 @@ func testV4CoherentInvalidPublicProof(t *testing.T, root string) {
 	if err := verifyCandidatePublicOutputsV4(d, candidate, dir); err != nil {
 		t.Fatalf("original public proof: %v", err)
 	}
+	changedReport := candidate
+	changedReport.VerificationReport.Digest = NewDigest([]byte("different report"))
+	if err := verifyCandidatePublicOutputsV4(d, changedReport, dir); err == nil || !strings.Contains(err.Error(), "public report differs") {
+		t.Fatalf("public output gate did not bind the report bytes it read: %v", err)
+	}
+	// Preserve a valid proof but make the report/candidate point to other bytes.
+	// The verifier must bind the bytes it actually verified, not just the report.
+	reportPath := filepath.Join(dir, candidate.VerificationReport.Name)
+	originalReport, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var changedEvidenceReport VerificationReport
+	if err := UnmarshalCanonical(originalReport, &changedEvidenceReport); err != nil {
+		t.Fatal(err)
+	}
+	changedEvidence := candidate
+	changedEvidence.PublicEvidence.Digest = NewDigest([]byte("different evidence"))
+	changedEvidenceReport.PublicEvidence = changedEvidence.PublicEvidence
+	changedReportBytes, err := MarshalCanonical(changedEvidenceReport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedEvidence.VerificationReport = putCheckpointTestFileV4(t, dir, candidate.VerificationReport.Name, changedReportBytes)
+	if err := verifyCandidatePublicOutputsV4(d, changedEvidence, dir); err == nil || !strings.Contains(err.Error(), "verified public evidence differs") {
+		t.Fatalf("public output gate did not bind verified evidence bytes: %v", err)
+	}
+	putCheckpointTestFileV4(t, dir, candidate.VerificationReport.Name, originalReport)
 	var evidence PublicFinalizationEvidence
 	if _, err := readCanonicalFile(filepath.Join(dir, candidate.PublicEvidence.Name), &evidence); err != nil {
 		t.Fatal(err)
