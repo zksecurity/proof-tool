@@ -215,7 +215,7 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	ceremonyRoot := filepath.Join(outputRoot, "ceremony")
 	phaseMinimum := uint8(2)
 	phase2Minimum := uint8(2)
-	if os.Getenv("MPC_WORKFLOW_PHASE1_ONE") == "1" || checkpointPhase2One {
+	if os.Getenv("MPC_WORKFLOW_PHASE1_ONE") == "1" || checkpointPhase2One || checkpointV4 {
 		phaseMinimum = 1
 	}
 	if checkpointPhase2One {

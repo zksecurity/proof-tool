@@ -485,6 +485,9 @@ func validateV4TurnTransition(previous, next CheckpointV4) error {
 			want, err = AllocateDeliveryV2(want, scope, CheckpointSubmissionCandidate, t.NextAttemptID)
 		}
 	case CheckpointPhase1CandidateAccepted, CheckpointPhase2CandidateAccepted:
+		if len(t.Contribution.Files) != 7 {
+			return errors.New("candidate acceptance requires the signed return handoff")
+		}
 		if err = findActive(CheckpointSubmissionCandidate); err != nil {
 			return err
 		}
@@ -500,8 +503,8 @@ func validateV4TurnTransition(previous, next CheckpointV4) error {
 			return errors.New("candidate acceptance must advance exactly one signed head")
 		}
 		base := fmt.Sprintf("%s/contributions/%04d/", scope.Phase, scope.Index)
-		if len(t.Evidence) != len(t.Contribution.Files)+1 {
-			return errors.New("candidate acceptance requires complete candidate plus coordinator verification record")
+		if len(t.Evidence) != len(t.Contribution.Files)+3 {
+			return errors.New("candidate acceptance requires complete candidate, verification and signed return receipt")
 		}
 		for _, ref := range t.Contribution.Files {
 			logical := ArtifactRef{Name: base + ref.Name, Digest: ref.Digest}
@@ -514,6 +517,11 @@ func validateV4TurnTransition(previous, next CheckpointV4) error {
 		}
 		if !slices.ContainsFunc(t.Evidence, func(ref ArtifactRef) bool { return ref.Name == base+"verification.json" }) {
 			return errors.New("candidate acceptance lacks coordinator verification record")
+		}
+		for _, name := range []string{"return-receipt.json", "return-receipt.sig"} {
+			if !slices.ContainsFunc(t.Evidence, func(ref ArtifactRef) bool { return ref.Name == base+name }) {
+				return errors.New("candidate acceptance lacks signed return receipt")
+			}
 		}
 		if scope.Phase == Phase1 {
 			wantProgress.Phase1 = state

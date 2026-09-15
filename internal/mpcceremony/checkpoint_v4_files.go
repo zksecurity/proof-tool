@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/blake2b"
 )
@@ -127,11 +128,12 @@ func (r *checkpointReaderV4) pair(refs SignedArtifactRefs) ([]byte, []byte, erro
 type checkpointAncestryV4 struct {
 	head     CheckpointV4
 	outbound map[string]SignedArtifactRefs
+	receipts map[ContributionScope]SignedArtifactRefs
 	count    uint64
 }
 
 func loadCheckpointAncestryV4(reader *checkpointReaderV4, d CeremonyDefinition, definitionBytes, definitionSignature []byte, refs SignedArtifactRefs) (checkpointAncestryV4, error) {
-	result := checkpointAncestryV4{outbound: map[string]SignedArtifactRefs{}}
+	result := checkpointAncestryV4{outbound: map[string]SignedArtifactRefs{}, receipts: map[ContributionScope]SignedArtifactRefs{}}
 	var child *CheckpointV4
 	for {
 		if result.count > MaxCheckpointSequenceV4 {
@@ -154,6 +156,9 @@ func loadCheckpointAncestryV4(reader *checkpointReaderV4, d CeremonyDefinition, 
 			}
 		}
 		result.count++
+		if current.Transition.Kind == CheckpointPhase1ReceiptAccepted || current.Transition.Kind == CheckpointPhase2ReceiptAccepted {
+			result.receipts[*current.Transition.Scope] = *current.Transition.Record
+		}
 		if current.Transition.Kind == CheckpointPhase1OutboundPublished || current.Transition.Kind == CheckpointPhase2OutboundPublished {
 			result.outbound[current.Transition.Record.Record.Digest.SHA256] = *current.Transition.Record
 		}
@@ -235,6 +240,7 @@ func PrepareCheckpointV4(options CheckpointPreparationV4) ([]byte, error) {
 	defer reader.root.Close()
 	var previous *CheckpointV4
 	outbound := map[string]SignedArtifactRefs{}
+	receipts := map[ContributionScope]SignedArtifactRefs{}
 	if c.PreviousCheckpoint != nil {
 		ancestry, err := loadCheckpointAncestryV4(reader, d, db, ds, *c.PreviousCheckpoint)
 		if err != nil {
@@ -242,6 +248,7 @@ func PrepareCheckpointV4(options CheckpointPreparationV4) ([]byte, error) {
 		}
 		previous = &ancestry.head
 		outbound = ancestry.outbound
+		receipts = ancestry.receipts
 		if err := ValidateCheckpointTransitionV4(*previous, c); err != nil {
 			return nil, err
 		}
@@ -261,13 +268,13 @@ func PrepareCheckpointV4(options CheckpointPreparationV4) ([]byte, error) {
 			return nil, err
 		}
 	}
-	if err := verifyCheckpointEvidenceV4(options, trusted, reader, previous, outbound); err != nil {
+	if err := verifyCheckpointEvidenceV4(options, trusted, reader, previous, outbound, receipts); err != nil {
 		return nil, err
 	}
 	return MarshalCanonical(c)
 }
 
-func verifyCheckpointEvidenceV4(options CheckpointPreparationV4, trusted *TrustedCeremony, reader *checkpointReaderV4, previous *CheckpointV4, outbound map[string]SignedArtifactRefs) error {
+func verifyCheckpointEvidenceV4(options CheckpointPreparationV4, trusted *TrustedCeremony, reader *checkpointReaderV4, previous *CheckpointV4, outbound map[string]SignedArtifactRefs, receipts map[ContributionScope]SignedArtifactRefs) error {
 	c := options.Proposal
 	d := trusted.Definition
 	switch c.Transition.Kind {
@@ -283,11 +290,13 @@ func verifyCheckpointEvidenceV4(options CheckpointPreparationV4, trusted *Truste
 	case CheckpointPhase1ReceiptAccepted, CheckpointPhase2ReceiptAccepted:
 		return verifyOutboundReceiptV4(reader, d, *previous, c.Transition, outbound)
 	case CheckpointPhase1CandidateAccepted, CheckpointPhase2CandidateAccepted:
-		return verifyAcceptedCandidateV4(options, trusted, reader, *previous)
+		return verifyAcceptedCandidateV4(options, trusted, reader, *previous, outbound, receipts)
 	case CheckpointContributionRejected:
 		return verifyRejectedInventoryV4(options.RejectedCandidateDir, *c.Transition.Contribution)
 	case CheckpointDeliveryRetired, CheckpointDeliveryReallocated:
 		return nil // No protocol claim or accepted artifact is added.
+	case CheckpointPhase1Closed, CheckpointPhase2Closed, CheckpointPhase1BeaconRecorded, CheckpointPhase2BeaconRecorded, CheckpointPhase1Sealed, CheckpointPhase2Initialized:
+		return verifyCheckpointLifecycleV4(options, trusted, reader, *previous)
 	default:
 		return errors.New("real-artifact authoring for this v4 transition is not implemented yet")
 	}
@@ -331,7 +340,7 @@ func verifyRejectedInventoryV4(dir string, inventory CandidateInventory) error {
 	return nil
 }
 
-func verifyAcceptedCandidateV4(options CheckpointPreparationV4, trusted *TrustedCeremony, reader *checkpointReaderV4, previous CheckpointV4) error {
+func verifyAcceptedCandidateV4(options CheckpointPreparationV4, trusted *TrustedCeremony, reader *checkpointReaderV4, previous CheckpointV4, outbound map[string]SignedArtifactRefs, receipts map[ContributionScope]SignedArtifactRefs) error {
 	c := options.Proposal
 	scope := *c.Transition.Scope
 	before, after := previous.Progress.Phase1, c.Progress.Phase1
@@ -379,8 +388,94 @@ func verifyAcceptedCandidateV4(options CheckpointPreparationV4, trusted *Trusted
 	if last.ParticipantID != scope.ParticipantID {
 		return errors.New("accepted chain names another participant")
 	}
-	if len(c.Transition.Contribution.Files) == 7 {
-		return verifyReturnHandoffV4(reader, trusted.Definition, scope, *c.Transition.Contribution)
+	if err := verifyReturnHandoffV4(reader, trusted.Definition, scope, *c.Transition.Contribution); err != nil {
+		return err
+	}
+	return verifyCandidateCustodyV4(reader, trusted, previous, c.Transition, chain, outbound, receipts)
+}
+
+func verifyCandidateCustodyV4(reader *checkpointReaderV4, trusted *TrustedCeremony, previous CheckpointV4, tx CheckpointTransitionV4, chain Chain, outbound map[string]SignedArtifactRefs, receipts map[ContributionScope]SignedArtifactRefs) error {
+	scope := *tx.Scope
+	inputRefs, ok := receipts[scope]
+	if !ok {
+		return errors.New("candidate has no committed outbound receipt")
+	}
+	inputTx := CheckpointTransitionV4{Scope: &scope, Record: &inputRefs}
+	if err := verifyOutboundReceiptV4(reader, trusted.Definition, previous, inputTx, outbound); err != nil {
+		return err
+	}
+	read := func(ref ArtifactRef, out any) error {
+		b, err := reader.read(ref, maxSignedRecordBytes, true)
+		if err != nil {
+			return err
+		}
+		return UnmarshalCanonical(b, out)
+	}
+	var inputReceipt TransferReceipt
+	if err := read(inputRefs.Record, &inputReceipt); err != nil {
+		return err
+	}
+	var inputHandoff TransferHandoff
+	if err := read(outbound[inputReceipt.HandoffSHA256].Record, &inputHandoff); err != nil {
+		return err
+	}
+	base := fmt.Sprintf("%s/contributions/%04d/", scope.Phase, scope.Index)
+	get := func(name string) ArtifactRef {
+		for _, ref := range tx.Evidence {
+			if ref.Name == base+name {
+				return ref
+			}
+		}
+		return ArtifactRef{}
+	}
+	handoffBytes, err := reader.read(get("return-handoff.json"), maxSignedRecordBytes, true)
+	if err != nil {
+		return err
+	}
+	var handoff TransferHandoff
+	if err = UnmarshalCanonical(handoffBytes, &handoff); err != nil {
+		return err
+	}
+	rb, rs, err := reader.pair(SignedArtifactRefs{Record: get("return-receipt.json"), Signature: get("return-receipt.sig")})
+	if err != nil {
+		return err
+	}
+	var receipt TransferReceipt
+	if err = VerifySignedRecord(rb, rs, &receipt, trusted.Definition.Coordinator.KeyID, trusted.CoordinatorPublicKey); err != nil {
+		return err
+	}
+	if receipt.Kind != ReceiptReceiver {
+		return errors.New("return receipt must be the coordinator receiver receipt")
+	}
+	if err = VerifyTransferReceipt(handoffBytes, handoff, receipt); err != nil {
+		return err
+	}
+	last := chain.Records[len(chain.Records)-1]
+	var attestation ContributionAttestation
+	var erasure ErasureAttestation
+	if err = read(last.Attestation, &attestation); err != nil {
+		return err
+	}
+	if err = read(last.Erasure, &erasure); err != nil {
+		return err
+	}
+	predecessor := trusted.Definition.CreatedAt
+	if len(chain.Records) > 1 {
+		predecessor = chain.Records[len(chain.Records)-2].AcceptedAt
+	}
+	timestamps := []string{predecessor, inputHandoff.CreatedAt, inputReceipt.ReceivedAt, attestation.ContributedAt, erasure.DestroyedAt, handoff.CreatedAt, receipt.ReceivedAt, last.AcceptedAt}
+	var before time.Time
+	for i, value := range timestamps {
+		parsed, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			return err
+		}
+		// Existing cleanup validation permits the same recorded timestamp as
+		// contribution; custody handoffs/receipts must be strictly later.
+		if i > 0 && ((i == 4 && parsed.Before(before)) || (i != 4 && !parsed.After(before))) {
+			return errors.New("candidate custody, cleanup and acceptance timestamps are not strictly ordered")
+		}
+		before = parsed
 	}
 	return nil
 }

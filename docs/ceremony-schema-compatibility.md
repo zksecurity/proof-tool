@@ -26,11 +26,14 @@ check by changing the meaning of V3 or a generic "current schema" constant.
 
 ## New-version implementation gate
 
-Current draft: opt-in V4 definition construction and a separate V4 structural
-checkpoint model exist in the library. Normal initialization still emits V3.
-Do not release this slice alone: real-artifact V4 checkpoint authoring and the
-new release/decision verification path are not complete. Structural fixture
-tests are not a completed cryptographic ceremony or normal CLI journey.
+Current draft: opt-in V4 construction, structural checkpoints and real-artifact
+verification through Phase 2 initialization exist in the library. The Linux
+integration test uses a real tiny contribution, signed custody records, genuine
+historical drand response, Phase 1 replay/sealing and Phase 2 genesis. Its
+environment and cleanup claims are test fixtures, not physical assurance.
+Normal initialization still emits V3. Do not release this slice alone: remaining
+evidence gates, final authoring and the new release/decision verification path
+are incomplete. These tests are not the normal CLI journey or a full ceremony.
 
 - Reserve Definition V4, Checkpoint V4 and `storage-first-v2` for the changed
   trust and submission rules; do not emit them until the whole verifier path

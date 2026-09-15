@@ -45,8 +45,63 @@ func TestCheckpointV4RealContributionTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("real checkpoint turn: %v\n%s", err, output)
 	}
-	if !strings.Contains(string(output), "V4 real phase1 turn passed") {
+	if !strings.Contains(string(output), "V4 real phase1 turn passed") || !strings.Contains(string(output), "closure, drand, seal, phase2 genesis") {
 		t.Fatalf("missing completion: %s", output)
+	}
+}
+
+func TestCheckpointV4LifecycleCanonicalPaths(t *testing.T) {
+	for _, phase := range []Phase{Phase1, Phase2} {
+		for _, directory := range []string{"closure", "beacon"} {
+			base := string(phase) + "/" + directory + "/record"
+			refs := SignedArtifactRefs{Record: inventoryTestRef(base+".json", []byte("record")), Signature: inventoryTestRef(base+".sig", []byte("signature"))}
+			if err := requireLifecycleRecordPathV4(refs, phase, directory); err != nil {
+				t.Fatal(err)
+			}
+			for _, field := range []string{"record", "signature"} {
+				bad := refs
+				if field == "record" {
+					bad.Record.Name = "other/record.json"
+				} else {
+					bad.Signature.Name = "other/record.sig"
+				}
+				if err := requireLifecycleRecordPathV4(bad, phase, directory); err == nil {
+					t.Fatal("accepted misplaced lifecycle record")
+				}
+			}
+		}
+	}
+}
+
+func TestCheckpointV4Phase2CloseBoundary(t *testing.T) {
+	first := CloseRecord{BeaconRound: 42}
+	beacon := BeaconRecord{PublishedAt: "2023-08-23T15:11:30Z"}
+	second := CloseRecord{BeaconRound: 43, ClosedAt: "2023-08-23T15:11:31Z"}
+	if err := validatePhase2CloseBoundaryV4(first, beacon, second); err != nil {
+		t.Fatal(err)
+	}
+	for name, change := range map[string]func(*CloseRecord){
+		"same round":         func(c *CloseRecord) { c.BeaconRound = 42 },
+		"older round":        func(c *CloseRecord) { c.BeaconRound = 41 },
+		"before publication": func(c *CloseRecord) { c.ClosedAt = "2023-08-23T15:11:29Z" },
+		"same time":          func(c *CloseRecord) { c.ClosedAt = beacon.PublishedAt },
+	} {
+		t.Run(name, func(t *testing.T) {
+			bad := second
+			change(&bad)
+			if err := validatePhase2CloseBoundaryV4(first, beacon, bad); err == nil {
+				t.Fatal("invalid phase2 boundary accepted")
+			}
+		})
+	}
+}
+
+func TestCheckpointV4RequiredEnrollmentsFitExistingBundle(t *testing.T) {
+	// Coordinator, release signer, full roster, auditors, witnesses and mirrors.
+	// External security-audit signoffs are later decision evidence, not enrollment.
+	maximumRequired := 2 + MaxParticipants + 3*MaxAuditors
+	if maximumRequired > 128 {
+		t.Fatalf("maximum required enrollments %d exceeds bundle capacity", maximumRequired)
 	}
 }
 

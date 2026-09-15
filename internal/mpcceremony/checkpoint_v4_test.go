@@ -103,6 +103,7 @@ func checkpointTurnV4(t *testing.T, d CeremonyDefinition, start CheckpointV4, ph
 	}
 	_, inventory := candidateInventoryFixture(t)
 	inventory.Scope = scope
+	inventory.Files = append(inventory.Files, inventoryTestRef("return-handoff.json", []byte("handoff")), inventoryTestRef("return-handoff.sig", []byte("handoff signature")))
 	chain := checkpointSigned(fmt.Sprintf("%s/chain-%04d", phase, scope.Index))
 	evidence := []ArtifactRef{}
 	for _, ref := range inventory.Files {
@@ -110,6 +111,7 @@ func checkpointTurnV4(t *testing.T, d CeremonyDefinition, start CheckpointV4, ph
 		evidence = append(evidence, ref)
 	}
 	evidence = checkpointArtifacts(append(evidence, checkpointArtifact(fmt.Sprintf("%s/contributions/%04d/verification.json", phase, scope.Index), "verification"))...)
+	evidence = checkpointArtifacts(append(evidence, checkpointArtifact(fmt.Sprintf("%s/contributions/%04d/return-receipt.json", phase, scope.Index), "receipt"), checkpointArtifact(fmt.Sprintf("%s/contributions/%04d/return-receipt.sig", phase, scope.Index), "receipt signature"))...)
 	c3 := nextCheckpointV4(t, c2, CheckpointTransitionV4{Kind: accept, Scope: &scope, AttemptID: id2, Record: &chain, Evidence: evidence, Contribution: &inventory})
 	c3.Deliveries, err = AdvanceDeliveryV2(c2.Deliveries, id2, DeliveryAccepted, &inventory)
 	if err != nil {
@@ -185,9 +187,18 @@ func TestCheckpointV4RejectsSkippedOrAlteredTurnEdges(t *testing.T) {
 		"hidden extra file": func(n *CheckpointV4) {
 			n.AcceptedArtifacts = appendCheckpointArtifacts(n.AcceptedArtifacts, checkpointArtifact("unexpected.json", "extra"))
 		},
-		"wrong slot":            func(n *CheckpointV4) { n.Transition.AttemptID = strings.Repeat("e", 32) },
-		"skipped count":         func(n *CheckpointV4) { n.Progress.Phase1.AcceptedCount++ },
-		"changed result":        func(n *CheckpointV4) { n.Transition.Contribution.Files[0].Digest = NewDigest([]byte("changed")) },
+		"wrong slot":          func(n *CheckpointV4) { n.Transition.AttemptID = strings.Repeat("e", 32) },
+		"skipped count":       func(n *CheckpointV4) { n.Progress.Phase1.AcceptedCount++ },
+		"changed result":      func(n *CheckpointV4) { n.Transition.Contribution.Files[0].Digest = NewDigest([]byte("changed")) },
+		"five file candidate": func(n *CheckpointV4) { n.Transition.Contribution.Files = n.Transition.Contribution.Files[:5] },
+		"missing return receipt": func(n *CheckpointV4) {
+			for i, ref := range n.Transition.Evidence {
+				if strings.HasSuffix(ref.Name, "return-receipt.sig") {
+					n.Transition.Evidence = append(n.Transition.Evidence[:i], n.Transition.Evidence[i+1:]...)
+					break
+				}
+			}
+		},
 		"discard history":       func(n *CheckpointV4) { n.Deliveries = n.Deliveries[1:] },
 		"advance another phase": func(n *CheckpointV4) { n.Progress.Phase2 = &n.Progress.Phase1 },
 	} {

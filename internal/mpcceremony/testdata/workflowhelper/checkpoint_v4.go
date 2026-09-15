@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
+	"time"
 
 	m "proof-tool/internal/mpcceremony"
 )
@@ -168,6 +170,34 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 	if _, err = m.CreateErasureAttestationFiles(m.CreateErasureAttestationFilesOptions{Trust: trust, ParticipantID: p.ID, ParticipantPrivateKeyPath: participantPath, CandidateDir: candidateDir, DestroyedAt: "2023-08-23T15:04:00Z"}); err != nil {
 		return err
 	}
+	returnFiles := []m.ArtifactRef{}
+	for _, name := range []string{"attestation.json", "attestation.sig", "contribution.bin", "erasure.json", "erasure.sig"} {
+		b, err := os.ReadFile(filepath.Join(candidateDir, name))
+		if err != nil {
+			return err
+		}
+		returnFiles = append(returnFiles, m.ArtifactRef{Name: "phase1/contributions/0001/" + name, Digest: m.NewDigest(b)})
+	}
+	returnHandoff, err := m.NewTransferHandoff(d, m.Phase1, 1, scope.ParentHeadID, returnFiles, p, d.Coordinator, "2023-08-23T15:04:10Z", "2023-08-23T16:04:10Z")
+	if err != nil {
+		return err
+	}
+	returnRefs, err := writePair("custody/return-handoff", returnHandoff, p.KeyID, participant)
+	if err != nil {
+		return err
+	}
+	rhBytes, err := os.ReadFile(filepath.Join(root, returnRefs.Record.Name))
+	if err != nil {
+		return err
+	}
+	returnReceipt, err := m.NewTransferReceipt(returnHandoff, rhBytes, m.ReceiptReceiver, "2023-08-23T15:04:20Z")
+	if err != nil {
+		return err
+	}
+	returnReceiptRefs, err := writePair("custody/return-receipt", returnReceipt, d.Coordinator.KeyID, coordinator)
+	if err != nil {
+		return err
+	}
 	accepted, err := m.VerifyAndAcceptContribution(m.AcceptContributionFilesOptions{Trust: trust, Circuit: circuit, Phase: m.Phase1, Transcript: paths, CandidateDir: candidateDir, CoordinatorPrivateKeyPath: coordinatorPath, AcceptedAt: "2023-08-23T15:05:00Z"})
 	if err != nil {
 		return err
@@ -180,11 +210,28 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 	}
 	last := chain.Records[0]
 	files := []m.ArtifactRef{last.Attestation, last.AttestationSignature, last.OutputPayload, last.Erasure, last.ErasureSignature}
+	returnEvidence := []m.ArtifactRef{}
+	for _, pair := range []m.SignedArtifactRefs{returnRefs, returnReceiptRefs} {
+		for _, original := range []m.ArtifactRef{pair.Record, pair.Signature} {
+			b, err := os.ReadFile(filepath.Join(root, original.Name))
+			if err != nil {
+				return err
+			}
+			name := "phase1/contributions/0001/" + filepath.Base(original.Name)
+			if err = os.WriteFile(filepath.Join(root, name), b, 0600); err != nil {
+				return err
+			}
+			returnEvidence = append(returnEvidence, m.ArtifactRef{Name: name, Digest: m.NewDigest(b)})
+		}
+	}
+	files = append(files, returnEvidence[:2]...)
 	inventory := m.CandidateInventory{Schema: m.CandidateInventorySchemaV1, Scope: scope, Files: append([]m.ArtifactRef{}, files...)}
 	for i := range inventory.Files {
 		inventory.Files[i].Name = filepath.Base(inventory.Files[i].Name)
 	}
-	next(m.CheckpointTransitionV4{Kind: m.CheckpointPhase1CandidateAccepted, Scope: &scope, AttemptID: candidateAttempt, Record: &chainRefs, Evidence: sorted(append(files, last.Verification)), Contribution: &inventory})
+	evidence := append(append([]m.ArtifactRef{}, files...), returnEvidence[2:]...)
+	evidence = append(evidence, last.Verification)
+	next(m.CheckpointTransitionV4{Kind: m.CheckpointPhase1CandidateAccepted, Scope: &scope, AttemptID: candidateAttempt, Record: &chainRefs, Evidence: sorted(evidence), Contribution: &inventory})
 	c.Deliveries, err = m.AdvanceDeliveryV2(c.Deliveries, candidateAttempt, m.DeliveryAccepted, &inventory)
 	if err != nil {
 		return err
@@ -198,6 +245,34 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 		return err
 	}
 	c.Progress.Phase1 = m.CheckpointPhaseState{Phase: m.Phase1, AcceptedCount: 1, HeadRecordID: head, HeadPayload: payload, Chain: chainRefs}
+	lateReceipt := returnReceipt
+	lateReceipt.ReceivedAt = "2023-08-23T15:06:00Z"
+	lateRefs, err := writePair("phase1/contributions/0001/return-receipt", lateReceipt, d.Coordinator.KeyID, coordinator)
+	if err != nil {
+		return err
+	}
+	bad := c
+	bad.Transition.Evidence = append([]m.ArtifactRef{}, c.Transition.Evidence...)
+	bad.AcceptedArtifacts = append([]m.ArtifactRef{}, c.AcceptedArtifacts...)
+	for _, replacement := range []m.ArtifactRef{lateRefs.Record, lateRefs.Signature} {
+		for i := range bad.Transition.Evidence {
+			if bad.Transition.Evidence[i].Name == replacement.Name {
+				bad.Transition.Evidence[i] = replacement
+			}
+		}
+		for i := range bad.AcceptedArtifacts {
+			if bad.AcceptedArtifacts[i].Name == replacement.Name {
+				bad.AcceptedArtifacts[i] = replacement
+			}
+		}
+	}
+	_, lateErr := m.PrepareCheckpointV4(m.CheckpointPreparationV4{Trust: trust, ArtifactRoot: root, Proposal: bad, Circuit: circuit})
+	if lateErr == nil || !strings.Contains(lateErr.Error(), "timestamps") {
+		return fmt.Errorf("late signed return receipt: expected custody chronology rejection, got %v", lateErr)
+	}
+	if _, err = writePair("phase1/contributions/0001/return-receipt", returnReceipt, d.Coordinator.KeyID, coordinator); err != nil {
+		return err
+	}
 	if err = commit(); err != nil {
 		return err
 	}
@@ -220,6 +295,106 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 	if rejectErr == nil {
 		return fmt.Errorf("corrupted accepted contribution passed checkpoint preparation")
 	}
-	fmt.Println("V4 real phase1 turn passed: initial, outbound, retirement, reallocation, receipt, contribution, cleanup, full replay, exact acceptance, corruption rejected")
+	// Historical genuine drand response tests binding and mathematics, not a
+	// live wait. Normal closure commands keep their current-time requirements.
+	roundTime, err := m.QuicknetRoundTime(42)
+	if err != nil {
+		return err
+	}
+	participants, err := chain.ParticipantIDs()
+	if err != nil {
+		return err
+	}
+	closure, err := m.NewCloseRecord(m.CloseRecord{CeremonyID: d.CeremonyID, Phase: m.Phase1, PhaseID: chain.PhaseID, FinalIndex: 1, FinalPayload: payload, ChainHeadID: head, AcceptedParticipants: participants, BeaconProvider: d.BeaconPolicy.Provider, BeaconNetwork: d.BeaconPolicy.Network, BeaconRound: 42, BeaconNotBefore: roundTime.Format(time.RFC3339Nano), ClosedAt: "2023-08-23T15:06:00Z", CoordinatorID: d.Coordinator.ID, CoordinatorKeyID: d.Coordinator.KeyID})
+	if err != nil {
+		return err
+	}
+	closureRefs, err := writePair("phase1/closure/record", closure, d.Coordinator.KeyID, coordinator)
+	if err != nil {
+		return err
+	}
+	next(m.CheckpointTransitionV4{Kind: m.CheckpointPhase1Closed, Record: &closureRefs, Evidence: []m.ArtifactRef{}})
+	c.Progress.Phase1Closure = &closureRefs
+	if err = commit(); err != nil {
+		return err
+	}
+	raw := filepath.Join(output, "quicknet-v4-42.json")
+	if err = os.WriteFile(raw, []byte(quicknetRound42), 0600); err != nil {
+		return err
+	}
+	beacon, err := m.RecordBeaconFiles(m.RecordBeaconFilesOptions{Trust: trust, TranscriptRoot: root, Phase: m.Phase1, ClosePath: filepath.Join(root, closureRefs.Record.Name), CloseSignaturePath: filepath.Join(root, closureRefs.Signature.Name), RawResponsePath: raw, PublishedAt: "2023-08-23T15:11:30Z", CoordinatorPrivateKeyPath: coordinatorPath})
+	if err != nil {
+		return err
+	}
+	beaconName, err := filepath.Rel(root, beacon.BeaconPath)
+	if err != nil {
+		return err
+	}
+	beaconSignatureName, err := filepath.Rel(root, beacon.SignaturePath)
+	if err != nil {
+		return err
+	}
+	br, err := ref(filepath.ToSlash(beaconName))
+	if err != nil {
+		return err
+	}
+	bs, err := ref(filepath.ToSlash(beaconSignatureName))
+	if err != nil {
+		return err
+	}
+	beaconRefs := m.SignedArtifactRefs{Record: br, Signature: bs}
+	next(m.CheckpointTransitionV4{Kind: m.CheckpointPhase1BeaconRecorded, Record: &beaconRefs, Evidence: []m.ArtifactRef{beacon.Beacon.RawResponse}})
+	c.Progress.Phase1Beacon = &beaconRefs
+	if err = commit(); err != nil {
+		return err
+	}
+	seal, err := m.SealPhase1Files(m.SealPhase1FilesOptions{Trust: trust, Circuit: circuit, TranscriptRoot: root, ClosePath: filepath.Join(root, closureRefs.Record.Name), CloseSignaturePath: filepath.Join(root, closureRefs.Signature.Name), BeaconPath: beacon.BeaconPath, BeaconSignaturePath: beacon.SignaturePath, CoordinatorPrivateKeyPath: coordinatorPath, OutputDir: filepath.Join(root, "phase1/sealed")})
+	if err != nil {
+		return err
+	}
+	sealName, err := filepath.Rel(root, seal.SealPath)
+	if err != nil {
+		return err
+	}
+	sealSigName, err := filepath.Rel(root, seal.SignaturePath)
+	if err != nil {
+		return err
+	}
+	sr, err := ref(filepath.ToSlash(sealName))
+	if err != nil {
+		return err
+	}
+	ss, err := ref(filepath.ToSlash(sealSigName))
+	if err != nil {
+		return err
+	}
+	sealRefs := m.SignedArtifactRefs{Record: sr, Signature: ss}
+	next(m.CheckpointTransitionV4{Kind: m.CheckpointPhase1Sealed, Record: &sealRefs, Evidence: seal.Seal.Outputs})
+	c.Progress.Phase1Seal = &sealRefs
+	if err = commit(); err != nil {
+		return err
+	}
+	p2, err := m.InitializePhase2Files(m.InitPhase2FilesOptions{Trust: trust, Circuit: circuit, TranscriptRoot: root, Phase1SealPath: seal.SealPath, Phase1SealSignaturePath: seal.SignaturePath, CoordinatorPrivateKeyPath: coordinatorPath, OutputDir: filepath.Join(root, "phase2")})
+	if err != nil {
+		return err
+	}
+	p2Chain, p2Refs, err := m.VerifyAcceptedPhase2Chain(trust, circuit, root, seal.SealPath, seal.SignaturePath, m.PhaseTranscriptPaths{RootDir: root, ChainPath: p2.ChainPath, ChainSignaturePath: p2.ChainSignaturePath})
+	if err != nil {
+		return err
+	}
+	p2Head, err := p2Chain.HeadRecordID()
+	if err != nil {
+		return err
+	}
+	p2Payload, err := p2Chain.HeadPayload()
+	if err != nil {
+		return err
+	}
+	next(m.CheckpointTransitionV4{Kind: m.CheckpointPhase2Initialized, Record: &p2Refs, Evidence: []m.ArtifactRef{p2Payload}})
+	c.Progress.Phase2 = &m.CheckpointPhaseState{Phase: m.Phase2, HeadRecordID: p2Head, HeadPayload: p2Payload, Chain: p2Refs}
+	if err = commit(); err != nil {
+		return err
+	}
+	fmt.Println("V4 real phase1 turn passed: initial, outbound, retirement, reallocation, receipt, contribution, cleanup, full replay, exact acceptance, corruption rejected, closure, drand, seal, phase2 genesis")
 	return nil
 }
