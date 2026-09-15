@@ -770,13 +770,16 @@ func runCheckpointCommandCLI(t *testing.T, args []string) CommandResult {
 
 func runCheckpointCommandExecutable(t *testing.T, executable string, args []string) CommandResult {
 	t.Helper()
-	output, err := exec.Command(executable, args...).CombinedOutput()
+	var stdout, stderr bytes.Buffer
+	command := exec.Command(executable, args...)
+	command.Stdout, command.Stderr = &stdout, &stderr
+	err := command.Run()
 	if err != nil {
-		t.Fatalf("run %s: %v, output = %q", executable, err, output)
+		t.Fatalf("run %s: %v, stdout = %q, stderr = %q", executable, err, stdout.String(), stderr.String())
 	}
 	var result CommandResult
-	if err := json.Unmarshal(output, &result); err != nil {
-		t.Fatalf("decode %s output: %v, output = %q", executable, err, output)
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("decode %s output: %v, stdout = %q, stderr = %q", executable, err, stdout.String(), stderr.String())
 	}
 	return result
 }
