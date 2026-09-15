@@ -223,7 +223,7 @@ func executeCheckpointPrepare(options CheckpointPrepareOptions) (CommandResult, 
 	}
 	return CommandResult{
 		CeremonyID: built.checkpoint.CeremonyID,
-		Summary:    fmt.Sprintf("prepared checkpoint %d from authenticated cp0-cp3 evidence; review before signing", built.checkpoint.Sequence),
+		Summary:    fmt.Sprintf("prepared checkpoint %d from authenticated Phase 1 evidence; review before signing", built.checkpoint.Sequence),
 		Outputs: map[string]string{
 			"checkpoint": checkpointPath, "signing_request": requestPath,
 		},
@@ -296,11 +296,11 @@ func executeCheckpointVerify(options CheckpointVerifyOptions) (CommandResult, er
 		Schema: checkpointEvidenceInspectionSchema, CeremonyID: built.checkpoint.CeremonyID,
 		Sequence: built.checkpoint.Sequence, CheckpointDigest: mpcceremony.NewDigest(checkpointBytes),
 		TransitionKind: built.checkpoint.Transition.Kind, FullyVerified: true,
-		VerifiedEvidenceBoundary: "phase1 checkpoint cp0-cp3: exact definition, predecessor, chain/head, transition record, submission payloads and acknowledgement; cp3 includes full contribution and cleanup replay",
+		VerifiedEvidenceBoundary: "phase1 checkpoint through closure: exact definition, ancestry, chain/head, transition records, submission payloads and acknowledgements; candidate acceptance includes full contribution and cleanup replay",
 	}
 	return CommandResult{
 		CeremonyID:                   built.checkpoint.CeremonyID,
-		Summary:                      fmt.Sprintf("fully authenticated checkpoint %d within the cp0-cp3 evidence boundary", built.checkpoint.Sequence),
+		Summary:                      fmt.Sprintf("fully authenticated Phase 1 checkpoint %d", built.checkpoint.Sequence),
 		CheckpointEvidenceInspection: &inspection,
 	}, nil
 }
@@ -314,7 +314,7 @@ func executeCheckpointVerifyStored(options CheckpointVerifyStoredOptions) (Comma
 		Schema: checkpointEvidenceInspectionSchema, CeremonyID: checkpoint.CeremonyID,
 		Sequence: checkpoint.Sequence, CheckpointDigest: mpcceremony.NewDigest(checkpointBytes),
 		TransitionKind: checkpoint.Transition.Kind, FullyVerified: true,
-		VerifiedEvidenceBoundary: "complete fetched cp0-cp3 ancestry; each edge re-derived from exact signed records, with full contribution and cleanup replay for cp3",
+		VerifiedEvidenceBoundary: "complete fetched Phase 1 ancestry through closure; every edge is re-derived from exact signed records, with full contribution and cleanup replay for candidate acceptance",
 	}
 	return CommandResult{
 		CeremonyID:                   checkpoint.CeremonyID,
@@ -413,8 +413,9 @@ func inferStoredCheckpointEvidence(options CheckpointVerifyStoredOptions, checkp
 			}
 		}
 	case mpcceremony.CheckpointPhase1CandidateAccepted:
+	case mpcceremony.CheckpointPhase1Closed:
 	default:
-		return CheckpointEvidenceOptions{}, fmt.Errorf("stored checkpoint transition %q is outside cp0-cp3", checkpoint.Transition.Kind)
+		return CheckpointEvidenceOptions{}, fmt.Errorf("stored checkpoint transition %q is outside the supported Phase 1 boundary", checkpoint.Transition.Kind)
 	}
 	return evidence, nil
 }
