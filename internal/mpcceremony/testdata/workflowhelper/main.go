@@ -90,14 +90,19 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		return fmt.Errorf("bind helper executable: %w", err)
 	}
 	if binary := os.Getenv("MPC_CEREMONY_TEST_BINARY"); binary != "" {
-		software, err = mpcceremony.SoftwareBindingWithAllowedBinaryFiles(
-			software,
-			prover.ProofToolVersion,
-			mpcceremony.ModeRehearsal,
-			[]string{binary},
-		)
+		// The workflow helper and command binary target the same platform, so an
+		// allowlist append would correctly reject them as ambiguous duplicates.
+		// This rehearsal-only helper instead replaces the primary executable
+		// digest with the separately built command exercised by the outer test.
+		var commandBytes []byte
+		commandBytes, err = os.ReadFile(binary)
 		if err != nil {
-			return fmt.Errorf("allow test command executable: %w", err)
+			return fmt.Errorf("read test command executable: %w", err)
+		}
+		software.ToolBinary = mpcceremony.NewDigest(commandBytes)
+		software.Binaries = nil
+		if err = software.Validate(); err != nil {
+			return fmt.Errorf("bind test command executable: %w", err)
 		}
 	}
 
