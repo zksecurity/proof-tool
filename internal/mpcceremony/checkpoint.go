@@ -14,10 +14,13 @@ const (
 	CheckpointSchema                 = "proof-tool-mpc-checkpoint-v3"
 	StorageFirstWorkflowV1           = "storage-first-v1"
 	CheckpointSigningRequestSchemaV1 = "proof-tool-mpc-checkpoint-signing-request-v1"
-	// A full 255-participant Phase 1 retains roughly twenty immutable public
-	// references per turn. Keep a hard parser bound while allowing the protocol
-	// maximum plus future evidence growth.
-	MaxCheckpointArtifacts = 8192
+	// Every participant can contribute once in each of two phases. Each turn has
+	// three checkpoint edges and currently adds at most 21 immutable references.
+	// The fixed lifecycle reserve covers initialization, closure, beacons,
+	// finalization, decisions, and modest schema growth without making parsing
+	// unbounded.
+	MaxCheckpointAncestry  = 2*MaxParticipants*3 + 64
+	MaxCheckpointArtifacts = 2*MaxParticipants*21 + 256
 )
 
 // CheckpointSigningRequest lets an isolated coordinator signer confirm that it
@@ -70,6 +73,9 @@ const (
 	CheckpointPhase1BeaconRecorded    CheckpointTransitionKind = "phase1-beacon-recorded"
 	CheckpointPhase1Sealed            CheckpointTransitionKind = "phase1-sealed"
 	CheckpointPhase2Initialized       CheckpointTransitionKind = "phase2-initialized"
+	CheckpointPhase2OutboundPublished CheckpointTransitionKind = "phase2-outbound-published"
+	CheckpointPhase2ReceiptAccepted   CheckpointTransitionKind = "phase2-receipt-accepted"
+	CheckpointPhase2CandidateAccepted CheckpointTransitionKind = "phase2-candidate-accepted"
 )
 
 type CheckpointSubmissionKind string
@@ -137,8 +143,8 @@ func (s CheckpointSubmissionSlot) Validate() error {
 	default:
 		return fmt.Errorf("unsupported checkpoint submission kind %q", s.Kind)
 	}
-	if s.Phase != Phase1 {
-		return fmt.Errorf("submission phase %q, want phase1", s.Phase)
+	if s.Phase != Phase1 && s.Phase != Phase2 {
+		return fmt.Errorf("submission phase %q, want phase1 or phase2", s.Phase)
 	}
 	if s.Index == 0 || s.Index > MaxParticipants {
 		return fmt.Errorf("submission index %d must be between 1 and %d", s.Index, MaxParticipants)
@@ -262,8 +268,13 @@ func (t CheckpointTransition) Validate() error {
 		}
 		return nil
 	}
-	if t.Phase != Phase1 {
-		return fmt.Errorf("transition phase %q, want phase1", t.Phase)
+	expectedPhase := Phase1
+	switch t.Kind {
+	case CheckpointPhase2OutboundPublished, CheckpointPhase2ReceiptAccepted, CheckpointPhase2CandidateAccepted:
+		expectedPhase = Phase2
+	}
+	if t.Phase != expectedPhase {
+		return fmt.Errorf("transition phase %q, want %s", t.Phase, expectedPhase)
 	}
 	if t.Index == 0 || t.Index > MaxParticipants {
 		return fmt.Errorf("transition index %d must be between 1 and %d", t.Index, MaxParticipants)
@@ -281,11 +292,11 @@ func (t CheckpointTransition) Validate() error {
 		return fmt.Errorf("transition record: %w", err)
 	}
 	switch t.Kind {
-	case CheckpointPhase1OutboundPublished:
+	case CheckpointPhase1OutboundPublished, CheckpointPhase2OutboundPublished:
 		if t.NextAttemptID != "" || t.Acknowledgement != nil || len(t.Evidence) != 0 {
 			return errors.New("outbound transition must not contain a next attempt or acknowledgement")
 		}
-	case CheckpointPhase1ReceiptAccepted:
+	case CheckpointPhase1ReceiptAccepted, CheckpointPhase2ReceiptAccepted:
 		if err := validateHex(t.NextAttemptID, 16); err != nil {
 			return fmt.Errorf("transition next_attempt_id: %w", err)
 		}
@@ -301,7 +312,7 @@ func (t CheckpointTransition) Validate() error {
 		if err := validateCheckpointTransitionEvidence(t.Evidence); err != nil {
 			return err
 		}
-	case CheckpointPhase1CandidateAccepted:
+	case CheckpointPhase1CandidateAccepted, CheckpointPhase2CandidateAccepted:
 		if t.NextAttemptID != "" || t.Acknowledgement == nil {
 			return errors.New("candidate acceptance requires an acknowledgement and no next attempt")
 		}
@@ -396,8 +407,8 @@ func (c Checkpoint) Validate() error {
 	if err := c.Transition.Validate(); err != nil {
 		return fmt.Errorf("transition: %w", err)
 	}
-	if c.Schema != CheckpointSchema && (c.Phase1Closure != nil || c.Phase1Beacon != nil || c.Phase1Seal != nil || c.Phase2 != nil ||
-		c.Transition.Kind == CheckpointPhase1Closed || c.Transition.Kind == CheckpointPhase1BeaconRecorded || c.Transition.Kind == CheckpointPhase1Sealed || c.Transition.Kind == CheckpointPhase2Initialized) {
+	if c.Schema != CheckpointSchema && (c.Phase1Closure != nil || c.Phase1Beacon != nil || c.Phase1Seal != nil || c.hasPhase2Semantics() ||
+		c.Transition.Kind == CheckpointPhase1Closed || c.Transition.Kind == CheckpointPhase1BeaconRecorded || c.Transition.Kind == CheckpointPhase1Sealed) {
 		return errors.New("phase1 closure and later lifecycle state require checkpoint v3")
 	}
 	if err := c.Phase1.Validate(); err != nil {
@@ -451,6 +462,9 @@ func (c Checkpoint) Validate() error {
 				return errors.New("phase2 state artifacts must be present in accepted_artifacts")
 			}
 		}
+	}
+	if c.Transition.Phase == Phase2 && c.Phase2 == nil {
+		return errors.New("phase2 transition requires phase2 state")
 	}
 	if c.Sequence == 0 && (c.Phase1Closure != nil || c.Phase1Beacon != nil || c.Phase1Seal != nil || c.Phase2 != nil) {
 		return errors.New("initial checkpoint must not contain later lifecycle state")
@@ -517,6 +531,13 @@ func (c Checkpoint) Validate() error {
 		}
 	}
 	return nil
+}
+
+func (c Checkpoint) hasPhase2Semantics() bool {
+	if c.Phase2 != nil || c.Transition.Phase == Phase2 {
+		return true
+	}
+	return slices.ContainsFunc(c.Submissions, func(slot CheckpointSubmissionSlot) bool { return slot.Phase == Phase2 })
 }
 
 // Storage-first names are materialized on both Linux and macOS. Restricting
@@ -634,11 +655,17 @@ func ValidateCheckpointTransition(previous, next Checkpoint) error {
 	}
 	switch next.Transition.Kind {
 	case CheckpointPhase1OutboundPublished:
-		return validateOutboundTransition(previous, next)
+		return validateOutboundTransition(previous, next, Phase1)
 	case CheckpointPhase1ReceiptAccepted:
-		return validateReceiptTransition(previous, next)
+		return validateReceiptTransition(previous, next, Phase1)
 	case CheckpointPhase1CandidateAccepted:
-		return validateCandidateTransition(previous, next)
+		return validateCandidateTransition(previous, next, Phase1)
+	case CheckpointPhase2OutboundPublished:
+		return validateOutboundTransition(previous, next, Phase2)
+	case CheckpointPhase2ReceiptAccepted:
+		return validateReceiptTransition(previous, next, Phase2)
+	case CheckpointPhase2CandidateAccepted:
+		return validateCandidateTransition(previous, next, Phase2)
 	case CheckpointPhase1Closed:
 		return validatePhase1ClosedTransition(previous, next)
 	case CheckpointPhase1BeaconRecorded:
@@ -779,15 +806,43 @@ func exactArtifactDelta(previous, next []ArtifactRef, expected ...ArtifactRef) b
 	return slices.Equal(actual, expected)
 }
 
-func validateOutboundTransition(previous, next Checkpoint) error {
+func checkpointPhaseState(checkpoint Checkpoint, phase Phase) (*CheckpointPhaseState, error) {
+	if phase == Phase1 {
+		return &checkpoint.Phase1, nil
+	}
+	if phase == Phase2 && checkpoint.Phase2 != nil {
+		return checkpoint.Phase2, nil
+	}
+	return nil, fmt.Errorf("checkpoint has no %s state", phase)
+}
+
+func otherPhaseStatePreserved(previous, next Checkpoint, phase Phase) bool {
+	if phase == Phase1 {
+		return reflect.DeepEqual(previous.Phase2, next.Phase2)
+	}
+	return samePhaseState(previous.Phase1, next.Phase1) &&
+		reflect.DeepEqual(previous.Phase1Closure, next.Phase1Closure) &&
+		reflect.DeepEqual(previous.Phase1Beacon, next.Phase1Beacon) &&
+		reflect.DeepEqual(previous.Phase1Seal, next.Phase1Seal)
+}
+
+func validateOutboundTransition(previous, next Checkpoint, phase Phase) error {
 	t := next.Transition
-	if previous.Phase1Closure != nil || next.Phase1Closure != nil {
+	previousState, err := checkpointPhaseState(previous, phase)
+	if err != nil {
+		return err
+	}
+	nextState, err := checkpointPhaseState(next, phase)
+	if err != nil {
+		return err
+	}
+	if phase == Phase1 && (previous.Phase1Closure != nil || next.Phase1Closure != nil) {
 		return errors.New("phase1 turn cannot advance after closure")
 	}
 	if hasAllocatedSubmission(previous.Submissions) {
 		return errors.New("a new phase1 turn cannot open while another submission attempt is allocated")
 	}
-	if !samePhaseState(previous.Phase1, next.Phase1) || t.Index != previous.Phase1.AcceptedCount+1 {
+	if previousState.AcceptedCount == MaxParticipants || !samePhaseState(*previousState, *nextState) || !otherPhaseStatePreserved(previous, next, phase) || int(t.Index) != int(previousState.AcceptedCount)+1 {
 		return errors.New("outbound publication must preserve the head and target the next index")
 	}
 	if len(next.Submissions) != len(previous.Submissions)+1 || !slotsEqual(previous.Submissions, next.Submissions[:len(previous.Submissions)]) {
@@ -795,7 +850,7 @@ func validateOutboundTransition(previous, next Checkpoint) error {
 	}
 	slot := next.Submissions[len(next.Submissions)-1]
 	if !transitionScopeMatchesSlot(t, slot, CheckpointSubmissionReceipt) || slot.Status != CheckpointSubmissionAllocated ||
-		slot.ParentHeadID != previous.Phase1.HeadRecordID || slot.BasisCheckpointSHA256 != next.PreviousCheckpoint.Record.Digest.SHA256 {
+		slot.ParentHeadID != previousState.HeadRecordID || slot.BasisCheckpointSHA256 != next.PreviousCheckpoint.Record.Digest.SHA256 {
 		return errors.New("outbound publication must allocate the matching receipt attempt for the current head")
 	}
 	if !exactArtifactDelta(previous.AcceptedArtifacts, next.AcceptedArtifacts, signedArtifacts(t.Record)...) {
@@ -804,12 +859,20 @@ func validateOutboundTransition(previous, next Checkpoint) error {
 	return nil
 }
 
-func validateReceiptTransition(previous, next Checkpoint) error {
+func validateReceiptTransition(previous, next Checkpoint, phase Phase) error {
 	t := next.Transition
-	if previous.Phase1Closure != nil || next.Phase1Closure != nil {
+	previousState, err := checkpointPhaseState(previous, phase)
+	if err != nil {
+		return err
+	}
+	nextState, err := checkpointPhaseState(next, phase)
+	if err != nil {
+		return err
+	}
+	if phase == Phase1 && (previous.Phase1Closure != nil || next.Phase1Closure != nil) {
 		return errors.New("phase1 receipt cannot be accepted after closure")
 	}
-	if !samePhaseState(previous.Phase1, next.Phase1) || len(next.Submissions) != len(previous.Submissions)+1 {
+	if !samePhaseState(*previousState, *nextState) || !otherPhaseStatePreserved(previous, next, phase) || len(next.Submissions) != len(previous.Submissions)+1 {
 		return errors.New("receipt acceptance must preserve the head and append one candidate slot")
 	}
 	changed := -1
@@ -835,7 +898,7 @@ func validateReceiptTransition(previous, next Checkpoint) error {
 	candidate := next.Submissions[len(next.Submissions)-1]
 	if candidate.Kind != CheckpointSubmissionCandidate || candidate.Phase != t.Phase || candidate.Index != t.Index ||
 		candidate.IdentityID != t.ParticipantID || candidate.AttemptID != t.NextAttemptID ||
-		candidate.Status != CheckpointSubmissionAllocated || candidate.ParentHeadID != previous.Phase1.HeadRecordID ||
+		candidate.Status != CheckpointSubmissionAllocated || candidate.ParentHeadID != previousState.HeadRecordID ||
 		candidate.BasisCheckpointSHA256 != next.PreviousCheckpoint.Record.Digest.SHA256 {
 		return errors.New("receipt acceptance must append the matching candidate attempt")
 	}
@@ -847,15 +910,23 @@ func validateReceiptTransition(previous, next Checkpoint) error {
 	return nil
 }
 
-func validateCandidateTransition(previous, next Checkpoint) error {
+func validateCandidateTransition(previous, next Checkpoint, phase Phase) error {
 	t := next.Transition
-	if previous.Phase1Closure != nil || next.Phase1Closure != nil {
+	previousState, err := checkpointPhaseState(previous, phase)
+	if err != nil {
+		return err
+	}
+	nextState, err := checkpointPhaseState(next, phase)
+	if err != nil {
+		return err
+	}
+	if phase == Phase1 && (previous.Phase1Closure != nil || next.Phase1Closure != nil) {
 		return errors.New("phase1 candidate cannot be accepted after closure")
 	}
-	if next.Phase1.AcceptedCount != previous.Phase1.AcceptedCount+1 || next.Phase1.AcceptedCount != t.Index ||
-		next.Phase1.HeadRecordID == previous.Phase1.HeadRecordID || next.Phase1.HeadPayload == previous.Phase1.HeadPayload ||
-		next.Phase1.Chain == previous.Phase1.Chain {
-		return errors.New("candidate acceptance must advance exactly one phase1 head")
+	if nextState.AcceptedCount != previousState.AcceptedCount+1 || nextState.AcceptedCount != t.Index ||
+		nextState.HeadRecordID == previousState.HeadRecordID || nextState.HeadPayload == previousState.HeadPayload ||
+		nextState.Chain == previousState.Chain || !otherPhaseStatePreserved(previous, next, phase) {
+		return fmt.Errorf("candidate acceptance must advance exactly one %s head", phase)
 	}
 	if len(next.Submissions) != len(previous.Submissions) {
 		return errors.New("candidate acceptance must not add or remove submission slots")
@@ -885,7 +956,7 @@ func validateCandidateTransition(previous, next Checkpoint) error {
 	// The accepted head payload is one of the submission envelope payloads and
 	// therefore already appears in transition evidence.  The new signed chain
 	// is coordinator-authored state and is added separately.
-	expected = append(expected, next.Phase1.Chain.Record, next.Phase1.Chain.Signature)
+	expected = append(expected, nextState.Chain.Record, nextState.Chain.Signature)
 	if !exactArtifactDelta(previous.AcceptedArtifacts, next.AcceptedArtifacts, expected...) {
 		return errors.New("candidate acceptance accepted an unexpected artifact set")
 	}

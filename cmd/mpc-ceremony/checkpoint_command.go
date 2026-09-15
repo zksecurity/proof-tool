@@ -70,6 +70,9 @@ func addCheckpointEvidenceFlags(fs *flag.FlagSet, options *CheckpointEvidenceOpt
 	fs.StringVar(&options.ChainSignaturePath, "chain-signature", "", "detached current chain signature")
 	fs.StringVar(&options.HeadPayloadPath, "head-payload", "", "exact current phase1 head payload")
 	fs.StringVar(&options.Phase2GenesisPath, "phase2-genesis", "", "exact deterministic phase2 genesis payload")
+	fs.StringVar(&options.Phase2ChainPath, "phase2-chain", "", "exact current phase2 chain")
+	fs.StringVar(&options.Phase2ChainSignaturePath, "phase2-chain-signature", "", "detached current phase2 chain signature")
+	fs.StringVar(&options.Phase2HeadPayloadPath, "phase2-head-payload", "", "exact current phase2 head payload")
 	fs.StringVar(&options.TransitionRecordPath, "transition-record", "", "signed record that causes the transition")
 	fs.StringVar(&options.TransitionRecordSignaturePath, "transition-record-signature", "", "detached transition record signature")
 	fs.StringVar(&options.AcknowledgementPath, "acknowledgement", "", "signed accepted submission acknowledgement")
@@ -99,6 +102,9 @@ func validateCheckpointEvidenceOptions(options CheckpointEvidenceOptions) error 
 		}
 		return nil
 	case mpcceremony.CheckpointPhase1OutboundPublished:
+		if checkpointPhase2TurnInputsPresent(options) {
+			return errors.New("phase1 checkpoint must not supply phase2 chain inputs")
+		}
 		if options.AcknowledgementPath != "" || options.AcknowledgementSignaturePath != "" || options.ManifestPath != "" || options.NextAttemptID != "" || options.NextManifestKey != "" {
 			return errors.New("outbound checkpoint must not supply acknowledgement, submission manifest, or next-attempt inputs")
 		}
@@ -108,6 +114,9 @@ func validateCheckpointEvidenceOptions(options CheckpointEvidenceOptions) error 
 			value("--attempt-id", options.AttemptID), value("--manifest-key", options.ManifestKey),
 		)
 	case mpcceremony.CheckpointPhase1ReceiptAccepted:
+		if checkpointPhase2TurnInputsPresent(options) {
+			return errors.New("phase1 checkpoint must not supply phase2 chain inputs")
+		}
 		return requireValues(
 			pathValue("--previous-checkpoint", options.PreviousCheckpointPath), pathValue("--previous-checkpoint-signature", options.PreviousCheckpointSignaturePath),
 			pathValue("--transition-record", options.TransitionRecordPath), pathValue("--transition-record-signature", options.TransitionRecordSignaturePath),
@@ -115,6 +124,9 @@ func validateCheckpointEvidenceOptions(options CheckpointEvidenceOptions) error 
 			pathValue("--manifest", options.ManifestPath), value("--next-attempt-id", options.NextAttemptID), value("--next-manifest-key", options.NextManifestKey),
 		)
 	case mpcceremony.CheckpointPhase1CandidateAccepted:
+		if checkpointPhase2TurnInputsPresent(options) {
+			return errors.New("phase1 checkpoint must not supply phase2 chain inputs")
+		}
 		if options.AttemptID != "" || options.ManifestKey != "" || options.NextAttemptID != "" || options.NextManifestKey != "" {
 			return errors.New("candidate-accepted checkpoint derives its allocated attempt and must not supply attempt flags")
 		}
@@ -152,9 +164,45 @@ func validateCheckpointEvidenceOptions(options CheckpointEvidenceOptions) error 
 			pathValue("--transition-record", options.TransitionRecordPath), pathValue("--transition-record-signature", options.TransitionRecordSignaturePath),
 			pathValue("--phase2-genesis", options.Phase2GenesisPath),
 		)
+	case mpcceremony.CheckpointPhase2OutboundPublished:
+		if options.AcknowledgementPath != "" || options.AcknowledgementSignaturePath != "" || options.ManifestPath != "" || options.NextAttemptID != "" || options.NextManifestKey != "" || options.Phase2GenesisPath != "" {
+			return errors.New("phase2 outbound checkpoint must not supply acknowledgement, submission manifest, next-attempt, or genesis inputs")
+		}
+		return requireCheckpointPhase2TurnValues(options,
+			pathValue("--transition-record", options.TransitionRecordPath), pathValue("--transition-record-signature", options.TransitionRecordSignaturePath),
+			value("--attempt-id", options.AttemptID), value("--manifest-key", options.ManifestKey))
+	case mpcceremony.CheckpointPhase2ReceiptAccepted:
+		if options.Phase2GenesisPath != "" {
+			return errors.New("phase2 receipt checkpoint must not supply a genesis input")
+		}
+		return requireCheckpointPhase2TurnValues(options,
+			pathValue("--transition-record", options.TransitionRecordPath), pathValue("--transition-record-signature", options.TransitionRecordSignaturePath),
+			pathValue("--acknowledgement", options.AcknowledgementPath), pathValue("--acknowledgement-signature", options.AcknowledgementSignaturePath),
+			pathValue("--manifest", options.ManifestPath), value("--next-attempt-id", options.NextAttemptID), value("--next-manifest-key", options.NextManifestKey))
+	case mpcceremony.CheckpointPhase2CandidateAccepted:
+		if options.AttemptID != "" || options.ManifestKey != "" || options.NextAttemptID != "" || options.NextManifestKey != "" || options.Phase2GenesisPath != "" {
+			return errors.New("phase2 candidate checkpoint derives its allocated attempt and must not supply attempt or genesis flags")
+		}
+		return requireCheckpointPhase2TurnValues(options,
+			pathValue("--transition-record", options.TransitionRecordPath), pathValue("--transition-record-signature", options.TransitionRecordSignaturePath),
+			pathValue("--acknowledgement", options.AcknowledgementPath), pathValue("--acknowledgement-signature", options.AcknowledgementSignaturePath),
+			pathValue("--manifest", options.ManifestPath))
 	default:
 		return fmt.Errorf("unsupported guarded checkpoint transition %q", kind)
 	}
+}
+
+func checkpointPhase2TurnInputsPresent(options CheckpointEvidenceOptions) bool {
+	return options.Phase2ChainPath != "" || options.Phase2ChainSignaturePath != "" || options.Phase2HeadPayloadPath != ""
+}
+
+func requireCheckpointPhase2TurnValues(options CheckpointEvidenceOptions, values ...requiredValue) error {
+	base := []requiredValue{
+		pathValue("--previous-checkpoint", options.PreviousCheckpointPath), pathValue("--previous-checkpoint-signature", options.PreviousCheckpointSignaturePath),
+		pathValue("--phase2-chain", options.Phase2ChainPath), pathValue("--phase2-chain-signature", options.Phase2ChainSignaturePath),
+		pathValue("--phase2-head-payload", options.Phase2HeadPayloadPath),
+	}
+	return requireValues(append(base, values...)...)
 }
 
 func checkpointTransitionOnlyInputsPresent(options CheckpointEvidenceOptions) bool {
@@ -162,7 +210,8 @@ func checkpointTransitionOnlyInputsPresent(options CheckpointEvidenceOptions) bo
 		options.TransitionRecordPath != "" || options.TransitionRecordSignaturePath != "" ||
 		options.AcknowledgementPath != "" || options.AcknowledgementSignaturePath != "" ||
 		options.ManifestPath != "" || options.AttemptID != "" || options.ManifestKey != "" ||
-		options.NextAttemptID != "" || options.NextManifestKey != "" || options.Phase2GenesisPath != ""
+		options.NextAttemptID != "" || options.NextManifestKey != "" || options.Phase2GenesisPath != "" ||
+		checkpointPhase2TurnInputsPresent(options)
 }
 
 func parseCheckpointPrepare(args []string) (CheckpointPrepareOptions, error) {
@@ -316,7 +365,7 @@ func executeCheckpointVerify(options CheckpointVerifyOptions) (CommandResult, er
 		Schema: checkpointEvidenceInspectionSchema, CeremonyID: built.checkpoint.CeremonyID,
 		Sequence: built.checkpoint.Sequence, CheckpointDigest: mpcceremony.NewDigest(checkpointBytes),
 		TransitionKind: built.checkpoint.Transition.Kind, FullyVerified: true,
-		VerifiedEvidenceBoundary: "authenticated ceremony checkpoint through phase2 initialization: exact definition and ancestry; full contribution and cleanup replay for accepted candidates; exact closure, beacon, sealed commons, and deterministic phase2 genesis",
+		VerifiedEvidenceBoundary: "authenticated ceremony checkpoint through phase2 participant turns: exact definition and ancestry; full contribution and cleanup replay for accepted candidates; exact closure, beacon, sealed commons, and deterministic phase2 genesis",
 	}
 	return CommandResult{
 		CeremonyID:                   built.checkpoint.CeremonyID,
@@ -334,7 +383,7 @@ func executeCheckpointVerifyStored(options CheckpointVerifyStoredOptions) (Comma
 		Schema: checkpointEvidenceInspectionSchema, CeremonyID: checkpoint.CeremonyID,
 		Sequence: checkpoint.Sequence, CheckpointDigest: mpcceremony.NewDigest(checkpointBytes),
 		TransitionKind: checkpoint.Transition.Kind, FullyVerified: true,
-		VerifiedEvidenceBoundary: "complete fetched ancestry through phase2 initialization; every edge is re-derived from exact signed records, including full accepted-contribution replay, exact beacon evidence, sealed commons, and deterministic phase2 genesis",
+		VerifiedEvidenceBoundary: "complete fetched ancestry through phase2 participant turns; every edge is re-derived from exact signed records, including full accepted-contribution replay, exact beacon evidence, sealed commons, and deterministic phase2 genesis",
 	}
 	return CommandResult{
 		CeremonyID:                   checkpoint.CeremonyID,
@@ -344,8 +393,8 @@ func executeCheckpointVerifyStored(options CheckpointVerifyStoredOptions) (Comma
 }
 
 func verifyStoredCheckpointAncestry(options CheckpointVerifyStoredOptions, checkpointPath, signaturePath string, seen map[string]struct{}, depth int) (mpcceremony.Checkpoint, []byte, error) {
-	if depth > 1024 {
-		return mpcceremony.Checkpoint{}, nil, errors.New("checkpoint ancestry exceeds the supported 1024-edge bound")
+	if depth > mpcceremony.MaxCheckpointAncestry {
+		return mpcceremony.Checkpoint{}, nil, fmt.Errorf("checkpoint ancestry exceeds the supported %d-edge bound", mpcceremony.MaxCheckpointAncestry)
 	}
 	trusted, definitionBytes, definitionSignatureBytes, err := loadExactInspectionCeremony(options.InspectDefinitionOptions)
 	if err != nil {
@@ -374,6 +423,11 @@ func verifyStoredCheckpointAncestry(options CheckpointVerifyStoredOptions, check
 		if _, _, err := verifyStoredCheckpointAncestry(options, previousPath, previousSignaturePath, seen, depth+1); err != nil {
 			return mpcceremony.Checkpoint{}, nil, fmt.Errorf("checkpoint %d predecessor: %w", checkpoint.Sequence, err)
 		}
+	}
+	if checkpoint.Phase2 != nil {
+		evidence.Phase2ChainPath = filepath.Join(options.ArtifactRoot, filepath.FromSlash(checkpoint.Phase2.Chain.Record.Name))
+		evidence.Phase2ChainSignaturePath = filepath.Join(options.ArtifactRoot, filepath.FromSlash(checkpoint.Phase2.Chain.Signature.Name))
+		evidence.Phase2HeadPayloadPath = filepath.Join(options.ArtifactRoot, filepath.FromSlash(checkpoint.Phase2.HeadPayload.Name))
 	}
 	// The recursive walk above already fully re-derived the predecessor.
 	built, err := buildCheckpointEvidenceWithParent(evidence, false)
@@ -418,21 +472,21 @@ func inferStoredCheckpointEvidence(options CheckpointVerifyStoredOptions, checkp
 	}
 	switch checkpoint.Transition.Kind {
 	case mpcceremony.CheckpointInitial:
-	case mpcceremony.CheckpointPhase1OutboundPublished:
+	case mpcceremony.CheckpointPhase1OutboundPublished, mpcceremony.CheckpointPhase2OutboundPublished:
 		for _, slot := range checkpoint.Submissions {
 			if slot.Kind == mpcceremony.CheckpointSubmissionReceipt && slot.AttemptID == checkpoint.Transition.AttemptID {
 				evidence.AttemptID, evidence.ManifestKey = slot.AttemptID, slot.ManifestKey
 				break
 			}
 		}
-	case mpcceremony.CheckpointPhase1ReceiptAccepted:
+	case mpcceremony.CheckpointPhase1ReceiptAccepted, mpcceremony.CheckpointPhase2ReceiptAccepted:
 		for _, slot := range checkpoint.Submissions {
 			if slot.Kind == mpcceremony.CheckpointSubmissionCandidate && slot.AttemptID == checkpoint.Transition.NextAttemptID {
 				evidence.NextAttemptID, evidence.NextManifestKey = slot.AttemptID, slot.ManifestKey
 				break
 			}
 		}
-	case mpcceremony.CheckpointPhase1CandidateAccepted:
+	case mpcceremony.CheckpointPhase1CandidateAccepted, mpcceremony.CheckpointPhase2CandidateAccepted:
 	case mpcceremony.CheckpointPhase1Closed:
 	case mpcceremony.CheckpointPhase1BeaconRecorded:
 	case mpcceremony.CheckpointPhase1Sealed:
@@ -517,7 +571,7 @@ func buildCheckpointEvidenceWithParent(options CheckpointEvidenceOptions, verify
 
 	kind := mpcceremony.CheckpointTransitionKind(options.TransitionKind)
 	var circuit *mpcceremony.CompiledCircuit
-	if kind == mpcceremony.CheckpointPhase1CandidateAccepted || kind == mpcceremony.CheckpointPhase1Sealed || kind == mpcceremony.CheckpointPhase2Initialized {
+	if kind == mpcceremony.CheckpointPhase1CandidateAccepted || kind == mpcceremony.CheckpointPhase1Sealed || kind == mpcceremony.CheckpointPhase2Initialized || kind == mpcceremony.CheckpointPhase2CandidateAccepted {
 		r1csPath := filepath.Join(options.ArtifactRoot, filepath.FromSlash(trusted.Definition.Circuit.R1CS.Name))
 		rootAbs, rootErr := filepath.Abs(options.ArtifactRoot)
 		if rootErr != nil {
@@ -608,14 +662,62 @@ func buildCheckpointEvidenceWithParent(options CheckpointEvidenceOptions, verify
 	if options.RelayReleaseID != previous.RelayReleaseID {
 		return builtCheckpointEvidence{}, errors.New("relay release id differs from previous checkpoint")
 	}
+	activePhase := mpcceremony.Phase1
+	activeState := phaseState
+	activeChain := chain
+	if kind == mpcceremony.CheckpointPhase2OutboundPublished || kind == mpcceremony.CheckpointPhase2ReceiptAccepted || kind == mpcceremony.CheckpointPhase2CandidateAccepted {
+		if previous.Phase2 == nil || previous.Phase1Seal == nil {
+			return builtCheckpointEvidence{}, errors.New("phase2 turn requires an initialized phase2 checkpoint")
+		}
+		activePhase = mpcceremony.Phase2
+		phase2Paths := mpcceremony.PhaseTranscriptPaths{RootDir: options.ArtifactRoot, ChainPath: options.Phase2ChainPath, ChainSignaturePath: options.Phase2ChainSignaturePath}
+		var phase2Refs mpcceremony.SignedArtifactRefs
+		if kind == mpcceremony.CheckpointPhase2CandidateAccepted {
+			activeChain, phase2Refs, err = mpcceremony.VerifyAcceptedPhase2Chain(
+				trustPaths(options.CeremonyPath, options.CeremonySignaturePath, options.CoordinatorPublicKeyFile), circuit, options.ArtifactRoot,
+				filepath.Join(options.ArtifactRoot, filepath.FromSlash(previous.Phase1Seal.Record.Name)),
+				filepath.Join(options.ArtifactRoot, filepath.FromSlash(previous.Phase1Seal.Signature.Name)), phase2Paths)
+		} else {
+			activeChain, phase2Refs, err = mpcceremony.LoadSignedChainExact(trusted, phase2Paths)
+		}
+		if err != nil {
+			return builtCheckpointEvidence{}, fmt.Errorf("phase2 chain verification: %w", err)
+		}
+		expectedName := fmt.Sprintf("phase2/chain-%04d.json", len(activeChain.Records))
+		if err := requireCheckpointArtifactName(phase2Refs.Record, expectedName, "phase2 chain"); err != nil {
+			return builtCheckpointEvidence{}, err
+		}
+		if err := requireCheckpointArtifactName(phase2Refs.Signature, strings.TrimSuffix(expectedName, ".json")+".sig", "phase2 chain signature"); err != nil {
+			return builtCheckpointEvidence{}, err
+		}
+		phase2Head, headErr := activeChain.HeadPayload()
+		if headErr != nil {
+			return builtCheckpointEvidence{}, headErr
+		}
+		supplied, refErr := checkpointArtifactRef(options.ArtifactRoot, options.Phase2HeadPayloadPath)
+		if refErr != nil {
+			return builtCheckpointEvidence{}, fmt.Errorf("phase2 head payload: %w", refErr)
+		}
+		if supplied != phase2Head {
+			return builtCheckpointEvidence{}, errors.New("phase2 head payload does not match the authenticated chain head")
+		}
+		phase2HeadID, headErr := activeChain.HeadRecordID()
+		if headErr != nil {
+			return builtCheckpointEvidence{}, headErr
+		}
+		activeState = mpcceremony.CheckpointPhaseState{Phase: mpcceremony.Phase2, AcceptedCount: uint8(len(activeChain.Records)), HeadRecordID: phase2HeadID, HeadPayload: phase2Head, Chain: phase2Refs}
+		if kind != mpcceremony.CheckpointPhase2CandidateAccepted && *previous.Phase2 != activeState {
+			return builtCheckpointEvidence{}, errors.New("phase2 chain and head do not equal the previous checkpoint state")
+		}
+	}
 
 	switch kind {
 	case mpcceremony.CheckpointPhase1OutboundPublished:
-		return buildOutboundCheckpoint(options, trusted, previous, previousRefs, phaseState)
+		return buildOutboundCheckpoint(options, trusted, previous, previousRefs, activeState, activePhase)
 	case mpcceremony.CheckpointPhase1ReceiptAccepted:
-		return buildReceiptCheckpoint(options, trusted, previous, previousRefs, phaseState)
+		return buildReceiptCheckpoint(options, trusted, previous, previousRefs, activeState, activePhase)
 	case mpcceremony.CheckpointPhase1CandidateAccepted:
-		return buildCandidateCheckpoint(options, trusted, previous, previousRefs, phaseState, chain)
+		return buildCandidateCheckpoint(options, trusted, previous, previousRefs, activeState, activeChain, activePhase)
 	case mpcceremony.CheckpointPhase1Closed:
 		return buildPhase1ClosedCheckpoint(options, trusted, previous, previousRefs, phaseState, chain)
 	case mpcceremony.CheckpointPhase1BeaconRecorded:
@@ -624,6 +726,12 @@ func buildCheckpointEvidenceWithParent(options CheckpointEvidenceOptions, verify
 		return buildPhase1SealCheckpoint(options, trusted, previous, previousRefs, phaseState, circuit)
 	case mpcceremony.CheckpointPhase2Initialized:
 		return buildPhase2InitializedCheckpoint(options, trusted, previous, previousRefs, phaseState, circuit)
+	case mpcceremony.CheckpointPhase2OutboundPublished:
+		return buildOutboundCheckpoint(options, trusted, previous, previousRefs, activeState, activePhase)
+	case mpcceremony.CheckpointPhase2ReceiptAccepted:
+		return buildReceiptCheckpoint(options, trusted, previous, previousRefs, activeState, activePhase)
+	case mpcceremony.CheckpointPhase2CandidateAccepted:
+		return buildCandidateCheckpoint(options, trusted, previous, previousRefs, activeState, activeChain, activePhase)
 	default:
 		return builtCheckpointEvidence{}, fmt.Errorf("unsupported guarded checkpoint transition %q", kind)
 	}
@@ -890,45 +998,62 @@ func checkpointSchemaForDefinition(definition mpcceremony.CeremonyDefinition) st
 	return mpcceremony.CheckpointSchemaV1
 }
 
-func buildOutboundCheckpoint(options CheckpointEvidenceOptions, trusted *mpcceremony.TrustedCeremony, previous mpcceremony.Checkpoint, previousRefs mpcceremony.SignedArtifactRefs, phaseState mpcceremony.CheckpointPhaseState) (builtCheckpointEvidence, error) {
+func buildOutboundCheckpoint(options CheckpointEvidenceOptions, trusted *mpcceremony.TrustedCeremony, previous mpcceremony.Checkpoint, previousRefs mpcceremony.SignedArtifactRefs, phaseState mpcceremony.CheckpointPhaseState, phase mpcceremony.Phase) (builtCheckpointEvidence, error) {
 	recordBytes, record, recordRefs, err := loadSignedOperationalPair(options, mpcceremony.RecordHandoff, options.TransitionRecordPath, options.TransitionRecordSignaturePath)
 	if err != nil {
 		return builtCheckpointEvidence{}, err
 	}
 	_ = recordBytes
 	handoff := record.(*mpcceremony.TransferHandoff)
-	index := previous.Phase1.AcceptedCount + 1
 	policy := trusted.Definition.Phase1Policy
-	if int(index) > len(policy.Participants) {
-		return builtCheckpointEvidence{}, errors.New("no next phase1 participant in the authenticated schedule")
+	transitionKind := mpcceremony.CheckpointPhase1OutboundPublished
+	if phase == mpcceremony.Phase2 {
+		policy = trusted.Definition.Phase2Policy
+		transitionKind = mpcceremony.CheckpointPhase2OutboundPublished
 	}
-	participantID := policy.Participants[index-1]
+	index, participantID, err := nextCheckpointParticipant(phaseState, policy, phase)
+	if err != nil {
+		return builtCheckpointEvidence{}, err
+	}
 	participant, _ := trusted.Definition.ParticipantByID(participantID)
-	if handoff.Phase != mpcceremony.Phase1 || handoff.Index != index || handoff.PredecessorHeadID != previous.Phase1.HeadRecordID ||
+	if handoff.Phase != phase || handoff.Index != index || handoff.PredecessorHeadID != phaseState.HeadRecordID ||
 		handoff.SenderID != trusted.Definition.Coordinator.ID || handoff.SenderKeyID != trusted.Definition.Coordinator.KeyID ||
 		handoff.RecipientID != participantID || handoff.RecipientKeyID != participant.Identity.KeyID ||
-		!slices.Equal(handoff.Files, []mpcceremony.ArtifactRef{previous.Phase1.HeadPayload}) {
+		!slices.Equal(handoff.Files, []mpcceremony.ArtifactRef{phaseState.HeadPayload}) {
 		return builtCheckpointEvidence{}, errors.New("outbound handoff does not bind the exact current head, next participant, and input payload")
 	}
 	transition := mpcceremony.CheckpointTransition{
-		Kind: mpcceremony.CheckpointPhase1OutboundPublished, Phase: mpcceremony.Phase1, Index: index,
+		Kind: transitionKind, Phase: phase, Index: index,
 		ParticipantID: participantID, AttemptID: options.AttemptID, Record: &recordRefs,
 	}
 	checkpoint := previous
 	checkpoint.Sequence++
 	checkpoint.PreviousCheckpoint = &previousRefs
 	checkpoint.Transition = transition
+	if phase == mpcceremony.Phase2 {
+		state := phaseState
+		checkpoint.Phase2 = &state
+	} else {
+		checkpoint.Phase1 = phaseState
+	}
 	checkpoint.AcceptedArtifacts = checkpointSortedArtifacts(append(append([]mpcceremony.ArtifactRef(nil), previous.AcceptedArtifacts...), recordRefs.Record, recordRefs.Signature)...)
 	checkpoint.Submissions = append(append([]mpcceremony.CheckpointSubmissionSlot(nil), previous.Submissions...), mpcceremony.CheckpointSubmissionSlot{
-		Kind: mpcceremony.CheckpointSubmissionReceipt, Phase: mpcceremony.Phase1, Index: index,
+		Kind: mpcceremony.CheckpointSubmissionReceipt, Phase: phase, Index: index,
 		IdentityID: participantID, AttemptID: options.AttemptID, ManifestKey: options.ManifestKey,
-		BasisCheckpointSHA256: previousRefs.Record.Digest.SHA256, ParentHeadID: previous.Phase1.HeadRecordID,
+		BasisCheckpointSHA256: previousRefs.Record.Digest.SHA256, ParentHeadID: phaseState.HeadRecordID,
 		Status: mpcceremony.CheckpointSubmissionAllocated,
 	})
 	return finishTransitionCheckpoint(trusted, previous, checkpoint)
 }
 
-func buildReceiptCheckpoint(options CheckpointEvidenceOptions, trusted *mpcceremony.TrustedCeremony, previous mpcceremony.Checkpoint, previousRefs mpcceremony.SignedArtifactRefs, phaseState mpcceremony.CheckpointPhaseState) (builtCheckpointEvidence, error) {
+func nextCheckpointParticipant(state mpcceremony.CheckpointPhaseState, policy mpcceremony.PhasePolicy, phase mpcceremony.Phase) (uint8, string, error) {
+	if int(state.AcceptedCount) >= len(policy.Participants) {
+		return 0, "", fmt.Errorf("no next %s participant in the authenticated schedule", phase)
+	}
+	return state.AcceptedCount + 1, policy.Participants[int(state.AcceptedCount)], nil
+}
+
+func buildReceiptCheckpoint(options CheckpointEvidenceOptions, trusted *mpcceremony.TrustedCeremony, previous mpcceremony.Checkpoint, previousRefs mpcceremony.SignedArtifactRefs, phaseState mpcceremony.CheckpointPhaseState, phase mpcceremony.Phase) (builtCheckpointEvidence, error) {
 	envelopeBytes, envelopeSignatureBytes, envelopeRefs, err := checkpointSignedBytes(options.ArtifactRoot, options.TransitionRecordPath, options.TransitionRecordSignaturePath)
 	if err != nil {
 		return builtCheckpointEvidence{}, fmt.Errorf("receipt submission envelope: %w", err)
@@ -970,9 +1095,13 @@ func buildReceiptCheckpoint(options CheckpointEvidenceOptions, trusted *mpccerem
 	if ack.Result != mpcceremony.SubmissionAccepted {
 		return builtCheckpointEvidence{}, errors.New("receipt-accepted checkpoint requires an accepted acknowledgement")
 	}
+	transitionKind := mpcceremony.CheckpointPhase1ReceiptAccepted
+	if phase == mpcceremony.Phase2 {
+		transitionKind = mpcceremony.CheckpointPhase2ReceiptAccepted
+	}
 	evidence := checkpointSortedArtifacts(append([]mpcceremony.ArtifactRef{manifest}, envelope.Payloads...)...)
 	transition := mpcceremony.CheckpointTransition{
-		Kind: mpcceremony.CheckpointPhase1ReceiptAccepted, Phase: mpcceremony.Phase1,
+		Kind: transitionKind, Phase: phase,
 		Index: slot.Index, ParticipantID: slot.IdentityID, AttemptID: slot.AttemptID,
 		NextAttemptID: options.NextAttemptID, Record: &envelopeRefs, Acknowledgement: &ackRefs, Evidence: evidence,
 	}
@@ -980,7 +1109,12 @@ func buildReceiptCheckpoint(options CheckpointEvidenceOptions, trusted *mpccerem
 	checkpoint.Sequence++
 	checkpoint.PreviousCheckpoint = &previousRefs
 	checkpoint.Transition = transition
-	checkpoint.Phase1 = phaseState
+	if phase == mpcceremony.Phase2 {
+		state := phaseState
+		checkpoint.Phase2 = &state
+	} else {
+		checkpoint.Phase1 = phaseState
+	}
 	accepted := append(append([]mpcceremony.ArtifactRef(nil), previous.AcceptedArtifacts...), envelopeRefs.Record, envelopeRefs.Signature, ackRefs.Record, ackRefs.Signature)
 	accepted = append(accepted, evidence...)
 	checkpoint.AcceptedArtifacts = checkpointSortedArtifacts(accepted...)
@@ -992,16 +1126,25 @@ func buildReceiptCheckpoint(options CheckpointEvidenceOptions, trusted *mpccerem
 		}
 	}
 	checkpoint.Submissions = append(checkpoint.Submissions, mpcceremony.CheckpointSubmissionSlot{
-		Kind: mpcceremony.CheckpointSubmissionCandidate, Phase: mpcceremony.Phase1, Index: slot.Index,
+		Kind: mpcceremony.CheckpointSubmissionCandidate, Phase: phase, Index: slot.Index,
 		IdentityID: slot.IdentityID, AttemptID: options.NextAttemptID, ManifestKey: options.NextManifestKey,
-		BasisCheckpointSHA256: previousRefs.Record.Digest.SHA256, ParentHeadID: previous.Phase1.HeadRecordID,
+		BasisCheckpointSHA256: previousRefs.Record.Digest.SHA256, ParentHeadID: phaseState.HeadRecordID,
 		Status: mpcceremony.CheckpointSubmissionAllocated,
 	})
 	return finishTransitionCheckpoint(trusted, previous, checkpoint)
 }
 
-func buildCandidateCheckpoint(options CheckpointEvidenceOptions, trusted *mpcceremony.TrustedCeremony, previous mpcceremony.Checkpoint, previousRefs mpcceremony.SignedArtifactRefs, phaseState mpcceremony.CheckpointPhaseState, chain mpcceremony.Chain) (builtCheckpointEvidence, error) {
-	if phaseState.AcceptedCount != previous.Phase1.AcceptedCount+1 || len(chain.Records) == 0 {
+func buildCandidateCheckpoint(options CheckpointEvidenceOptions, trusted *mpcceremony.TrustedCeremony, previous mpcceremony.Checkpoint, previousRefs mpcceremony.SignedArtifactRefs, phaseState mpcceremony.CheckpointPhaseState, chain mpcceremony.Chain, phase mpcceremony.Phase) (builtCheckpointEvidence, error) {
+	previousState := previous.Phase1
+	transitionKind := mpcceremony.CheckpointPhase1CandidateAccepted
+	if phase == mpcceremony.Phase2 {
+		if previous.Phase2 == nil {
+			return builtCheckpointEvidence{}, errors.New("phase2 candidate requires initialized phase2 state")
+		}
+		previousState = *previous.Phase2
+		transitionKind = mpcceremony.CheckpointPhase2CandidateAccepted
+	}
+	if phaseState.AcceptedCount != previousState.AcceptedCount+1 || len(chain.Records) == 0 {
 		return builtCheckpointEvidence{}, errors.New("candidate checkpoint chain must advance the previous head by exactly one record")
 	}
 	envelopeBytes, envelopeSignatureBytes, envelopeRefs, err := checkpointSignedBytes(options.ArtifactRoot, options.TransitionRecordPath, options.TransitionRecordSignaturePath)
@@ -1025,7 +1168,7 @@ func buildCandidateCheckpoint(options CheckpointEvidenceOptions, trusted *mpccer
 	}
 	acceptedRecord := chain.Records[len(chain.Records)-1]
 	if acceptedRecord.Index != slot.Index || acceptedRecord.ParticipantID != slot.IdentityID ||
-		acceptedRecord.PreviousRecordID != previous.Phase1.HeadRecordID {
+		acceptedRecord.PreviousRecordID != previousState.HeadRecordID {
 		return builtCheckpointEvidence{}, errors.New("authenticated accepted chain record does not match the allocated candidate slot and previous head")
 	}
 	if err := verifyCandidateEnvelopePayloads(options.ArtifactRoot, envelope, acceptedRecord); err != nil {
@@ -1052,7 +1195,7 @@ func buildCandidateCheckpoint(options CheckpointEvidenceOptions, trusted *mpccer
 	}
 	evidence := checkpointSortedArtifacts(append([]mpcceremony.ArtifactRef{manifest}, envelope.Payloads...)...)
 	transition := mpcceremony.CheckpointTransition{
-		Kind: mpcceremony.CheckpointPhase1CandidateAccepted, Phase: mpcceremony.Phase1,
+		Kind: transitionKind, Phase: phase,
 		Index: slot.Index, ParticipantID: slot.IdentityID, AttemptID: slot.AttemptID,
 		Record: &envelopeRefs, Acknowledgement: &ackRefs, Evidence: evidence,
 	}
@@ -1060,7 +1203,12 @@ func buildCandidateCheckpoint(options CheckpointEvidenceOptions, trusted *mpccer
 	checkpoint.Sequence++
 	checkpoint.PreviousCheckpoint = &previousRefs
 	checkpoint.Transition = transition
-	checkpoint.Phase1 = phaseState
+	if phase == mpcceremony.Phase2 {
+		state := phaseState
+		checkpoint.Phase2 = &state
+	} else {
+		checkpoint.Phase1 = phaseState
+	}
 	accepted := append(append([]mpcceremony.ArtifactRef(nil), previous.AcceptedArtifacts...),
 		envelopeRefs.Record, envelopeRefs.Signature, ackRefs.Record, ackRefs.Signature,
 		phaseState.Chain.Record, phaseState.Chain.Signature)
@@ -1374,7 +1522,7 @@ func checkpointBytesForRef(root string, ref mpcceremony.ArtifactRef, limit int64
 		return nil, err
 	}
 	if actual != ref {
-		return nil, errors.New("retained file differs from checkpoint digest")
+		return nil, fmt.Errorf("retained file %q differs from checkpoint digest", ref.Name)
 	}
 	return data, nil
 }

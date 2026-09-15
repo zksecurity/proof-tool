@@ -9,6 +9,7 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -167,7 +168,7 @@ func TestCheckpointPrepareRejectsWrongOutboundSignature(t *testing.T) {
 	writeDecisionTestFile(t, handoffPath, handoffBytes, 0o600)
 	writeDecisionTestFile(t, handoffSignaturePath, wrongSignature, 0o600)
 
-	args := checkpointOutboundEvidenceArgs(fixture, cp0Path, cp0SignaturePath, handoffPath, handoffSignaturePath)
+	args := checkpointOutboundEvidenceArgs(fixture, cp0Path, cp0SignaturePath, handoffPath, handoffSignaturePath, mpcceremony.Phase1, fixture.chainPath, fixture.chainSignaturePath, fixture.headPayloadPath)
 	args = append(args, "--out-dir", filepath.Join(fixture.root, "prepared", "cp1"))
 	assertCheckpointCommandFails(t, append([]string{"--format", "json", "checkpoint", "prepare"}, args...), "signature")
 }
@@ -175,7 +176,7 @@ func TestCheckpointPrepareRejectsWrongOutboundSignature(t *testing.T) {
 func TestCheckpointPrepareReceiptAcceptedAuthenticatesInnerEvidence(t *testing.T) {
 	fixture := writeCheckpointCLIFixture(t)
 	cp0Path, cp0SignaturePath := prepareAndSignInitialCheckpoint(t, fixture)
-	cp1Path, cp1SignaturePath, handoff, handoffBytes := prepareAndSignOutboundCheckpoint(t, fixture, cp0Path, cp0SignaturePath)
+	cp1Path, cp1SignaturePath, handoff, handoffBytes := prepareAndSignOutboundCheckpoint(t, fixture, cp0Path, cp0SignaturePath, mpcceremony.Phase1, fixture.chainPath, fixture.chainSignaturePath, fixture.headPayloadPath)
 	var cp1 mpcceremony.Checkpoint
 	if err := mpcceremony.UnmarshalCanonical(mustReadTestFile(t, cp1Path), &cp1); err != nil {
 		t.Fatal(err)
@@ -261,7 +262,7 @@ func TestCheckpointPrepareReceiptAcceptedAuthenticatesInnerEvidence(t *testing.T
 	writeDecisionTestFile(t, ackPath, ackBytes, 0o600)
 	writeDecisionTestFile(t, ackSignaturePath, ackSignatureBytes, 0o600)
 
-	args := checkpointReceiptEvidenceArgs(fixture, cp1Path, cp1SignaturePath, envelopePath, envelopeSignaturePath, manifestPath, ackPath, ackSignaturePath)
+	args := checkpointReceiptEvidenceArgs(fixture, cp1Path, cp1SignaturePath, envelopePath, envelopeSignaturePath, manifestPath, ackPath, ackSignaturePath, mpcceremony.Phase1, fixture.chainPath, fixture.chainSignaturePath, fixture.headPayloadPath)
 	cp2Packet := filepath.Join(fixture.root, "prepared", "cp2")
 	result := runCheckpointCommandCLI(t, append(append([]string{"--format", "json", "checkpoint", "prepare"}, args...), "--out-dir", cp2Packet))
 	var cp2 mpcceremony.Checkpoint
@@ -306,14 +307,14 @@ func TestCheckpointPrepareReceiptAcceptedAuthenticatesInnerEvidence(t *testing.T
 	)
 }
 
-func TestCheckpointCommandFullLifecycleThroughPhase2Initialization(t *testing.T) {
+func TestCheckpointCommandFullLifecycleThroughPhase2Turn(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("full signed workflow fixture requires Linux executable identity")
 	}
 	fixture, participantKey := writeWorkflowCheckpointCLIFixture(t)
 	cp0Path, cp0SignaturePath := prepareAndSignInitialCheckpoint(t, fixture)
-	cp1Path, cp1SignaturePath, handoff, handoffBytes := prepareAndSignOutboundCheckpoint(t, fixture, cp0Path, cp0SignaturePath)
-	cp2Path, cp2SignaturePath := prepareAndSignReceiptCheckpoint(t, fixture, participantKey, cp1Path, cp1SignaturePath, handoff, handoffBytes)
+	cp1Path, cp1SignaturePath, handoff, handoffBytes := prepareAndSignOutboundCheckpoint(t, fixture, cp0Path, cp0SignaturePath, mpcceremony.Phase1, fixture.chainPath, fixture.chainSignaturePath, fixture.headPayloadPath)
+	cp2Path, cp2SignaturePath := prepareAndSignReceiptCheckpoint(t, fixture, participantKey, cp1Path, cp1SignaturePath, handoff, handoffBytes, mpcceremony.Phase1, fixture.chainPath, fixture.chainSignaturePath, fixture.headPayloadPath)
 
 	var cp2 mpcceremony.Checkpoint
 	if err := mpcceremony.UnmarshalCanonical(mustReadTestFile(t, cp2Path), &cp2); err != nil {
@@ -415,7 +416,7 @@ func TestCheckpointCommandFullLifecycleThroughPhase2Initialization(t *testing.T)
 	result := runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "prepare"}, args...), "--out-dir", cp3Packet))
 	keyPath := filepath.Join(filepath.Dir(fixture.root), "identity-keys", "coordinator.ed25519.private.hex")
 	cp3SignaturePath := filepath.Join(fixture.root, "state", "signed-cp3.sig")
-	runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "sign"}, args...),
+	runCheckpointFixtureCommand(t, fixture, append(append([]string{"--format", "json", "checkpoint", "sign"}, args...),
 		"--checkpoint", result.Outputs["checkpoint"], "--signing-request", result.Outputs["signing_request"],
 		"--coordinator-signing-key", keyPath, "--out", cp3SignaturePath))
 	verified := runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "verify-stored"}, fixture.trustArgs...),
@@ -482,25 +483,18 @@ func TestCheckpointCommandFullLifecycleThroughPhase2Initialization(t *testing.T)
 	if verified.CheckpointEvidenceInspection == nil || !verified.CheckpointEvidenceInspection.FullyVerified || verified.CheckpointEvidenceInspection.Sequence != 6 {
 		t.Fatalf("cp6 stored verification = %#v", verified.CheckpointEvidenceInspection)
 	}
-	phase2 := runCheckpointCommandExecutable(t, fixture.executable, append([]string{"--format", "json", "phase2", "init"}, append(fixture.trustArgs,
-		"--phase1-transcript-dir", fixture.root,
-		"--phase1-seal", filepath.Join(fixture.root, "phase1", "sealed", "seal.json"),
-		"--phase1-seal-signature", filepath.Join(fixture.root, "phase1", "sealed", "seal.sig"),
-		"--coordinator-signing-key", keyPath,
-		"--out-dir", filepath.Join(fixture.root, "phase2"),
-	)...))
-	if phase2.Outputs["phase2_genesis"] == "" || phase2.Outputs["phase2_chain"] == "" {
-		t.Fatalf("Phase 2 initialization after cp6 outputs = %#v", phase2.Outputs)
-	}
+	phase2Genesis := filepath.Join(fixture.root, "phase2", "genesis.bin")
+	phase2Chain0 := filepath.Join(fixture.root, "phase2", "chain-0000.json")
+	phase2Chain0Signature := filepath.Join(fixture.root, "phase2", "chain-0000.sig")
 	phase2Args := append(append([]string{}, fixture.trustArgs...),
 		"--artifact-root", fixture.root, "--relay-release-id", "role-images-test",
 		"--transition", string(mpcceremony.CheckpointPhase2Initialized),
 		"--previous-checkpoint", cp6.Outputs["checkpoint"], "--previous-checkpoint-signature", cp6SignaturePath,
 		"--chain", chainPath, "--chain-signature", chainSignaturePath,
 		"--head-payload", filepath.Join(fixture.root, filepath.FromSlash(accepted.OutputPayload.Name)),
-		"--transition-record", phase2.Outputs["phase2_chain"],
-		"--transition-record-signature", phase2.Outputs["phase2_chain_signature"],
-		"--phase2-genesis", phase2.Outputs["phase2_genesis"],
+		"--transition-record", phase2Chain0,
+		"--transition-record-signature", phase2Chain0Signature,
+		"--phase2-genesis", phase2Genesis,
 	)
 	cp7Packet := filepath.Join(fixture.root, "prepared", "cp7")
 	cp7 := runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "prepare"}, phase2Args...), "--out-dir", cp7Packet))
@@ -513,6 +507,19 @@ func TestCheckpointCommandFullLifecycleThroughPhase2Initialization(t *testing.T)
 	if verified.CheckpointEvidenceInspection == nil || !verified.CheckpointEvidenceInspection.FullyVerified || verified.CheckpointEvidenceInspection.Sequence != 7 {
 		t.Fatalf("cp7 stored verification = %#v", verified.CheckpointEvidenceInspection)
 	}
+	phase2Fixture := fixture
+	phase2Fixture.chainPath, phase2Fixture.chainSignaturePath = chainPath, chainSignaturePath
+	phase2Fixture.headPayloadPath = filepath.Join(fixture.root, filepath.FromSlash(accepted.OutputPayload.Name))
+	cp8Path, cp8SignaturePath, phase2Handoff, phase2HandoffBytes := prepareAndSignOutboundCheckpoint(t, phase2Fixture, cp7.Outputs["checkpoint"], cp7SignaturePath, mpcceremony.Phase2, phase2Chain0, phase2Chain0Signature, phase2Genesis)
+	cp9Path, cp9SignaturePath := prepareAndSignReceiptCheckpoint(t, phase2Fixture, participantKey, cp8Path, cp8SignaturePath, phase2Handoff, phase2HandoffBytes, mpcceremony.Phase2, phase2Chain0, phase2Chain0Signature, phase2Genesis)
+	phase2Chain1 := filepath.Join(fixture.root, "phase2", "chain-0001.json")
+	phase2Chain1Signature := filepath.Join(fixture.root, "phase2", "chain-0001.sig")
+	cp10Path, cp10SignaturePath := prepareAndSignCandidateCheckpoint(t, phase2Fixture, participantKey, cp9Path, cp9SignaturePath, mpcceremony.Phase2, phase2Chain1, phase2Chain1Signature)
+	verified = runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "verify-stored"}, fixture.trustArgs...),
+		"--checkpoint", cp10Path, "--checkpoint-signature", cp10SignaturePath, "--artifact-root", fixture.root))
+	if verified.CheckpointEvidenceInspection == nil || !verified.CheckpointEvidenceInspection.FullyVerified || verified.CheckpointEvidenceInspection.Sequence != 10 {
+		t.Fatalf("cp10 stored verification = %#v", verified.CheckpointEvidenceInspection)
+	}
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, phase2Args, "phase2/genesis.bin", "phase2-genesis")
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, phase2Args, "phase2/chain-0000.json", "phase2-chain")
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, phase2Args, "phase2/chain-0000.sig", "phase2-chain-signature")
@@ -523,6 +530,105 @@ func TestCheckpointCommandFullLifecycleThroughPhase2Initialization(t *testing.T)
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, args, filepath.ToSlash(mustRelativeTestPath(t, fixture.root, manifestPath)), "manifest")
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, args, filepath.ToSlash(mustRelativeTestPath(t, fixture.root, ackSignaturePath)), "acknowledgement")
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, args, filepath.ToSlash(mustRelativeTestPath(t, fixture.root, chainPath)), "accepted-chain")
+}
+
+func prepareAndSignCandidateCheckpoint(t *testing.T, fixture checkpointCLIFixture, participantKey ed25519.PrivateKey, previousPath, previousSignaturePath string, phase mpcceremony.Phase, chainPath, chainSignaturePath string) (string, string) {
+	t.Helper()
+	var previous mpcceremony.Checkpoint
+	if err := mpcceremony.UnmarshalCanonical(mustReadTestFile(t, previousPath), &previous); err != nil {
+		t.Fatal(err)
+	}
+	var slot mpcceremony.CheckpointSubmissionSlot
+	for _, candidate := range previous.Submissions {
+		if candidate.Phase == phase && candidate.Kind == mpcceremony.CheckpointSubmissionCandidate && candidate.Status == mpcceremony.CheckpointSubmissionAllocated {
+			slot = candidate
+		}
+	}
+	if slot.AttemptID == "" {
+		t.Fatalf("%s checkpoint has no allocated candidate slot", phase)
+	}
+	trusted, err := mpcceremony.LoadSignedDefinition(mpcceremony.TrustPaths{DefinitionPath: fixture.trustArgs[1], DefinitionSignaturePath: fixture.trustArgs[3], CoordinatorPublicKeyPath: fixture.trustArgs[5]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain, _, err := mpcceremony.LoadSignedChainExact(trusted, mpcceremony.PhaseTranscriptPaths{RootDir: fixture.root, ChainPath: chainPath, ChainSignaturePath: chainSignaturePath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted := chain.Records[len(chain.Records)-1]
+	payloads := checkpointSortedArtifacts(accepted.OutputPayload, accepted.Attestation, accepted.AttestationSignature, accepted.Erasure, accepted.ErasureSignature)
+	previousBytes := mustReadTestFile(t, previousPath)
+	envelope := mpcceremony.SubmissionEnvelopeV1{
+		Schema: mpcceremony.SubmissionEnvelopeSchemaV1, Workflow: previous.Workflow,
+		CeremonyID: previous.CeremonyID, Definition: previous.Definition, RelayReleaseID: previous.RelayReleaseID,
+		SubmitterID: slot.IdentityID, SubmitterKeyID: fixture.definition.Roster[0].Identity.KeyID,
+		SubmitterRole: mpcceremony.SubmissionRoleParticipant, Kind: slot.Kind, Phase: slot.Phase, Index: slot.Index,
+		ParentCheckpointSHA256: slot.BasisCheckpointSHA256, AllocationCheckpointSHA256: mpcceremony.NewDigest(previousBytes).SHA256,
+		ParentHeadID: slot.ParentHeadID, AttemptID: slot.AttemptID, ManifestKey: slot.ManifestKey, Payloads: payloads,
+	}
+	envelopeDir := filepath.Join(fixture.root, "submissions", string(phase)+"-candidate", slot.AttemptID)
+	if err := os.MkdirAll(envelopeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	envelopePath, envelopeSignaturePath := filepath.Join(envelopeDir, "envelope.json"), filepath.Join(envelopeDir, "envelope.sig")
+	envelopeBytes, envelopeSignatureBytes, err := mpcceremony.SignSubmissionEnvelope(fixture.definition, previous, slot, envelope, participantKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeDecisionTestFile(t, envelopePath, envelopeBytes, 0o600)
+	writeDecisionTestFile(t, envelopeSignaturePath, envelopeSignatureBytes, 0o600)
+	envelopeRefs, err := checkpointPairRefs(fixture.root, envelopePath, envelopeSignaturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(fixture.root, filepath.FromSlash(slot.ManifestKey))
+	manifestBytes := []byte(`{"kind":"candidate","complete":true}`)
+	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeDecisionTestFile(t, manifestPath, manifestBytes, 0o600)
+	manifestRef, err := checkpointArtifactRef(fixture.root, manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ack := mpcceremony.SubmissionAcknowledgementV1{
+		Schema: mpcceremony.SubmissionAcknowledgementSchemaV1, Workflow: previous.Workflow,
+		CeremonyID: previous.CeremonyID, Definition: previous.Definition, RelayReleaseID: previous.RelayReleaseID,
+		CoordinatorID: fixture.definition.Coordinator.ID, CoordinatorKeyID: fixture.definition.Coordinator.KeyID,
+		SubmitterID: envelope.SubmitterID, SubmitterKeyID: envelope.SubmitterKeyID, SubmitterRole: envelope.SubmitterRole,
+		Kind: envelope.Kind, Phase: envelope.Phase, Index: envelope.Index,
+		ParentCheckpointSHA256: envelope.ParentCheckpointSHA256, AllocationCheckpointSHA256: envelope.AllocationCheckpointSHA256,
+		ParentHeadID: envelope.ParentHeadID, AttemptID: envelope.AttemptID, ManifestKey: envelope.ManifestKey,
+		Envelope: envelopeRefs, Manifest: manifestRef, Result: mpcceremony.SubmissionAccepted,
+	}
+	ackPath, ackSignaturePath := filepath.Join(envelopeDir, "ack.json"), filepath.Join(envelopeDir, "ack.sig")
+	ackBytes, ackSignatureBytes, err := mpcceremony.SignSubmissionAcknowledgement(fixture.definition, previous, slot, envelope, envelopeRefs, manifestRef, ack, ed25519.PrivateKey(fixture.coordinatorKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeDecisionTestFile(t, ackPath, ackBytes, 0o600)
+	writeDecisionTestFile(t, ackSignaturePath, ackSignatureBytes, 0o600)
+	kind := mpcceremony.CheckpointPhase1CandidateAccepted
+	activeArgs := checkpointActivePhaseArgs(phase, chainPath, chainSignaturePath, filepath.Join(fixture.root, filepath.FromSlash(accepted.OutputPayload.Name)))
+	if phase == mpcceremony.Phase2 {
+		kind = mpcceremony.CheckpointPhase2CandidateAccepted
+	}
+	args := append(append([]string{}, fixture.trustArgs...), "--artifact-root", fixture.root, "--relay-release-id", "role-images-test",
+		"--transition", string(kind), "--previous-checkpoint", previousPath, "--previous-checkpoint-signature", previousSignaturePath,
+		"--transition-record", envelopePath, "--transition-record-signature", envelopeSignaturePath,
+		"--manifest", manifestPath, "--acknowledgement", ackPath, "--acknowledgement-signature", ackSignaturePath)
+	args = append(args, activeArgs...)
+	if phase == mpcceremony.Phase2 {
+		args = append(args, "--chain", fixture.chainPath, "--chain-signature", fixture.chainSignaturePath, "--head-payload", fixture.headPayloadPath)
+	}
+	packet := filepath.Join(fixture.root, "prepared", "signed-"+string(phase)+"-candidate")
+	result := runCheckpointFixtureCommand(t, fixture, append(append([]string{"--format", "json", "checkpoint", "prepare"}, args...), "--out-dir", packet))
+	keyPath := filepath.Join(filepath.Dir(fixture.root), "identity-keys", "coordinator.ed25519.private.hex")
+	signaturePath := filepath.Join(fixture.root, "state", "signed-"+string(phase)+"-candidate.sig")
+	runCheckpointFixtureCommand(t, fixture, append(append([]string{"--format", "json", "checkpoint", "sign"}, args...),
+		"--checkpoint", result.Outputs["checkpoint"], "--signing-request", result.Outputs["signing_request"],
+		"--coordinator-signing-key", keyPath, "--out", signaturePath))
+	return result.Outputs["checkpoint"], signaturePath
 }
 
 func TestVerifyCandidateEnvelopePayloadsStreamsLargeContribution(t *testing.T) {
@@ -578,6 +684,17 @@ func TestVerifyCandidateEnvelopePayloadsStreamsLargeContribution(t *testing.T) {
 	}
 }
 
+func TestNextCheckpointParticipantRejectsCompleteMaximumSchedule(t *testing.T) {
+	participants := make([]string, mpcceremony.MaxParticipants)
+	for index := range participants {
+		participants[index] = fmt.Sprintf("participant-%03d", index+1)
+	}
+	state := mpcceremony.CheckpointPhaseState{Phase: mpcceremony.Phase2, AcceptedCount: mpcceremony.MaxParticipants}
+	if _, _, err := nextCheckpointParticipant(state, mpcceremony.PhasePolicy{Participants: participants, Minimum: 1}, mpcceremony.Phase2); err == nil {
+		t.Fatal("complete 255-participant schedule returned another participant")
+	}
+}
+
 func checkpointInitialEvidenceArgs(fixture checkpointCLIFixture) []string {
 	return append(append([]string{}, fixture.trustArgs...),
 		"--artifact-root", fixture.root,
@@ -615,7 +732,7 @@ func writeWorkflowCheckpointCLIFixture(t *testing.T) (checkpointCLIFixture, ed25
 	run.Dir = filepath.Clean(filepath.Join(repoRoot, "..", ".."))
 	run.Env = append(os.Environ(),
 		"MPC_CEREMONY_TEST_BINARY="+commandPath,
-		"MPC_WORKFLOW_PHASE1_ONE=1",
+		"MPC_WORKFLOW_PHASE2_ONE=1",
 	)
 	if output, runErr := run.CombinedOutput(); runErr != nil {
 		t.Fatalf("run workflow helper: %v\n%s", runErr, output)
@@ -653,7 +770,7 @@ func readCheckpointTestKey(t *testing.T, path string) ed25519.PrivateKey {
 	return ed25519.NewKeyFromSeed(seed)
 }
 
-func prepareAndSignReceiptCheckpoint(t *testing.T, fixture checkpointCLIFixture, participantKey ed25519.PrivateKey, cp1Path, cp1SignaturePath string, handoff mpcceremony.TransferHandoff, handoffBytes []byte) (string, string) {
+func prepareAndSignReceiptCheckpoint(t *testing.T, fixture checkpointCLIFixture, participantKey ed25519.PrivateKey, cp1Path, cp1SignaturePath string, handoff mpcceremony.TransferHandoff, handoffBytes []byte, phase mpcceremony.Phase, activeChainPath, activeChainSignaturePath, activeHeadPath string) (string, string) {
 	t.Helper()
 	var cp1 mpcceremony.Checkpoint
 	if err := mpcceremony.UnmarshalCanonical(mustReadTestFile(t, cp1Path), &cp1); err != nil {
@@ -732,19 +849,19 @@ func prepareAndSignReceiptCheckpoint(t *testing.T, fixture checkpointCLIFixture,
 	if err := os.MkdirAll(ackDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	ackPath, ackSignaturePath := filepath.Join(ackDir, "receipt-real.json"), filepath.Join(ackDir, "receipt-real.sig")
+	ackPath, ackSignaturePath := filepath.Join(ackDir, string(phase)+"-receipt-real.json"), filepath.Join(ackDir, string(phase)+"-receipt-real.sig")
 	ackBytes, ackSignatureBytes, err := mpcceremony.SignSubmissionAcknowledgement(fixture.definition, cp1, slot, envelope, envelopeRefs, manifestRef, ack, ed25519.PrivateKey(fixture.coordinatorKey))
 	if err != nil {
 		t.Fatal(err)
 	}
 	writeDecisionTestFile(t, ackPath, ackBytes, 0o600)
 	writeDecisionTestFile(t, ackSignaturePath, ackSignatureBytes, 0o600)
-	args := checkpointReceiptEvidenceArgs(fixture, cp1Path, cp1SignaturePath, envelopePath, envelopeSignaturePath, manifestPath, ackPath, ackSignaturePath)
-	packet := filepath.Join(fixture.root, "prepared", "signed-cp2-real")
-	result := runCheckpointCommandCLI(t, append(append([]string{"--format", "json", "checkpoint", "prepare"}, args...), "--out-dir", packet))
+	args := checkpointReceiptEvidenceArgs(fixture, cp1Path, cp1SignaturePath, envelopePath, envelopeSignaturePath, manifestPath, ackPath, ackSignaturePath, phase, activeChainPath, activeChainSignaturePath, activeHeadPath)
+	packet := filepath.Join(fixture.root, "prepared", "signed-"+string(phase)+"-receipt")
+	result := runCheckpointFixtureCommand(t, fixture, append(append([]string{"--format", "json", "checkpoint", "prepare"}, args...), "--out-dir", packet))
 	keyPath := filepath.Join(filepath.Dir(fixture.root), "identity-keys", "coordinator.ed25519.private.hex")
-	signaturePath := filepath.Join(fixture.root, "state", "signed-cp2-real.sig")
-	runCheckpointCommandCLI(t, append(append([]string{"--format", "json", "checkpoint", "sign"}, args...),
+	signaturePath := filepath.Join(fixture.root, "state", "signed-"+string(phase)+"-receipt.sig")
+	runCheckpointFixtureCommand(t, fixture, append(append([]string{"--format", "json", "checkpoint", "sign"}, args...),
 		"--checkpoint", result.Outputs["checkpoint"], "--signing-request", result.Outputs["signing_request"],
 		"--coordinator-signing-key", keyPath, "--out", signaturePath))
 	return result.Outputs["checkpoint"], signaturePath
@@ -782,42 +899,64 @@ func mustRelativeTestPath(t *testing.T, root, path string) string {
 	return rel
 }
 
-func checkpointOutboundEvidenceArgs(fixture checkpointCLIFixture, cp0Path, cp0SignaturePath, handoffPath, handoffSignaturePath string) []string {
+func checkpointActivePhaseArgs(phase mpcceremony.Phase, chainPath, chainSignaturePath, headPath string) []string {
+	if phase == mpcceremony.Phase1 {
+		return []string{"--chain", chainPath, "--chain-signature", chainSignaturePath, "--head-payload", headPath}
+	}
+	return []string{"--phase2-chain", chainPath, "--phase2-chain-signature", chainSignaturePath, "--phase2-head-payload", headPath}
+}
+
+func checkpointOutboundEvidenceArgs(fixture checkpointCLIFixture, cp0Path, cp0SignaturePath, handoffPath, handoffSignaturePath string, phase mpcceremony.Phase, activeChainPath, activeChainSignaturePath, activeHeadPath string) []string {
+	kind := mpcceremony.CheckpointPhase1OutboundPublished
+	attemptID := strings.Repeat("a", 32)
+	if phase == mpcceremony.Phase2 {
+		kind = mpcceremony.CheckpointPhase2OutboundPublished
+		attemptID = strings.Repeat("c", 32)
+	}
 	args := append(append([]string{}, fixture.trustArgs...),
 		"--artifact-root", fixture.root,
 		"--relay-release-id", "role-images-test",
-		"--transition", string(mpcceremony.CheckpointPhase1OutboundPublished),
+		"--transition", string(kind),
 		"--previous-checkpoint", cp0Path,
 		"--previous-checkpoint-signature", cp0SignaturePath,
-		"--chain", fixture.chainPath,
-		"--chain-signature", fixture.chainSignaturePath,
-		"--head-payload", fixture.headPayloadPath,
 		"--transition-record", handoffPath,
 		"--transition-record-signature", handoffSignaturePath,
-		"--attempt-id", strings.Repeat("a", 32),
-		"--manifest-key", "submissions/receipt/"+strings.Repeat("a", 32)+"/manifest.json",
+		"--attempt-id", attemptID,
+		"--manifest-key", "submissions/receipt/"+attemptID+"/manifest.json",
 	)
+	args = append(args, checkpointActivePhaseArgs(phase, activeChainPath, activeChainSignaturePath, activeHeadPath)...)
+	if phase == mpcceremony.Phase2 {
+		args = append(args, "--chain", fixture.chainPath, "--chain-signature", fixture.chainSignaturePath, "--head-payload", fixture.headPayloadPath)
+	}
 	return args
 }
 
-func checkpointReceiptEvidenceArgs(fixture checkpointCLIFixture, cp1Path, cp1SignaturePath, envelopePath, envelopeSignaturePath, manifestPath, ackPath, ackSignaturePath string) []string {
-	return append(append([]string{}, fixture.trustArgs...),
+func checkpointReceiptEvidenceArgs(fixture checkpointCLIFixture, cp1Path, cp1SignaturePath, envelopePath, envelopeSignaturePath, manifestPath, ackPath, ackSignaturePath string, phase mpcceremony.Phase, activeChainPath, activeChainSignaturePath, activeHeadPath string) []string {
+	kind := mpcceremony.CheckpointPhase1ReceiptAccepted
+	nextAttemptID := strings.Repeat("b", 32)
+	if phase == mpcceremony.Phase2 {
+		kind = mpcceremony.CheckpointPhase2ReceiptAccepted
+		nextAttemptID = strings.Repeat("d", 32)
+	}
+	args := append(append([]string{}, fixture.trustArgs...),
 		"--artifact-root", fixture.root,
 		"--relay-release-id", "role-images-test",
-		"--transition", string(mpcceremony.CheckpointPhase1ReceiptAccepted),
+		"--transition", string(kind),
 		"--previous-checkpoint", cp1Path,
 		"--previous-checkpoint-signature", cp1SignaturePath,
-		"--chain", fixture.chainPath,
-		"--chain-signature", fixture.chainSignaturePath,
-		"--head-payload", fixture.headPayloadPath,
 		"--transition-record", envelopePath,
 		"--transition-record-signature", envelopeSignaturePath,
 		"--manifest", manifestPath,
 		"--acknowledgement", ackPath,
 		"--acknowledgement-signature", ackSignaturePath,
-		"--next-attempt-id", strings.Repeat("b", 32),
-		"--next-manifest-key", "submissions/candidate/"+strings.Repeat("b", 32)+"/manifest.json",
+		"--next-attempt-id", nextAttemptID,
+		"--next-manifest-key", "submissions/candidate/"+nextAttemptID+"/manifest.json",
 	)
+	args = append(args, checkpointActivePhaseArgs(phase, activeChainPath, activeChainSignaturePath, activeHeadPath)...)
+	if phase == mpcceremony.Phase2 {
+		args = append(args, "--chain", fixture.chainPath, "--chain-signature", fixture.chainSignaturePath, "--head-payload", fixture.headPayloadPath)
+	}
+	return args
 }
 
 func prepareAndSignInitialCheckpoint(t *testing.T, fixture checkpointCLIFixture) (string, string) {
@@ -838,22 +977,29 @@ func prepareAndSignInitialCheckpoint(t *testing.T, fixture checkpointCLIFixture)
 	return result.Outputs["checkpoint"], signaturePath
 }
 
-func prepareAndSignOutboundCheckpoint(t *testing.T, fixture checkpointCLIFixture, cp0Path, cp0SignaturePath string) (string, string, mpcceremony.TransferHandoff, []byte) {
+func prepareAndSignOutboundCheckpoint(t *testing.T, fixture checkpointCLIFixture, cp0Path, cp0SignaturePath string, phase mpcceremony.Phase, activeChainPath, activeChainSignaturePath, activeHeadPath string) (string, string, mpcceremony.TransferHandoff, []byte) {
 	t.Helper()
 	var cp0 mpcceremony.Checkpoint
 	if err := mpcceremony.UnmarshalCanonical(mustReadTestFile(t, cp0Path), &cp0); err != nil {
 		t.Fatal(err)
 	}
+	state := cp0.Phase1
+	if phase == mpcceremony.Phase2 {
+		if cp0.Phase2 == nil {
+			t.Fatal("phase2 outbound parent has no phase2 state")
+		}
+		state = *cp0.Phase2
+	}
 	handoff, err := mpcceremony.NewTransferHandoff(
-		fixture.definition, mpcceremony.Phase1, 1, cp0.Phase1.HeadRecordID,
-		[]mpcceremony.ArtifactRef{cp0.Phase1.HeadPayload}, fixture.definition.Coordinator, fixture.definition.Roster[0].Identity,
+		fixture.definition, phase, 1, state.HeadRecordID,
+		[]mpcceremony.ArtifactRef{state.HeadPayload}, fixture.definition.Coordinator, fixture.definition.Roster[0].Identity,
 		time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano), time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	handoffPath := filepath.Join(fixture.root, "custody", "valid-outbound.json")
-	handoffSignaturePath := filepath.Join(fixture.root, "custody", "valid-outbound.sig")
+	handoffPath := filepath.Join(fixture.root, "custody", string(phase)+"-valid-outbound.json")
+	handoffSignaturePath := filepath.Join(fixture.root, "custody", string(phase)+"-valid-outbound.sig")
 	if err := os.MkdirAll(filepath.Dir(handoffPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -863,17 +1009,17 @@ func prepareAndSignOutboundCheckpoint(t *testing.T, fixture checkpointCLIFixture
 	}
 	writeDecisionTestFile(t, handoffPath, handoffBytes, 0o600)
 	writeDecisionTestFile(t, handoffSignaturePath, handoffSignatureBytes, 0o600)
-	args := checkpointOutboundEvidenceArgs(fixture, cp0Path, cp0SignaturePath, handoffPath, handoffSignaturePath)
-	packet := filepath.Join(fixture.root, "prepared", "signed-cp1")
-	result := runCheckpointCommandCLI(t, append(append([]string{"--format", "json", "checkpoint", "prepare"}, args...), "--out-dir", packet))
+	args := checkpointOutboundEvidenceArgs(fixture, cp0Path, cp0SignaturePath, handoffPath, handoffSignaturePath, phase, activeChainPath, activeChainSignaturePath, activeHeadPath)
+	packet := filepath.Join(fixture.root, "prepared", "signed-"+string(phase)+"-outbound")
+	result := runCheckpointFixtureCommand(t, fixture, append(append([]string{"--format", "json", "checkpoint", "prepare"}, args...), "--out-dir", packet))
 	keyPath := filepath.Join(fixture.root, "coordinator-key-for-cp1.hex")
 	writeDecisionTestFile(t, keyPath, []byte(hex.EncodeToString(ed25519.PrivateKey(fixture.coordinatorKey).Seed())+"\n"), 0o600)
-	signaturePath := filepath.Join(fixture.root, "state", "signed-cp1.sig")
+	signaturePath := filepath.Join(fixture.root, "state", "signed-"+string(phase)+"-outbound.sig")
 	signArgs := append(args,
 		"--checkpoint", result.Outputs["checkpoint"], "--signing-request", result.Outputs["signing_request"],
 		"--coordinator-signing-key", keyPath, "--out", signaturePath,
 	)
-	runCheckpointCommandCLI(t, append([]string{"--format", "json", "checkpoint", "sign"}, signArgs...))
+	runCheckpointFixtureCommand(t, fixture, append([]string{"--format", "json", "checkpoint", "sign"}, signArgs...))
 	return result.Outputs["checkpoint"], signaturePath, handoff, handoffBytes
 }
 
@@ -888,6 +1034,14 @@ func runCheckpointCommandCLI(t *testing.T, args []string) CommandResult {
 		t.Fatal(err)
 	}
 	return result
+}
+
+func runCheckpointFixtureCommand(t *testing.T, fixture checkpointCLIFixture, args []string) CommandResult {
+	t.Helper()
+	if fixture.executable != "" {
+		return runCheckpointCommandExecutable(t, fixture.executable, args)
+	}
+	return runCheckpointCommandCLI(t, args)
 }
 
 func runCheckpointCommandExecutable(t *testing.T, executable string, args []string) CommandResult {

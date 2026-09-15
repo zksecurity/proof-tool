@@ -583,6 +583,31 @@ func VerifyAcceptedPhase1Chain(trust TrustPaths, circuit *CompiledCircuit, paths
 	return chain, refs, nil
 }
 
+// VerifyAcceptedPhase2Chain fully replays sealed Phase 1 and every accepted
+// Phase 2 transition, returning references to the exact authenticated chain.
+func VerifyAcceptedPhase2Chain(trust TrustPaths, circuit *CompiledCircuit, transcriptRoot, phase1SealPath, phase1SealSignaturePath string, paths PhaseTranscriptPaths) (Chain, SignedArtifactRefs, error) {
+	trusted, err := loadOperationalCeremony(trust)
+	if err != nil {
+		return Chain{}, SignedArtifactRefs{}, err
+	}
+	if err := validateWorkflowCircuit(trusted, circuit); err != nil {
+		return Chain{}, SignedArtifactRefs{}, err
+	}
+	commons, seal, _, err := loadPhase1CommonsForPhase2(trusted, circuit, transcriptRoot, phase1SealPath, phase1SealSignaturePath)
+	if err != nil {
+		return Chain{}, SignedArtifactRefs{}, err
+	}
+	chain, refs, err := loadVerifiedPhase2FilesExact(trusted, circuit, commons, seal, paths)
+	if err != nil {
+		return Chain{}, SignedArtifactRefs{}, err
+	}
+	loader := phase2FileLoader(paths.RootDir, chain, contributionPhase2Shape(circuit.Binding.Phase2Shape), paths.Progress)
+	if err := ReplayPhase2Loaded(circuit, commons, len(chain.Records), loader); err != nil {
+		return Chain{}, SignedArtifactRefs{}, err
+	}
+	return chain, refs, nil
+}
+
 // LoadReplayPhase1Files strictly reads all accepted evidence and replays every
 // native Phase 1 transition while retaining at most the states needed by gnark.
 func loadVerifiedPhase1Files(

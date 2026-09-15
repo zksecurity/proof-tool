@@ -206,7 +206,8 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 
 	ceremonyRoot := filepath.Join(outputRoot, "ceremony")
 	phaseMinimum := uint8(2)
-	if os.Getenv("MPC_WORKFLOW_PHASE1_ONE") == "1" {
+	checkpointPhase2One := os.Getenv("MPC_WORKFLOW_PHASE2_ONE") == "1"
+	if os.Getenv("MPC_WORKFLOW_PHASE1_ONE") == "1" || checkpointPhase2One {
 		phaseMinimum = 1
 	}
 	auditors := []mpcceremony.Identity{}
@@ -504,7 +505,7 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		return fmt.Errorf("Phase 1 participant 1: %w", err)
 	}
 	checkpointPhase1One := os.Getenv("MPC_WORKFLOW_PHASE1_ONE") == "1"
-	if !checkpointPhase1One {
+	if !checkpointPhase1One && !checkpointPhase2One {
 		phase1Paths, err = contributeAndAccept(
 			mpcceremony.Phase1,
 			2,
@@ -539,7 +540,9 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	if err := os.WriteFile(round42Path, []byte(quicknetRound42), 0o600); err != nil {
 		return err
 	}
-	if checkpointPhase1One && testCommand != "" {
+	var phase1Seal mpcceremony.SealPhase1FilesResult
+	var phase1Beacon mpcceremony.RecordBeaconFilesResult
+	if (checkpointPhase1One || checkpointPhase2One) && testCommand != "" {
 		if err := runTestCommand("phase1", "beacon",
 			"--ceremony", trust.DefinitionPath,
 			"--ceremony-signature", trust.DefinitionSignaturePath,
@@ -567,47 +570,72 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		); err != nil {
 			return fmt.Errorf("seal checkpoint Phase 1: %w", err)
 		}
-		return nil
+		if checkpointPhase1One {
+			return nil
+		}
+		sealPath := filepath.Join(ceremonyRoot, "phase1", "sealed", "seal.json")
+		sealSignaturePath := filepath.Join(ceremonyRoot, "phase1", "sealed", "seal.sig")
+		sealBytes, readErr := os.ReadFile(sealPath)
+		if readErr != nil {
+			return readErr
+		}
+		sealSignatureBytes, readErr := os.ReadFile(sealSignaturePath)
+		if readErr != nil {
+			return readErr
+		}
+		var seal mpcceremony.SealRecord
+		if verifyErr := mpcceremony.VerifySignedRecord(sealBytes, sealSignatureBytes, &seal, coordinator.KeyID, coordinatorPrivate.Public().(ed25519.PublicKey)); verifyErr != nil {
+			return fmt.Errorf("verify checkpoint Phase 1 seal record: %w", verifyErr)
+		}
+		if len(seal.Outputs) != 1 {
+			return fmt.Errorf("checkpoint Phase 1 seal has %d outputs", len(seal.Outputs))
+		}
+		phase1Seal = mpcceremony.SealPhase1FilesResult{
+			Seal: seal, CommonsPath: filepath.Join(ceremonyRoot, filepath.FromSlash(seal.Outputs[0].Name)),
+			SealPath: sealPath, SignaturePath: sealSignaturePath,
+		}
 	}
-	phase1Beacon, err := mpcceremony.RecordBeaconFiles(mpcceremony.RecordBeaconFilesOptions{
-		Trust:                     trust,
-		TranscriptRoot:            ceremonyRoot,
-		Phase:                     mpcceremony.Phase1,
-		ClosePath:                 phase1Close.ClosePath,
-		CloseSignaturePath:        phase1Close.SignaturePath,
-		RawResponsePath:           round42Path,
-		PublishedAt:               "2023-08-23T15:11:30Z",
-		CoordinatorPrivateKeyPath: coordinatorKeyPath,
-	})
-	if err != nil {
-		return fmt.Errorf("record Phase 1 beacon: %w", err)
-	}
-	// The seal replays the whole phase and is the longest operation in a K=21
-	// ceremony, so its progress callback is wired here and asserted below: a
-	// silent multi-hour command is the defect this reports against.
-	sealProgress := 0
-	phase1Seal, err := mpcceremony.SealPhase1Files(mpcceremony.SealPhase1FilesOptions{
-		Trust:                     trust,
-		Circuit:                   circuit,
-		TranscriptRoot:            ceremonyRoot,
-		ClosePath:                 phase1Close.ClosePath,
-		CloseSignaturePath:        phase1Close.SignaturePath,
-		BeaconPath:                phase1Beacon.BeaconPath,
-		BeaconSignaturePath:       phase1Beacon.SignaturePath,
-		CoordinatorPrivateKeyPath: coordinatorKeyPath,
-		OutputDir:                 filepath.Join(ceremonyRoot, "phase1", "sealed"),
-		Progress: func(phase mpcceremony.Phase, index, total int) {
-			if phase != mpcceremony.Phase1 || index < 1 || index > total {
-				panic(fmt.Sprintf("seal progress reported %s %d/%d", phase, index, total))
-			}
-			sealProgress++
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("seal Phase 1: %w", err)
-	}
-	if sealProgress == 0 {
-		return errors.New("Phase 1 seal replayed without reporting progress")
+	if !checkpointPhase2One {
+		phase1Beacon, err = mpcceremony.RecordBeaconFiles(mpcceremony.RecordBeaconFilesOptions{
+			Trust:                     trust,
+			TranscriptRoot:            ceremonyRoot,
+			Phase:                     mpcceremony.Phase1,
+			ClosePath:                 phase1Close.ClosePath,
+			CloseSignaturePath:        phase1Close.SignaturePath,
+			RawResponsePath:           round42Path,
+			PublishedAt:               "2023-08-23T15:11:30Z",
+			CoordinatorPrivateKeyPath: coordinatorKeyPath,
+		})
+		if err != nil {
+			return fmt.Errorf("record Phase 1 beacon: %w", err)
+		}
+		// The seal replays the whole phase and is the longest operation in a K=21
+		// ceremony, so its progress callback is wired here and asserted below: a
+		// silent multi-hour command is the defect this reports against.
+		sealProgress := 0
+		phase1Seal, err = mpcceremony.SealPhase1Files(mpcceremony.SealPhase1FilesOptions{
+			Trust:                     trust,
+			Circuit:                   circuit,
+			TranscriptRoot:            ceremonyRoot,
+			ClosePath:                 phase1Close.ClosePath,
+			CloseSignaturePath:        phase1Close.SignaturePath,
+			BeaconPath:                phase1Beacon.BeaconPath,
+			BeaconSignaturePath:       phase1Beacon.SignaturePath,
+			CoordinatorPrivateKeyPath: coordinatorKeyPath,
+			OutputDir:                 filepath.Join(ceremonyRoot, "phase1", "sealed"),
+			Progress: func(phase mpcceremony.Phase, index, total int) {
+				if phase != mpcceremony.Phase1 || index < 1 || index > total {
+					panic(fmt.Sprintf("seal progress reported %s %d/%d", phase, index, total))
+				}
+				sealProgress++
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("seal Phase 1: %w", err)
+		}
+		if sealProgress == 0 {
+			return errors.New("Phase 1 seal replayed without reporting progress")
+		}
 	}
 	// The checkpoint fixture needs one authentic turn through the deterministic
 	// historical Phase 1 seal, but not the later Phase 2 and release fixtures.
@@ -619,26 +647,39 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	// its cost is one monolithic transform rather than a per-contribution
 	// replay. Assert every stage arrives, in order.
 	var phase2Stages []int
-	phase2Initialized, err := mpcceremony.InitializePhase2Files(mpcceremony.InitPhase2FilesOptions{
-		Trust:                     trust,
-		Circuit:                   circuit,
-		TranscriptRoot:            ceremonyRoot,
-		Phase1SealPath:            phase1Seal.SealPath,
-		Phase1SealSignaturePath:   phase1Seal.SignaturePath,
-		CoordinatorPrivateKeyPath: coordinatorKeyPath,
-		Progress: func(stage string, index, total int) {
-			if stage == "" || index < 1 || index > total {
-				panic(fmt.Sprintf("phase 2 stage %q reported %d/%d", stage, index, total))
-			}
-			phase2Stages = append(phase2Stages, index)
-		},
-		OutputDir: filepath.Join(ceremonyRoot, "phase2"),
-	})
-	if err != nil {
-		return fmt.Errorf("initialize Phase 2: %w", err)
-	}
-	if !slices.Equal(phase2Stages, []int{1, 2, 3}) {
-		return fmt.Errorf("phase 2 initialization reported stages %v, want [1 2 3]", phase2Stages)
+	var phase2Initialized mpcceremony.InitPhase2FilesResult
+	if checkpointPhase2One && testCommand != "" {
+		if err := runTestCommand("phase2", "init",
+			"--ceremony", trust.DefinitionPath, "--ceremony-signature", trust.DefinitionSignaturePath,
+			"--coordinator-public-key-file", trust.CoordinatorPublicKeyPath,
+			"--phase1-transcript-dir", ceremonyRoot, "--phase1-seal", phase1Seal.SealPath,
+			"--phase1-seal-signature", phase1Seal.SignaturePath,
+			"--coordinator-signing-key", coordinatorKeyPath, "--out-dir", filepath.Join(ceremonyRoot, "phase2")); err != nil {
+			return fmt.Errorf("initialize checkpoint Phase 2: %w", err)
+		}
+		phase2Initialized = mpcceremony.InitPhase2FilesResult{
+			GenesisPath:        filepath.Join(ceremonyRoot, "phase2", "genesis.bin"),
+			ChainPath:          filepath.Join(ceremonyRoot, "phase2", "chain-0000.json"),
+			ChainSignaturePath: filepath.Join(ceremonyRoot, "phase2", "chain-0000.sig"),
+		}
+	} else {
+		phase2Initialized, err = mpcceremony.InitializePhase2Files(mpcceremony.InitPhase2FilesOptions{
+			Trust: trust, Circuit: circuit, TranscriptRoot: ceremonyRoot,
+			Phase1SealPath: phase1Seal.SealPath, Phase1SealSignaturePath: phase1Seal.SignaturePath,
+			CoordinatorPrivateKeyPath: coordinatorKeyPath,
+			Progress: func(stage string, index, total int) {
+				if stage == "" || index < 1 || index > total {
+					panic(fmt.Sprintf("phase 2 stage %q reported %d/%d", stage, index, total))
+				}
+				phase2Stages = append(phase2Stages, index)
+			}, OutputDir: filepath.Join(ceremonyRoot, "phase2"),
+		})
+		if err != nil {
+			return fmt.Errorf("initialize Phase 2: %w", err)
+		}
+		if !slices.Equal(phase2Stages, []int{1, 2, 3}) {
+			return fmt.Errorf("phase 2 initialization reported stages %v, want [1 2 3]", phase2Stages)
+		}
 	}
 	phase2Paths := mpcceremony.PhaseTranscriptPaths{
 		RootDir:            ceremonyRoot,
@@ -657,6 +698,9 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	)
 	if err != nil {
 		return fmt.Errorf("Phase 2 participant 1: %w", err)
+	}
+	if checkpointPhase2One {
+		return nil
 	}
 	phase2Paths, err = contributeAndAccept(
 		mpcceremony.Phase2,

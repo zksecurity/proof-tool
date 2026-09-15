@@ -378,6 +378,9 @@ type CheckpointEvidenceOptions struct {
 	ChainSignaturePath              string
 	HeadPayloadPath                 string
 	Phase2GenesisPath               string
+	Phase2ChainPath                 string
+	Phase2ChainSignaturePath        string
+	Phase2HeadPayloadPath           string
 	TransitionRecordPath            string
 	TransitionRecordSignaturePath   string
 	AcknowledgementPath             string

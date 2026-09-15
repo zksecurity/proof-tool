@@ -323,7 +323,7 @@ func TestCheckpointPhase1ClosureIsOneWayAndExact(t *testing.T) {
 		Kind: CheckpointPhase1OutboundPublished, Phase: Phase1, Index: 2,
 		ParticipantID: "participant-02", AttemptID: strings.Repeat("e", 32), Record: &illegalOutbound,
 	}
-	if err := validateOutboundTransition(next, afterClose); err == nil || !strings.Contains(err.Error(), "after closure") {
+	if err := validateOutboundTransition(next, afterClose, Phase1); err == nil || !strings.Contains(err.Error(), "after closure") {
 		t.Fatalf("phase1 turn after closure err=%v", err)
 	}
 
@@ -527,6 +527,139 @@ func TestCheckpointPhase2InitializationRequiresExactGenesis(t *testing.T) {
 	repeated.PreviousCheckpoint = &repeatedParent
 	if err := ValidateCheckpointTransition(next, repeated); err == nil {
 		t.Fatal("repeated phase2 initialization accepted")
+	}
+}
+
+func TestCheckpointPhase2ParticipantTurnSequence(t *testing.T) {
+	base := phase1ClosedCheckpoint(t, phase1CheckpointSequence(t)[3])
+	beaconRefs := checkpointSigned("phase1/beacon/record")
+	raw := checkpointArtifact("phase1/beacon/raw-response.bin", "raw")
+	beacon := cloneCheckpoint(t, base)
+	beacon.Sequence++
+	parent := checkpointReference(t, base, "p2-base")
+	beacon.PreviousCheckpoint = &parent
+	beacon.Transition = CheckpointTransition{Kind: CheckpointPhase1BeaconRecorded, Phase: Phase1, Record: &beaconRefs, Evidence: []ArtifactRef{raw}}
+	beacon.Phase1Beacon = &beaconRefs
+	beacon.AcceptedArtifacts = appendCheckpointArtifacts(beacon.AcceptedArtifacts, beaconRefs.Record, beaconRefs.Signature, raw)
+	sealRefs := checkpointSigned("phase1/sealed/seal")
+	commons := checkpointArtifact("phase1/sealed/commons.bin", "commons")
+	sealed := cloneCheckpoint(t, beacon)
+	sealed.Sequence++
+	sealParent := checkpointReference(t, beacon, "p2-beacon")
+	sealed.PreviousCheckpoint = &sealParent
+	sealed.Transition = CheckpointTransition{Kind: CheckpointPhase1Sealed, Phase: Phase1, Record: &sealRefs, Evidence: []ArtifactRef{commons}}
+	sealed.Phase1Seal = &sealRefs
+	sealed.AcceptedArtifacts = appendCheckpointArtifacts(sealed.AcceptedArtifacts, sealRefs.Record, sealRefs.Signature, commons)
+	chain0 := checkpointSigned("phase2/chain-0000")
+	genesis := checkpointArtifact("phase2/genesis.bin", "phase2 genesis")
+	initialized := cloneCheckpoint(t, sealed)
+	initialized.Sequence++
+	initializedParent := checkpointReference(t, sealed, "p2-sealed")
+	initialized.PreviousCheckpoint = &initializedParent
+	initialized.Transition = CheckpointTransition{Kind: CheckpointPhase2Initialized, Phase: Phase2, Record: &chain0, Evidence: []ArtifactRef{genesis}}
+	initialized.Phase2 = &CheckpointPhaseState{Phase: Phase2, HeadRecordID: "sha256:" + strings.Repeat("7", 64), HeadPayload: genesis, Chain: chain0}
+	initialized.AcceptedArtifacts = appendCheckpointArtifacts(initialized.AcceptedArtifacts, chain0.Record, chain0.Signature, genesis)
+
+	participant := "participant-01"
+	receiptAttempt, candidateAttempt := strings.Repeat("c", 32), strings.Repeat("d", 32)
+	handoff := checkpointSigned("phase2/handoff")
+	outbound := cloneCheckpoint(t, initialized)
+	outbound.Sequence++
+	outboundParent := checkpointReference(t, initialized, "p2-initialized")
+	outbound.PreviousCheckpoint = &outboundParent
+	outbound.Transition = CheckpointTransition{Kind: CheckpointPhase2OutboundPublished, Phase: Phase2, Index: 1, ParticipantID: participant, AttemptID: receiptAttempt, Record: &handoff}
+	outbound.AcceptedArtifacts = appendCheckpointArtifacts(outbound.AcceptedArtifacts, handoff.Record, handoff.Signature)
+	outbound.Submissions = append(outbound.Submissions, CheckpointSubmissionSlot{Kind: CheckpointSubmissionReceipt, Phase: Phase2, Index: 1, IdentityID: participant, AttemptID: receiptAttempt, ManifestKey: "submissions/phase2-receipt/manifest.json", BasisCheckpointSHA256: outboundParent.Record.Digest.SHA256, ParentHeadID: initialized.Phase2.HeadRecordID, Status: CheckpointSubmissionAllocated})
+
+	receiptRecord, receiptAck := checkpointSigned("phase2/receipt"), checkpointSigned("phase2/receipt-ack")
+	receiptManifest := checkpointArtifact("submissions/phase2-receipt/manifest.json", "manifest")
+	receiptPayload := checkpointArtifact("submissions/phase2-receipt/receipt.json", "receipt")
+	receipt := cloneCheckpoint(t, outbound)
+	receipt.Sequence++
+	receiptParent := checkpointReference(t, outbound, "p2-outbound")
+	receipt.PreviousCheckpoint = &receiptParent
+	receipt.Transition = CheckpointTransition{Kind: CheckpointPhase2ReceiptAccepted, Phase: Phase2, Index: 1, ParticipantID: participant, AttemptID: receiptAttempt, NextAttemptID: candidateAttempt, Record: &receiptRecord, Acknowledgement: &receiptAck, Evidence: checkpointArtifacts(receiptManifest, receiptPayload)}
+	receipt.AcceptedArtifacts = appendCheckpointArtifacts(receipt.AcceptedArtifacts, receiptRecord.Record, receiptRecord.Signature, receiptAck.Record, receiptAck.Signature, receiptManifest, receiptPayload)
+	phase2ReceiptIndex := len(receipt.Submissions) - 1
+	receipt.Submissions[phase2ReceiptIndex].Status = CheckpointSubmissionAccepted
+	receipt.Submissions[phase2ReceiptIndex].Acknowledgement = &receiptAck
+	receipt.Submissions = append(receipt.Submissions, CheckpointSubmissionSlot{Kind: CheckpointSubmissionCandidate, Phase: Phase2, Index: 1, IdentityID: participant, AttemptID: candidateAttempt, ManifestKey: "submissions/phase2-candidate/manifest.json", BasisCheckpointSHA256: receiptParent.Record.Digest.SHA256, ParentHeadID: initialized.Phase2.HeadRecordID, Status: CheckpointSubmissionAllocated})
+
+	candidateRecord, candidateAck := checkpointSigned("phase2/candidate"), checkpointSigned("phase2/candidate-ack")
+	candidateManifest := checkpointArtifact("submissions/phase2-candidate/manifest.json", "manifest")
+	payload := checkpointArtifact("phase2/contributions/0001/contribution.bin", "contribution")
+	candidateEvidence := checkpointArtifacts(candidateManifest, payload)
+	candidate := cloneCheckpoint(t, receipt)
+	candidate.Sequence++
+	candidateParent := checkpointReference(t, receipt, "p2-receipt")
+	candidate.PreviousCheckpoint = &candidateParent
+	candidate.Transition = CheckpointTransition{Kind: CheckpointPhase2CandidateAccepted, Phase: Phase2, Index: 1, ParticipantID: participant, AttemptID: candidateAttempt, Record: &candidateRecord, Acknowledgement: &candidateAck, Evidence: candidateEvidence}
+	chain1 := checkpointSigned("phase2/chain-0001")
+	candidate.Phase2 = &CheckpointPhaseState{Phase: Phase2, AcceptedCount: 1, HeadRecordID: "sha256:" + strings.Repeat("8", 64), HeadPayload: payload, Chain: chain1}
+	candidate.AcceptedArtifacts = appendCheckpointArtifacts(candidate.AcceptedArtifacts, candidateRecord.Record, candidateRecord.Signature, candidateAck.Record, candidateAck.Signature, candidateManifest, payload, chain1.Record, chain1.Signature)
+	phase2CandidateIndex := len(candidate.Submissions) - 1
+	candidate.Submissions[phase2CandidateIndex].Status = CheckpointSubmissionAccepted
+	candidate.Submissions[phase2CandidateIndex].Acknowledgement = &candidateAck
+
+	for _, edge := range [][2]Checkpoint{{initialized, outbound}, {outbound, receipt}, {receipt, candidate}} {
+		if err := ValidateCheckpointTransition(edge[0], edge[1]); err != nil {
+			t.Fatalf("valid phase2 turn edge %s: %v", edge[1].Transition.Kind, err)
+		}
+		for _, field := range []string{"closure", "beacon", "seal"} {
+			changed := cloneCheckpoint(t, edge[1])
+			replacement := edge[0].Definition
+			switch field {
+			case "closure":
+				changed.Phase1Closure = &replacement
+			case "beacon":
+				changed.Phase1Beacon = &replacement
+			case "seal":
+				changed.Phase1Seal = &replacement
+			}
+			if err := ValidateCheckpointTransition(edge[0], changed); err == nil {
+				t.Fatalf("%s edge accepted changed phase1 %s", edge[1].Transition.Kind, field)
+			}
+		}
+	}
+}
+
+func TestCheckpointOldSchemasRejectPhase2TurnTransition(t *testing.T) {
+	for _, schema := range []string{CheckpointSchemaV1, CheckpointSchemaV2} {
+		checkpoint := phase1CheckpointSequence(t)[0]
+		checkpoint.Schema = schema
+		checkpoint.Transition = CheckpointTransition{Kind: CheckpointPhase2OutboundPublished, Phase: Phase2, Index: 1, ParticipantID: "participant-01", AttemptID: strings.Repeat("e", 32), Record: func() *SignedArtifactRefs { value := checkpointSigned("phase2-outbound"); return &value }()}
+		checkpoint.AcceptedArtifacts = appendCheckpointArtifacts(checkpoint.AcceptedArtifacts, checkpoint.Transition.Record.Record, checkpoint.Transition.Record.Signature)
+		if schema == CheckpointSchemaV1 {
+			checkpoint.AssurancePolicy = nil
+		}
+		if err := checkpoint.Validate(); err == nil {
+			t.Fatalf("schema %s accepted phase2 turn without phase2 state", schema)
+		}
+	}
+	for _, schema := range []string{CheckpointSchemaV1, CheckpointSchemaV2} {
+		checkpoint := phase1CheckpointSequence(t)[0]
+		checkpoint.Schema = schema
+		if schema == CheckpointSchemaV1 {
+			checkpoint.AssurancePolicy = nil
+		}
+		checkpoint.Submissions = []CheckpointSubmissionSlot{{
+			Kind: CheckpointSubmissionReceipt, Phase: Phase2, Index: 1, IdentityID: "participant-01",
+			AttemptID: strings.Repeat("f", 32), ManifestKey: "submissions/legacy/manifest.json",
+			BasisCheckpointSHA256: "sha256:" + strings.Repeat("1", 64), ParentHeadID: "sha256:" + strings.Repeat("2", 64), Status: CheckpointSubmissionAllocated,
+		}}
+		if err := checkpoint.Validate(); err == nil {
+			t.Fatalf("schema %s accepted phase2 submission slot", schema)
+		}
+	}
+}
+
+func TestCheckpointBoundsCoverBothMaximumParticipantSchedules(t *testing.T) {
+	const turns = 2 * MaxParticipants
+	if MaxCheckpointAncestry < turns*3+10 {
+		t.Fatalf("ancestry bound %d cannot cover %d participant edges plus lifecycle", MaxCheckpointAncestry, turns*3)
+	}
+	if MaxCheckpointArtifacts < turns*21+10 {
+		t.Fatalf("artifact bound %d cannot cover %d participant artifacts plus lifecycle", MaxCheckpointArtifacts, turns*21)
 	}
 }
 

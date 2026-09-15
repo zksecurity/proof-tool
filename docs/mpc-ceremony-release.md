@@ -136,3 +136,6 @@ The next checkpoint fully replays that sealed Phase 1 state and accepts only
 the deterministic zero-contribution Phase 2 tree at
 `phase2/chain-0000.json`, `phase2/chain-0000.sig`, and
 `phase2/genesis.bin`. Merely uploading files with those names is insufficient.
+Phase 2 participant checkpoints then use the same ordered
+outbound-handoff, signed-receipt, and accepted-candidate transitions as Phase 1.
+Each accepted candidate is fully replayed against the sealed Phase 1 commons.
