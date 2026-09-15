@@ -54,6 +54,7 @@ const (
 	CommandDecisionSign                     Command = "decision sign"
 	CommandDecisionVerify                   Command = "decision verify"
 	CommandInspectDefinition                Command = "inspect definition"
+	CommandInspectDefinitionProtocol        Command = "inspect definition-protocol"
 	CommandInspectChain                     Command = "inspect chain"
 	CommandInspectParticipant               Command = "inspect participant"
 	CommandInspectEnrollment                Command = "inspect enrollment"
@@ -70,6 +71,7 @@ const (
 	CommandCheckpointPrepareV4              Command = "checkpoint prepare-v4"
 	CommandCheckpointSignV4                 Command = "checkpoint sign-v4"
 	CommandCheckpointVerifyStoredV4         Command = "checkpoint verify-stored-v4"
+	CommandCheckpointInspectSignedV4        Command = "checkpoint inspect-signed-v4"
 	CommandCheckpointVerifyReleaseV4        Command = "checkpoint verify-release-v4"
 )
 
@@ -648,6 +650,8 @@ type CommandResult struct {
 	Summary                             string                               `json:"summary,omitempty"`
 	Identity                            *mpcceremony.Identity                `json:"identity,omitempty"`
 	DefinitionInspection                *DefinitionInspection                `json:"definition_inspection,omitempty"`
+	DefinitionProtocolInspection        *DefinitionProtocolInspection        `json:"definition_protocol_inspection,omitempty"`
+	CheckpointDiscoveryV4               *CheckpointDiscoveryInspectionV4     `json:"checkpoint_discovery_v4,omitempty"`
 	ChainInspection                     *ChainInspection                     `json:"chain_inspection,omitempty"`
 	ParticipantInspection               *ParticipantInspection               `json:"participant_inspection,omitempty"`
 	EnrollmentInspection                *EnrollmentInspection                `json:"enrollment_inspection,omitempty"`

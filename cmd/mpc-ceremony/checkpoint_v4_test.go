@@ -170,6 +170,12 @@ func TestCheckpointV4CLIInitialPrepareSignInspectAndMutation(t *testing.T) {
 		t.Fatalf("overclaim: %+v", projection)
 	}
 	assertCheckpointExecutableFails(t, executable, sign, "fresh operational artifact")
+	discoverArgs := append([]string{"--format", "json", "checkpoint", "inspect-signed-v4"}, trustArgs...)
+	discoverArgs = append(discoverArgs, "--checkpoint", checkedPath, "--checkpoint-signature", signaturePath)
+	discovered := runCheckpointCommandExecutable(t, executable, discoverArgs).CheckpointDiscoveryV4
+	if discovered == nil || discovered.Schema != "proof-tool-mpc-checkpoint-discovery-v4" || discovered.Depth != "signed-checkpoint-discovery" || discovered.AncestryVerified || discovered.ArtifactsVerified || discovered.MathematicsReplayed || discovered.GlobalFreshnessVerified || discovered.Discovery.Sequence != 0 || len(discovered.Discovery.VerificationDependencies) != 0 || discovered.CheckpointRefs != projection.CheckpointRefs {
+		t.Fatalf("discovery overclaim or wrong head: %+v", discovered)
+	}
 	// Sign again only after rereading every required byte, not a saved success marker.
 	genesis := filepath.Join(artifactRoot, payload.Name)
 	original := mustReadTestFile(t, genesis)

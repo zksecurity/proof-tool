@@ -61,6 +61,7 @@ Commands:
   checkpoint verify    Fully verify a signed ceremony checkpoint and its evidence
   checkpoint verify-stored  Infer and fully verify a fetched checkpoint ancestry
   inspect definition   Authenticate and describe a ceremony definition
+  inspect definition-protocol  Authenticate its protocol selector and schedules
   inspect chain        Authenticate and describe an accepted chain
   inspect participant  Match an existing key to the participant roster
   inspect enrollment   Authenticate an operational enrollment
@@ -181,6 +182,14 @@ Authenticated record projections are also available as subcommands:
 These subcommands are read-only and machine-readable. They perform no network
 access, replay, signing, or writes.
 `,
+	"inspect definition-protocol": `Usage:
+  mpc-ceremony --format json inspect definition-protocol --ceremony FILE \
+    --ceremony-signature FILE --coordinator-public-key-file KEY
+
+Authenticates the definition before reporting its exact format, derived storage
+workflow, release verification policy and schedules. This does not authenticate
+backend progress or replay contributions. Failure must not trigger legacy fallback.
+`,
 	"inspect definition": `Usage:
   mpc-ceremony --format json inspect definition --ceremony FILE \
     --ceremony-signature FILE --coordinator-public-key-file KEY
@@ -260,6 +269,15 @@ exact checked bytes. Keep the proposal and detached signature together. Neither
 is the published current head until the delivery service uploads both and
 successfully updates the head. Existing outputs require inspection, not overwrite.
 `,
+	"checkpoint inspect-signed-v4": `Usage:
+  mpc-ceremony checkpoint inspect-signed-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE
+
+Authenticates only this checkpoint pair for discovery of its predecessor and
+bounded verification dependencies. It does not load ancestry or contribution
+files. Run verify-stored-v4 on the complete ancestry before using its progress.
+`,
 	"checkpoint verify-stored-v4": `Usage:
   mpc-ceremony checkpoint verify-stored-v4 --ceremony FILE --ceremony-signature FILE \
     --coordinator-public-key-file KEY --artifact-root DIR \
@@ -283,6 +301,7 @@ performed. Keep the report outside final/candidate and final/release.
 	"checkpoint": `Usage:
   mpc-ceremony checkpoint <prepare|sign|verify|verify-stored> [flags]
   mpc-ceremony checkpoint <prepare-v4|sign-v4|verify-stored-v4|verify-release-v4> [flags]
+  mpc-ceremony checkpoint inspect-signed-v4 [flags]
 
 Legacy storage-first checkpoint operations re-authenticate
 the exact signed definition, predecessor, both phase chains and all records

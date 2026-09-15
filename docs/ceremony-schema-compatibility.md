@@ -26,6 +26,17 @@ check by changing the meaning of V3 or a generic "current schema" constant.
 
 ## New-version implementation gate
 
+New read-only discovery APIs preserve the old inspection wire shape:
+`inspect definition-protocol` authenticates V1–V4 before reporting its exact
+format and derived workflow. `checkpoint inspect-signed-v4` authenticates one
+V4 pair and returns its predecessor plus bounded stored-verifier dependencies;
+it does not authorize progress. The caller must stage and verify the complete
+ancestry with `checkpoint verify-stored-v4` before using it. No cumulative
+contribution payload inventory is downloaded for this structural check.
+Fresh-copy tests cover incident, abort, restart and accepted-contribution
+history; removing each required dependency fails verification. The discovery
+signature alone intentionally does not prove that an edge is legal.
+
 Current draft: opt-in V4 construction, structural checkpoints and real-artifact
 verification through final-candidate recording exist in the library. The Linux
 integration test uses real tiny contributions in both phases, signed custody

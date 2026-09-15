@@ -271,9 +271,9 @@ command:
 			"contribute": {}, "help": {}, "init": {}, "verify": {},
 		},
 		"decision":   {"help": {}, "prepare": {}, "sign": {}, "verify": {}},
-		"checkpoint": {"help": {}, "prepare": {}, "sign": {}, "verify": {}, "verify-stored": {}, "prepare-v4": {}, "sign-v4": {}, "verify-stored-v4": {}, "verify-release-v4": {}},
+		"checkpoint": {"help": {}, "prepare": {}, "sign": {}, "verify": {}, "verify-stored": {}, "prepare-v4": {}, "sign-v4": {}, "verify-stored-v4": {}, "verify-release-v4": {}, "inspect-signed-v4": {}},
 		"inspect": {
-			"chain": {}, "checkpoint": {}, "checkpoint-transition": {}, "definition": {}, "enrollment": {}, "help": {}, "participant": {},
+			"chain": {}, "checkpoint": {}, "checkpoint-transition": {}, "definition": {}, "definition-protocol": {}, "enrollment": {}, "help": {}, "participant": {},
 		},
 		"ops": {
 			"export-signing": {}, "help": {}, "import-signature": {}, "sign": {}, "prepare-enrollment": {}, "prepare-handoff": {}, "prepare-receipt": {},

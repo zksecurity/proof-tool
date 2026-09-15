@@ -27,12 +27,23 @@ type CheckpointInspectionV4 struct {
 	GlobalFreshnessVerified bool                 `json:"global_freshness_verified"`
 }
 
+type CheckpointDiscoveryInspectionV4 struct {
+	Schema                  string                  `json:"schema"`
+	Depth                   string                  `json:"depth"`
+	Discovery               m.CheckpointDiscoveryV4 `json:"discovery"`
+	CheckpointRefs          m.SignedArtifactRefs    `json:"checkpoint_refs"`
+	AncestryVerified        bool                    `json:"ancestry_verified"`
+	ArtifactsVerified       bool                    `json:"artifacts_verified"`
+	MathematicsReplayed     bool                    `json:"mathematics_replayed"`
+	GlobalFreshnessVerified bool                    `json:"global_freshness_verified"`
+}
+
 func parseCheckpointV4(action string, args []string) (CheckpointOptionsV4, error) {
 	var o CheckpointOptionsV4
 	fs := commandFlagSet("checkpoint " + action)
 	addCeremonyTrustFlags(fs, &o.CeremonyPath, &o.CeremonySignaturePath, &o.CoordinatorPublicKeyFile)
 	fs.StringVar(&o.ArtifactRoot, "artifact-root", "", "local root containing protocol artifacts")
-	if action == "verify-stored-v4" {
+	if action == "verify-stored-v4" || action == "inspect-signed-v4" {
 		fs.StringVar(&o.CheckpointPath, "checkpoint", "", "exact checkpoint under artifact-root")
 		fs.StringVar(&o.CheckpointSignaturePath, "checkpoint-signature", "", "exact detached checkpoint signature under artifact-root")
 	} else {
@@ -49,7 +60,7 @@ func parseCheckpointV4(action string, args []string) (CheckpointOptionsV4, error
 	if err := requireValues(pathValue("--ceremony", o.CeremonyPath), pathValue("--ceremony-signature", o.CeremonySignaturePath), pathValue("--coordinator-public-key-file", o.CoordinatorPublicKeyFile), pathValue("--artifact-root", o.ArtifactRoot)); err != nil {
 		return o, err
 	}
-	if action == "verify-stored-v4" {
+	if action == "verify-stored-v4" || action == "inspect-signed-v4" {
 		return o, requireValues(pathValue("--checkpoint", o.CheckpointPath), pathValue("--checkpoint-signature", o.CheckpointSignaturePath))
 	}
 	if action != "prepare-v4" && action != "sign-v4" {
@@ -99,6 +110,27 @@ func executeCheckpointV4(command Command, o CheckpointOptionsV4) (CommandResult,
 	}
 	if err := m.VerifyRunningSoftwareForMode(d.Software, d.Mode); err != nil {
 		return CommandResult{}, err
+	}
+	if command == CommandCheckpointInspectSignedV4 {
+		record, signature, refs, err := checkpointSignedBytes(o.ArtifactRoot, o.CheckpointPath, o.CheckpointSignaturePath)
+		if err != nil {
+			return CommandResult{}, err
+		}
+		db, err := m.MarshalCanonical(d)
+		if err != nil {
+			return CommandResult{}, err
+		}
+		ds, err := readRegularOperationalFile(o.CeremonySignaturePath, 4096)
+		if err != nil {
+			return CommandResult{}, err
+		}
+		discovery, err := m.DiscoverSignedCheckpointV4(d, db, ds, record, signature)
+		if err != nil {
+			return CommandResult{}, err
+		}
+		return CommandResult{CeremonyID: d.CeremonyID,
+			Summary:               "Authenticated one checkpoint for file discovery only. Ancestry, referenced evidence, contribution mathematics and freshness are not verified.",
+			CheckpointDiscoveryV4: &CheckpointDiscoveryInspectionV4{Schema: "proof-tool-mpc-checkpoint-discovery-v4", Depth: "signed-checkpoint-discovery", Discovery: discovery, CheckpointRefs: refs}}, nil
 	}
 	if command == CommandCheckpointVerifyStoredV4 {
 		_, _, refs, err := checkpointSignedBytes(o.ArtifactRoot, o.CheckpointPath, o.CheckpointSignaturePath)

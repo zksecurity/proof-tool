@@ -49,7 +49,7 @@ func parseCheckpoint(invocation Invocation, args []string) (Invocation, error) {
 		options, err := parseEvidenceV4(CommandCheckpointVerifyReleaseV4, args[1:])
 		invocation.Command, invocation.Options = CommandCheckpointVerifyReleaseV4, options
 		return invocation, wrapCommandError(err, "checkpoint", args[0])
-	case "prepare-v4", "sign-v4", "verify-stored-v4":
+	case "prepare-v4", "sign-v4", "verify-stored-v4", "inspect-signed-v4":
 		options, err := parseCheckpointV4(args[0], args[1:])
 		invocation.Command, invocation.Options = Command("checkpoint "+args[0]), options
 		return invocation, wrapCommandError(err, "checkpoint", args[0])

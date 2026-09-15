@@ -214,6 +214,10 @@ func parseInspectSubcommand(invocation Invocation, args []string) (Invocation, e
 		return Invocation{}, &helpRequest{topic: append([]string{"inspect"}, args[1:]...)}
 	}
 	switch args[0] {
+	case "definition-protocol":
+		options, err := parseInspectDefinition(args[1:])
+		invocation.Command, invocation.Options = CommandInspectDefinitionProtocol, options
+		return invocation, wrapCommandError(err, "inspect", "definition-protocol")
 	case "definition":
 		options, err := parseInspectDefinition(args[1:])
 		invocation.Command, invocation.Options = CommandInspectDefinition, options
