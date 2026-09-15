@@ -126,14 +126,17 @@ func (r *checkpointReaderV4) pair(refs SignedArtifactRefs) ([]byte, []byte, erro
 }
 
 type checkpointAncestryV4 struct {
-	head     CheckpointV4
-	outbound map[string]SignedArtifactRefs
-	receipts map[ContributionScope]SignedArtifactRefs
-	count    uint64
+	head        CheckpointV4
+	outbound    map[string]SignedArtifactRefs
+	receipts    map[ContributionScope]SignedArtifactRefs
+	enrollments []SignedArtifactRefs
+	mirrors     []SignedArtifactRefs
+	accepted    map[ContributionScope]SignedArtifactRefs
+	count       uint64
 }
 
 func loadCheckpointAncestryV4(reader *checkpointReaderV4, d CeremonyDefinition, definitionBytes, definitionSignature []byte, refs SignedArtifactRefs) (checkpointAncestryV4, error) {
-	result := checkpointAncestryV4{outbound: map[string]SignedArtifactRefs{}, receipts: map[ContributionScope]SignedArtifactRefs{}}
+	result := checkpointAncestryV4{outbound: map[string]SignedArtifactRefs{}, receipts: map[ContributionScope]SignedArtifactRefs{}, accepted: map[ContributionScope]SignedArtifactRefs{}}
 	var child *CheckpointV4
 	for {
 		if result.count > MaxCheckpointSequenceV4 {
@@ -156,6 +159,15 @@ func loadCheckpointAncestryV4(reader *checkpointReaderV4, d CeremonyDefinition, 
 			}
 		}
 		result.count++
+		if current.Transition.Kind == CheckpointMirrorRecorded {
+			result.mirrors = append(result.mirrors, *current.Transition.Record)
+		}
+		if current.Transition.Kind == CheckpointPhase1CandidateAccepted || current.Transition.Kind == CheckpointPhase2CandidateAccepted {
+			result.accepted[*current.Transition.Scope] = *current.Transition.Record
+		}
+		if current.Transition.Kind == CheckpointEnrollmentRecorded {
+			result.enrollments = append(result.enrollments, *current.Transition.Record)
+		}
 		if current.Transition.Kind == CheckpointPhase1ReceiptAccepted || current.Transition.Kind == CheckpointPhase2ReceiptAccepted {
 			result.receipts[*current.Transition.Scope] = *current.Transition.Record
 		}
@@ -241,6 +253,8 @@ func PrepareCheckpointV4(options CheckpointPreparationV4) ([]byte, error) {
 	var previous *CheckpointV4
 	outbound := map[string]SignedArtifactRefs{}
 	receipts := map[ContributionScope]SignedArtifactRefs{}
+	enrollments := []SignedArtifactRefs{}
+	var evidenceAncestry checkpointAncestryV4
 	if c.PreviousCheckpoint != nil {
 		ancestry, err := loadCheckpointAncestryV4(reader, d, db, ds, *c.PreviousCheckpoint)
 		if err != nil {
@@ -249,6 +263,8 @@ func PrepareCheckpointV4(options CheckpointPreparationV4) ([]byte, error) {
 		previous = &ancestry.head
 		outbound = ancestry.outbound
 		receipts = ancestry.receipts
+		enrollments = ancestry.enrollments
+		evidenceAncestry = ancestry
 		if err := ValidateCheckpointTransitionV4(*previous, c); err != nil {
 			return nil, err
 		}
@@ -266,6 +282,43 @@ func PrepareCheckpointV4(options CheckpointPreparationV4) ([]byte, error) {
 		}
 		if _, err := reader.read(ref, limit, false); err != nil {
 			return nil, err
+		}
+	}
+	verifiedEnrollments, err := loadCheckpointEnrollmentsV4(reader, d, db, enrollments)
+	if err != nil {
+		return nil, err
+	}
+	if c.Transition.Kind == CheckpointEnrollmentRecorded {
+		if err := verifyNewCheckpointEnrollmentV4(reader, d, db, c.Transition, verifiedEnrollments); err != nil {
+			return nil, err
+		}
+		return MarshalCanonical(c)
+	}
+	if c.Transition.Kind == CheckpointMirrorRecorded || c.Transition.Kind == CheckpointPhase1Closed || c.Transition.Kind == CheckpointPhase2Closed {
+		mirrorRefs := append([]SignedArtifactRefs{}, evidenceAncestry.mirrors...)
+		if c.Transition.Kind == CheckpointMirrorRecorded {
+			mirrorRefs = append(mirrorRefs, *c.Transition.Record)
+		}
+		mirrors, err := verifyCheckpointMirrorsV4(reader, d, db, evidenceAncestry.accepted, verifiedEnrollments, mirrorRefs)
+		if err != nil {
+			return nil, err
+		}
+		if c.Transition.Kind == CheckpointMirrorRecorded {
+			return MarshalCanonical(c)
+		}
+		phase := Phase1
+		if c.Transition.Kind == CheckpointPhase2Closed {
+			phase = Phase2
+		}
+		for scope := range evidenceAncestry.accepted {
+			if scope.Phase == phase && len(mirrors[scope]) < int(d.AssurancePolicy.MirrorsPerAcceptedHead) {
+				return nil, errors.New("each accepted head requires its signed mirror minimum before closure")
+			}
+		}
+	}
+	if c.Transition.Kind == CheckpointPhase1OutboundPublished || c.Transition.Kind == CheckpointPhase2OutboundPublished {
+		if _, ok := verifiedEnrollments[c.Transition.Scope.ParticipantID]; !ok {
+			return nil, errors.New("participant enrollment must be committed before outbound delivery")
 		}
 	}
 	if err := verifyCheckpointEvidenceV4(options, trusted, reader, previous, outbound, receipts); err != nil {

@@ -14,6 +14,8 @@ const (
 	CheckpointDeliveryRetired      CheckpointTransitionKind = "delivery-retired"
 	CheckpointContributionRejected CheckpointTransitionKind = "contribution-rejected"
 	CheckpointDeliveryReallocated  CheckpointTransitionKind = "delivery-reallocated"
+	CheckpointEnrollmentRecorded   CheckpointTransitionKind = "enrollment-recorded"
+	CheckpointMirrorRecorded       CheckpointTransitionKind = "mirror-recorded"
 )
 
 // CheckpointProgressV4 is the protocol projection used for guidance. It is not
@@ -240,6 +242,14 @@ func (t CheckpointTransitionV4) Validate() error {
 			return errors.New("lifecycle transition must not contain turn fields")
 		}
 		switch t.Kind {
+		case CheckpointEnrollmentRecorded:
+			if len(t.Evidence) != 1 {
+				return errors.New("enrollment transition requires its disclosure artifact")
+			}
+		case CheckpointMirrorRecorded:
+			if len(t.Evidence) != 0 {
+				return errors.New("mirror edge adds only its signed receipt")
+			}
 		case CheckpointPhase1Closed, CheckpointPhase2Closed:
 			if len(t.Evidence) != 0 {
 				return errors.New("closure transition only adds the signed closure")
@@ -372,6 +382,18 @@ func ValidateCheckpointTransitionV4(previous, next CheckpointV4) error {
 		return errors.New("accepted artifact inventory must remain append-only")
 	}
 	t := next.Transition
+	if t.Kind == CheckpointEnrollmentRecorded || t.Kind == CheckpointMirrorRecorded {
+		if previous.Progress.FinalRelease != nil {
+			return errors.New("cannot add assurance evidence after final release")
+		}
+		if !reflect.DeepEqual(previous.Progress, next.Progress) || !reflect.DeepEqual(previous.Deliveries, next.Deliveries) {
+			return errors.New("evidence edge changed protocol progress or deliveries")
+		}
+		if !exactArtifactDelta(previous.AcceptedArtifacts, next.AcceptedArtifacts, append(signedArtifacts(t.Record), t.Evidence...)...) {
+			return errors.New("evidence edge changed unrelated artifacts")
+		}
+		return nil
+	}
 	if t.Scope != nil {
 		if t.Scope.CeremonyID != next.CeremonyID {
 			return errors.New("transition belongs to another ceremony")

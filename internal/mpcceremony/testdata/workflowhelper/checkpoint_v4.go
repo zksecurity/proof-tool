@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"fmt"
 	"os"
@@ -100,6 +101,35 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 		return err
 	}
 	p := d.Roster[0].Identity
+	beforeEnrollment := c
+	beforeEnrollmentRefs := committed
+	disclosureName := "enrollments/participant-01/disclosure.txt"
+	if err := os.MkdirAll(filepath.Join(root, "enrollments/participant-01"), 0700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(root, disclosureName), []byte("Test fixture: one process operates every role on one machine.\n"), 0600); err != nil {
+		return err
+	}
+	disclosure, err := ref(disclosureName)
+	if err != nil {
+		return err
+	}
+	db, err := os.ReadFile(trust.DefinitionPath)
+	if err != nil {
+		return err
+	}
+	enrollment, err := m.NewEnrollmentRecord(d, db, p, m.EnrollmentParticipant, 1, disclosure, "2023-08-23T15:00:30Z")
+	if err != nil {
+		return err
+	}
+	enrollmentRefs, err := writePair("enrollments/participant-01/record", enrollment, p.KeyID, participant)
+	if err != nil {
+		return err
+	}
+	next(m.CheckpointTransitionV4{Kind: m.CheckpointEnrollmentRecorded, Record: &enrollmentRefs, Evidence: []m.ArtifactRef{disclosure}})
+	if err = commit(); err != nil {
+		return err
+	}
 	scope := m.ContributionScope{CeremonyID: d.CeremonyID, Phase: m.Phase1, Index: 1, ParticipantID: p.ID, ParentHeadID: head}
 	handoff, err := m.NewTransferHandoff(d, m.Phase1, 1, head, []m.ArtifactRef{payload}, d.Coordinator, p, "2023-08-23T15:01:00Z", "2023-08-23T16:01:00Z")
 	if err != nil {
@@ -116,6 +146,13 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 	c.Deliveries, err = m.AllocateDeliveryV2(c.Deliveries, scope, m.CheckpointSubmissionReceipt, first)
 	if err != nil {
 		return err
+	}
+	missingEnrollment := c
+	missingEnrollment.Sequence = beforeEnrollment.Sequence + 1
+	missingEnrollment.PreviousCheckpoint = &beforeEnrollmentRefs
+	missingEnrollment.AcceptedArtifacts = sorted(append(append([]m.ArtifactRef{}, beforeEnrollment.AcceptedArtifacts...), handoffRefs.Record, handoffRefs.Signature))
+	if _, err := m.PrepareCheckpointV4(m.CheckpointPreparationV4{Trust: trust, ArtifactRoot: root, Proposal: missingEnrollment, Circuit: circuit}); err == nil || !strings.Contains(err.Error(), "enrollment") {
+		return fmt.Errorf("outbound without committed enrollment: %v", err)
 	}
 	if err = commit(); err != nil {
 		return err
@@ -295,6 +332,57 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 	if rejectErr == nil {
 		return fmt.Errorf("corrupted accepted contribution passed checkpoint preparation")
 	}
+	beforeMirrors, beforeMirrorsRefs := c, committed
+	if d.AssurancePolicy.MirrorsPerAcceptedHead > 0 {
+		mirrorKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0xb1}, 32))
+		mirror, err := m.NewIdentity("mirror-01", "Fixture mirror", "mirror-key", mirrorKey.Public().(ed25519.PublicKey))
+		if err != nil {
+			return err
+		}
+		mr, err := m.NewEnrollmentRecord(d, db, mirror, m.EnrollmentMirrorOperator, 1, disclosure, "2023-08-23T15:00:31Z")
+		if err != nil {
+			return err
+		}
+		mrRefs, err := writePair("enrollments/mirror-01/record", mr, mirror.KeyID, mirrorKey)
+		if err != nil {
+			return err
+		}
+		// Give this enrollment its own disclosure reference; immutable evidence
+		// must add precisely its own supporting file rather than re-add a path.
+		mirrorDisclosureName := "enrollments/mirror-01/disclosure.txt"
+		if err = os.WriteFile(filepath.Join(root, mirrorDisclosureName), []byte("One-process mirror fixture.\n"), 0600); err != nil {
+			return err
+		}
+		md, err := ref(mirrorDisclosureName)
+		if err != nil {
+			return err
+		}
+		mr.IndependenceDisclosure = md
+		mrRefs, err = writePair("enrollments/mirror-01/record", mr, mirror.KeyID, mirrorKey)
+		if err != nil {
+			return err
+		}
+		next(m.CheckpointTransitionV4{Kind: m.CheckpointEnrollmentRecorded, Record: &mrRefs, Evidence: []m.ArtifactRef{md}})
+		if err = commit(); err != nil {
+			return err
+		}
+		mf, err := m.MirrorReceiptFiles(last, chainRefs)
+		if err != nil {
+			return err
+		}
+		mirrorReceipt, err := m.NewImmutableMirrorReceipt(d.CeremonyID, m.Phase1, 1, head, mf, mirror, m.NewDigest([]byte("fixture archive")).SHA256, "2023-08-23T15:05:30Z")
+		if err != nil {
+			return err
+		}
+		mirrorRefs, err := writePair("mirrors/phase1-0001", mirrorReceipt, mirror.KeyID, mirrorKey)
+		if err != nil {
+			return err
+		}
+		next(m.CheckpointTransitionV4{Kind: m.CheckpointMirrorRecorded, Record: &mirrorRefs, Evidence: []m.ArtifactRef{}})
+		if err = commit(); err != nil {
+			return err
+		}
+	}
 	// Historical genuine drand response tests binding and mathematics, not a
 	// live wait. Normal closure commands keep their current-time requirements.
 	roundTime, err := m.QuicknetRoundTime(42)
@@ -315,6 +403,15 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 	}
 	next(m.CheckpointTransitionV4{Kind: m.CheckpointPhase1Closed, Record: &closureRefs, Evidence: []m.ArtifactRef{}})
 	c.Progress.Phase1Closure = &closureRefs
+	if d.AssurancePolicy.MirrorsPerAcceptedHead > 0 {
+		missing := c
+		missing.Sequence = beforeMirrors.Sequence + 1
+		missing.PreviousCheckpoint = &beforeMirrorsRefs
+		missing.AcceptedArtifacts = sorted(append(append([]m.ArtifactRef{}, beforeMirrors.AcceptedArtifacts...), closureRefs.Record, closureRefs.Signature))
+		if _, err := m.PrepareCheckpointV4(m.CheckpointPreparationV4{Trust: trust, ArtifactRoot: root, Proposal: missing, Circuit: circuit}); err == nil || !strings.Contains(err.Error(), "mirror") {
+			return fmt.Errorf("closure without required mirror: %v", err)
+		}
+	}
 	if err = commit(); err != nil {
 		return err
 	}

@@ -10,6 +10,7 @@ import (
 )
 
 const (
+	maxEnrollmentDisclosureBytes      = 1 << 20
 	OperationalEvidenceBundleSchemaV2 = "proof-tool-mpc-operational-evidence-bundle-v2"
 	OperationalEvidenceBundleSchema   = "proof-tool-mpc-operational-evidence-bundle-v3"
 )
@@ -811,7 +812,7 @@ func verifyEnrollmentEvidence(
 			return nil, nil, fmt.Errorf("enrollment %d proof of possession: %w", index, err)
 		}
 		signer := record.Identity
-		if _, err := verifyArtifactBytes(root, record.IndependenceDisclosure, 1<<20); err != nil {
+		if _, err := verifyArtifactBytes(root, record.IndependenceDisclosure, maxEnrollmentDisclosureBytes); err != nil {
 			return nil, nil, fmt.Errorf("enrollment %d independence disclosure: %w", index, err)
 		}
 		if _, duplicate := enrollments[signer.ID]; duplicate {

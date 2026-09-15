@@ -32,21 +32,25 @@ func TestCheckpointV4RealContributionTurn(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, output)
 	}
-	run := exec.Command(helper, filepath.Join(t.TempDir(), "ceremony-run"))
-	run.Dir = repo
-	for _, entry := range os.Environ() {
-		if strings.HasPrefix(entry, "MPC_WORKFLOW_") || strings.HasPrefix(entry, "MPC_CEREMONY_TEST_") || strings.HasPrefix(entry, "PROOF_TOOL_TEST_") {
-			continue
-		}
-		run.Env = append(run.Env, entry)
-	}
-	run.Env = append(run.Env, "MPC_WORKFLOW_CHECKPOINT_V4=1", "PROOF_TOOL_TEST_ZERO_ASSURANCE=1")
-	output, err := run.CombinedOutput()
-	if err != nil {
-		t.Fatalf("real checkpoint turn: %v\n%s", err, output)
-	}
-	if !strings.Contains(string(output), "V4 real phase1 turn passed") || !strings.Contains(string(output), "closure, drand, seal, phase2 genesis") {
-		t.Fatalf("missing completion: %s", output)
+	for _, mirrorMode := range []string{"0", "1"} {
+		t.Run("mirrors-"+mirrorMode, func(t *testing.T) {
+			run := exec.Command(helper, filepath.Join(t.TempDir(), "ceremony-run"))
+			run.Dir = repo
+			for _, entry := range os.Environ() {
+				if strings.HasPrefix(entry, "MPC_WORKFLOW_") || strings.HasPrefix(entry, "MPC_CEREMONY_TEST_") || strings.HasPrefix(entry, "PROOF_TOOL_TEST_") {
+					continue
+				}
+				run.Env = append(run.Env, entry)
+			}
+			run.Env = append(run.Env, "MPC_WORKFLOW_CHECKPOINT_V4=1", "PROOF_TOOL_TEST_ZERO_ASSURANCE=1", "MPC_WORKFLOW_V4_MIRROR="+mirrorMode)
+			output, err := run.CombinedOutput()
+			if err != nil {
+				t.Fatalf("real checkpoint turn: %v\n%s", err, output)
+			}
+			if !strings.Contains(string(output), "V4 real phase1 turn passed") || !strings.Contains(string(output), "closure, drand, seal, phase2 genesis") {
+				t.Fatalf("missing completion: %s", output)
+			}
+		})
 	}
 }
 

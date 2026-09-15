@@ -232,6 +232,9 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	releaseVerification := ""
 	if checkpointV4 {
 		releaseVerification = mpcceremony.CoordinatorReplayReleaseV1
+		if os.Getenv("MPC_WORKFLOW_V4_MIRROR") == "1" {
+			assurance.MirrorsPerAcceptedHead = 1
+		}
 	}
 	initialized, err := mpcceremony.InitializeCeremonyFiles(mpcceremony.InitFilesOptions{
 		RootDir: ceremonyRoot,
