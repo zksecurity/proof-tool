@@ -1,0 +1,436 @@
+package mpcceremony
+
+import (
+	"bytes"
+	"crypto/ed25519"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"testing"
+)
+
+// These fixtures test structural guidance transitions, not contribution math.
+// A real signed ceremony round trip separately exercises semantic authoring.
+func checkpointFixtureV4(t *testing.T) (CeremonyDefinition, CheckpointV4, []byte, []byte) {
+	t.Helper()
+	d := trustedCoordinatorDefinition(t)
+	d.Mode = ModeRehearsal
+	d.AssurancePolicy.ExternalSecurityAuditSignoffs = 0
+	d.Phase1Policy.Minimum = 1
+	d.Phase2Policy.Minimum = 1
+	var err error
+	d, err = FinalizeCeremonyDefinition(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{1}, 32))
+	db, ds, err := SignRecord(d, d.Coordinator.KeyID, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def := SignedArtifactRefs{Record: inventoryTestRef("ceremony.json", db), Signature: inventoryTestRef("ceremony.sig", ds)}
+	chain := checkpointSigned("phase1/chain-0000")
+	c := CheckpointV4{Schema: CheckpointSchemaV4, Workflow: StorageFirstWorkflowV2, CeremonyID: d.CeremonyID, Definition: def,
+		AssurancePolicy: cloneAssurancePolicy(d.AssurancePolicy), ReleaseVerification: CoordinatorReplayReleaseV1,
+		Transition:        CheckpointTransitionV4{Kind: CheckpointInitial, Evidence: []ArtifactRef{}},
+		Progress:          CheckpointProgressV4{Phase1: CheckpointPhaseState{Phase: Phase1, HeadRecordID: NewDigest([]byte("head-0")).SHA256, HeadPayload: d.Phase1Genesis, Chain: chain}},
+		AcceptedArtifacts: checkpointArtifacts(def.Record, def.Signature, chain.Record, chain.Signature, d.Phase1Genesis), Deliveries: []DeliverySlotV2{}}
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	return d, c, db, ds
+}
+
+func cloneCheckpointV4(t *testing.T, c CheckpointV4) CheckpointV4 {
+	t.Helper()
+	raw, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out CheckpointV4
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func nextCheckpointV4(t *testing.T, p CheckpointV4, transition CheckpointTransitionV4) CheckpointV4 {
+	t.Helper()
+	c := cloneCheckpointV4(t, p)
+	raw, err := MarshalCanonical(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := checkpointSigned(fmt.Sprintf("checkpoints/%04d", p.Sequence))
+	ref.Record.Digest = NewDigest(raw)
+	c.PreviousCheckpoint = &ref
+	c.Sequence++
+	c.Transition = transition
+	c.AcceptedArtifacts = appendCheckpointArtifacts(c.AcceptedArtifacts, append(signedArtifacts(transition.Record), transition.Evidence...)...)
+	return c
+}
+
+func checkpointTurnV4(t *testing.T, d CeremonyDefinition, start CheckpointV4, phase Phase) []CheckpointV4 {
+	t.Helper()
+	state := start.Progress.Phase1
+	participant := d.Phase1Policy.Participants[0]
+	outbound, receipt, accept := CheckpointPhase1OutboundPublished, CheckpointPhase1ReceiptAccepted, CheckpointPhase1CandidateAccepted
+	if phase == Phase2 {
+		state = *start.Progress.Phase2
+		participant = d.Phase2Policy.Participants[0]
+		outbound = CheckpointPhase2OutboundPublished
+		receipt = CheckpointPhase2ReceiptAccepted
+		accept = CheckpointPhase2CandidateAccepted
+	}
+	scope := ContributionScope{CeremonyID: d.CeremonyID, Phase: phase, Index: state.AcceptedCount + 1, ParticipantID: participant, ParentHeadID: state.HeadRecordID}
+	id1, id2 := fmt.Sprintf("%032x", start.Sequence+100), fmt.Sprintf("%032x", start.Sequence+101)
+	handoff := checkpointSigned(string(phase) + "/outbound")
+	c1 := nextCheckpointV4(t, start, CheckpointTransitionV4{Kind: outbound, Scope: &scope, AttemptID: id1, Record: &handoff, Evidence: []ArtifactRef{}})
+	var err error
+	c1.Deliveries, err = AllocateDeliveryV2(start.Deliveries, scope, CheckpointSubmissionReceipt, id1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := checkpointSigned(string(phase) + "/receipt")
+	c2 := nextCheckpointV4(t, c1, CheckpointTransitionV4{Kind: receipt, Scope: &scope, AttemptID: id1, NextAttemptID: id2, Record: &r, Evidence: []ArtifactRef{}})
+	c2.Deliveries, err = AdvanceDeliveryV2(c1.Deliveries, id1, DeliveryAccepted, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c2.Deliveries, err = AllocateDeliveryV2(c2.Deliveries, scope, CheckpointSubmissionCandidate, id2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, inventory := candidateInventoryFixture(t)
+	inventory.Scope = scope
+	chain := checkpointSigned(fmt.Sprintf("%s/chain-%04d", phase, scope.Index))
+	evidence := []ArtifactRef{}
+	for _, ref := range inventory.Files {
+		ref.Name = fmt.Sprintf("%s/contributions/%04d/%s", phase, scope.Index, ref.Name)
+		evidence = append(evidence, ref)
+	}
+	evidence = checkpointArtifacts(append(evidence, checkpointArtifact(fmt.Sprintf("%s/contributions/%04d/verification.json", phase, scope.Index), "verification"))...)
+	c3 := nextCheckpointV4(t, c2, CheckpointTransitionV4{Kind: accept, Scope: &scope, AttemptID: id2, Record: &chain, Evidence: evidence, Contribution: &inventory})
+	c3.Deliveries, err = AdvanceDeliveryV2(c2.Deliveries, id2, DeliveryAccepted, &inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextState := CheckpointPhaseState{Phase: phase, AcceptedCount: scope.Index, HeadRecordID: NewDigest([]byte(string(phase) + "accepted-head")).SHA256, HeadPayload: evidence[2], Chain: chain}
+	if phase == Phase1 {
+		c3.Progress.Phase1 = nextState
+	} else {
+		c3.Progress.Phase2 = &nextState
+	}
+	sequence := []CheckpointV4{start, c1, c2, c3}
+	for i := 1; i < len(sequence); i++ {
+		if err := ValidateCheckpointTransitionV4(sequence[i-1], sequence[i]); err != nil {
+			t.Fatalf("%s edge %d: %v", phase, i, err)
+		}
+	}
+	return sequence
+}
+
+func TestCheckpointV4FullStructuralLifecycle(t *testing.T) {
+	d, c, _, _ := checkpointFixtureV4(t)
+	turn := checkpointTurnV4(t, d, c, Phase1)
+	c = turn[len(turn)-1]
+	stages := []CheckpointTransitionKind{CheckpointPhase1Closed, CheckpointPhase1BeaconRecorded, CheckpointPhase1Sealed, CheckpointPhase2Initialized, CheckpointPhase2Closed, CheckpointPhase2BeaconRecorded, CheckpointFinalCandidateRecorded, CheckpointFinalReleaseRecorded}
+	for _, kind := range stages {
+		record := checkpointSigned("lifecycle/" + string(kind))
+		evidence := []ArtifactRef{}
+		if kind != CheckpointPhase1Closed && kind != CheckpointPhase2Closed {
+			evidence = append(evidence, checkpointArtifact("lifecycle/"+string(kind)+".bin", "payload"))
+		}
+		next := nextCheckpointV4(t, c, CheckpointTransitionV4{Kind: kind, Record: &record, Evidence: evidence})
+		switch kind {
+		case CheckpointPhase1Closed:
+			next.Progress.Phase1Closure = &record
+		case CheckpointPhase1BeaconRecorded:
+			next.Progress.Phase1Beacon = &record
+		case CheckpointPhase1Sealed:
+			next.Progress.Phase1Seal = &record
+		case CheckpointPhase2Initialized:
+			next.Progress.Phase2 = &CheckpointPhaseState{Phase: Phase2, HeadRecordID: NewDigest([]byte("p2genesis")).SHA256, HeadPayload: evidence[0], Chain: record}
+		case CheckpointPhase2Closed:
+			next.Progress.Phase2Closure = &record
+		case CheckpointPhase2BeaconRecorded:
+			next.Progress.Phase2Beacon = &record
+		case CheckpointFinalCandidateRecorded:
+			next.Progress.FinalCandidate = &record
+		case CheckpointFinalReleaseRecorded:
+			next.Progress.FinalRelease = &record
+		}
+		if err := ValidateCheckpointTransitionV4(c, next); err != nil {
+			t.Fatalf("%s: %v", kind, err)
+		}
+		c = next
+		if kind == CheckpointPhase2Initialized {
+			turn = checkpointTurnV4(t, d, c, Phase2)
+			c = turn[len(turn)-1]
+		}
+	}
+	if c.Progress.FinalRelease == nil {
+		t.Fatal("did not reach final release")
+	}
+}
+
+func TestCheckpointV4RejectsSkippedOrAlteredTurnEdges(t *testing.T) {
+	d, c, _, _ := checkpointFixtureV4(t)
+	turn := checkpointTurnV4(t, d, c, Phase1)
+	for name, mutate := range map[string]func(*CheckpointV4){
+		"wrong parent":          func(n *CheckpointV4) { n.PreviousCheckpoint.Record.Digest = NewDigest([]byte("other checkpoint")) },
+		"wrong sequence":        func(n *CheckpointV4) { n.Sequence++ },
+		"changed policy":        func(n *CheckpointV4) { n.AssurancePolicy.PublicWitnessesPerPhase++ },
+		"changed runtime claim": func(n *CheckpointV4) { n.ReleaseVerification = "none" },
+		"hidden extra file": func(n *CheckpointV4) {
+			n.AcceptedArtifacts = appendCheckpointArtifacts(n.AcceptedArtifacts, checkpointArtifact("unexpected.json", "extra"))
+		},
+		"wrong slot":            func(n *CheckpointV4) { n.Transition.AttemptID = strings.Repeat("e", 32) },
+		"skipped count":         func(n *CheckpointV4) { n.Progress.Phase1.AcceptedCount++ },
+		"changed result":        func(n *CheckpointV4) { n.Transition.Contribution.Files[0].Digest = NewDigest([]byte("changed")) },
+		"discard history":       func(n *CheckpointV4) { n.Deliveries = n.Deliveries[1:] },
+		"advance another phase": func(n *CheckpointV4) { n.Progress.Phase2 = &n.Progress.Phase1 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			n := cloneCheckpointV4(t, turn[3])
+			mutate(&n)
+			if err := ValidateCheckpointTransitionV4(turn[2], n); err == nil {
+				t.Fatal("invalid edge accepted")
+			}
+		})
+	}
+	if err := ValidateCheckpointTransitionV4(turn[1], turn[3]); err == nil {
+		t.Fatal("receipt step skipped")
+	}
+	// A receipt allocation cannot be treated as an accepted candidate allocation.
+	n := cloneCheckpointV4(t, turn[3])
+	n.Sequence = turn[1].Sequence + 1
+	raw, _ := MarshalCanonical(turn[1])
+	n.PreviousCheckpoint.Record.Digest = NewDigest(raw)
+	if err := ValidateCheckpointTransitionV4(turn[1], n); err == nil {
+		t.Fatal("candidate accepted before receipt")
+	}
+}
+
+func TestCheckpointV4AuthenticatesExactPolicyAndRejectsLegacy(t *testing.T) {
+	d, c, db, ds := checkpointFixtureV4(t)
+	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{1}, 32))
+	cb, cs, err := SignRecord(c, d.Coordinator.KeyID, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifySignedCheckpointV4(d, db, ds, cb, cs); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifySignedCheckpoint(d, db, ds, cb, cs); err == nil {
+		t.Fatal("old checkpoint verifier accepted v4")
+	}
+	old := adversarialDefinition(t)
+	odb, ods, err := SignRecord(old, old.Coordinator.KeyID, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifySignedCheckpointV4(old, odb, ods, cb, cs); err == nil {
+		t.Fatal("v4 checker accepted old definition")
+	}
+	changed := cloneCheckpointV4(t, c)
+	changed.AssurancePolicy.PublicWitnessesPerPhase++
+	bad, bads, err := SignRecord(changed, d.Coordinator.KeyID, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifySignedCheckpointV4(d, db, ds, bad, bads); err == nil {
+		t.Fatal("signed but changed policy accepted")
+	}
+	wrongKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{2}, 32))
+	bad, bads, err = SignRecord(c, d.Coordinator.KeyID, wrongKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifySignedCheckpointV4(d, db, ds, bad, bads); err == nil {
+		t.Fatal("wrong coordinator key accepted")
+	}
+	for _, field := range []string{"relay_release_id", "manifest_key", "acknowledgement"} {
+		if bytes.Contains(cb, []byte(field)) {
+			t.Fatalf("transport field %s leaked into v4", field)
+		}
+	}
+}
+
+func TestCheckpointV4RejectsOverlappingArtifactNames(t *testing.T) {
+	refs := checkpointArtifacts(checkpointArtifact("a", "file"), checkpointArtifact("a-b", "middle"), checkpointArtifact("a/b", "child"))
+	if err := validateV4ArtifactSet(refs, 10); err == nil {
+		t.Fatal("non-adjacent file/directory collision accepted")
+	}
+}
+
+func TestCheckpointV4DeliveryRetryAndRejectionEdges(t *testing.T) {
+	d, initial, _, _ := checkpointFixtureV4(t)
+	turn := checkpointTurnV4(t, d, initial, Phase1)
+	previous := turn[2]
+	for _, kind := range []CheckpointTransitionKind{CheckpointDeliveryRetired, CheckpointContributionRejected} {
+		t.Run(string(kind), func(t *testing.T) {
+			transition := CheckpointTransitionV4{Kind: kind, Scope: turn[3].Transition.Scope, AttemptID: turn[3].Transition.AttemptID, NextAttemptID: strings.Repeat("e", 32), Evidence: []ArtifactRef{}}
+			status := DeliveryRetired
+			if kind == CheckpointContributionRejected {
+				status = DeliveryRejected
+				transition.Contribution = turn[3].Transition.Contribution
+			}
+			next := nextCheckpointV4(t, previous, transition)
+			var err error
+			next.Deliveries, err = AdvanceDeliveryV2(previous.Deliveries, transition.AttemptID, status, transition.Contribution)
+			if err != nil {
+				t.Fatal(err)
+			}
+			next.Deliveries, err = AllocateDeliveryV2(next.Deliveries, *transition.Scope, CheckpointSubmissionCandidate, transition.NextAttemptID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := ValidateCheckpointTransitionV4(previous, next); err != nil {
+				t.Fatal(err)
+			}
+			changed := cloneCheckpointV4(t, next)
+			changed.Deliveries[1].Status = DeliveryRetired
+			changed.Deliveries[1].ContributionResultID = ""
+			if kind == CheckpointContributionRejected {
+				if err := ValidateCheckpointTransitionV4(previous, changed); err == nil {
+					t.Fatal("rejection silently retired")
+				}
+			}
+			accept := turn[3].Transition
+			accept.AttemptID = transition.NextAttemptID
+			final := nextCheckpointV4(t, next, accept)
+			final.Progress = turn[3].Progress
+			final.Deliveries, err = AdvanceDeliveryV2(next.Deliveries, accept.AttemptID, DeliveryAccepted, accept.Contribution)
+			if kind == CheckpointContributionRejected {
+				if err == nil {
+					t.Fatal("rejected result accepted through replacement")
+				}
+				final.Deliveries = append([]DeliverySlotV2{}, next.Deliveries...)
+				last := len(final.Deliveries) - 1
+				final.Deliveries[last].Status = DeliveryAccepted
+				final.Deliveries[last].ContributionResultID, _ = accept.Contribution.ID()
+				if err := ValidateCheckpointTransitionV4(next, final); err == nil {
+					t.Fatal("hand-constructed rejection bypass accepted")
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := ValidateCheckpointTransitionV4(next, final); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Rejected payload hashes may be public state, but their unaccepted
+			// bytes must never enter the public accepted-artifact inventory.
+			bad := cloneCheckpointV4(t, next)
+			bad.AcceptedArtifacts = appendCheckpointArtifacts(bad.AcceptedArtifacts, checkpointArtifact("rejected.bin", "unaccepted"))
+			if err := ValidateCheckpointTransitionV4(previous, bad); err == nil {
+				t.Fatal("rejected payload published as accepted")
+			}
+		})
+	}
+}
+
+func TestCheckpointV4RetirementAtLimitCanCloseAfterMinimum(t *testing.T) {
+	d, initial, db, ds := checkpointFixtureV4(t)
+	turn := checkpointTurnV4(t, d, initial, Phase1)
+	previous := turn[3]
+	scope := ContributionScope{CeremonyID: d.CeremonyID, Phase: Phase1, Index: 2, ParticipantID: d.Phase1Policy.Participants[1], ParentHeadID: previous.Progress.Phase1.HeadRecordID}
+	id := fmt.Sprintf("%032x", 200)
+	handoff := checkpointSigned("phase1/outbound-2")
+	c := nextCheckpointV4(t, previous, CheckpointTransitionV4{Kind: CheckpointPhase1OutboundPublished, Scope: &scope, AttemptID: id, Record: &handoff, Evidence: []ArtifactRef{}})
+	var err error
+	c.Deliveries, err = AllocateDeliveryV2(previous.Deliveries, scope, CheckpointSubmissionReceipt, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateCheckpointTransitionV4(previous, c); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < MaxDeliveryAttemptsPerSubmissionV2; i++ {
+		tx := CheckpointTransitionV4{Kind: CheckpointDeliveryRetired, Scope: &scope, AttemptID: id, Evidence: []ArtifactRef{}}
+		n := nextCheckpointV4(t, c, tx)
+		n.Deliveries, err = AdvanceDeliveryV2(c.Deliveries, id, DeliveryRetired, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := ValidateCheckpointTransitionV4(c, n); err != nil {
+			t.Fatal(err)
+		}
+		c = n
+		if i < MaxDeliveryAttemptsPerSubmissionV2-1 {
+			nextID := fmt.Sprintf("%032x", 201+i)
+			n = nextCheckpointV4(t, c, CheckpointTransitionV4{Kind: CheckpointDeliveryReallocated, Scope: &scope, AttemptID: id, NextAttemptID: nextID, Evidence: []ArtifactRef{}})
+			n.Deliveries, err = AllocateDeliveryV2(c.Deliveries, scope, CheckpointSubmissionReceipt, nextID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := ValidateCheckpointTransitionV4(c, n); err != nil {
+				t.Fatal(err)
+			}
+			c = n
+			id = nextID
+		}
+	}
+	if _, err := AllocateDeliveryV2(c.Deliveries, scope, CheckpointSubmissionReceipt, strings.Repeat("f", 32)); err == nil {
+		t.Fatal("attempt budget exceeded")
+	}
+	closure := checkpointSigned("phase1/closure")
+	n := nextCheckpointV4(t, c, CheckpointTransitionV4{Kind: CheckpointPhase1Closed, Record: &closure, Evidence: []ArtifactRef{}})
+	n.Progress.Phase1Closure = &closure
+	if err := ValidateCheckpointTransitionV4(c, n); err != nil {
+		t.Fatal(err)
+	}
+	key := adversarialPrivateKey(1)
+	pb, ps, err := SignRecord(c, d.Coordinator.KeyID, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n.PreviousCheckpoint.Signature.Digest = NewDigest(ps)
+	nb, ns, err := SignRecord(n, d.Coordinator.KeyID, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyCheckpointEdgeV4(d, db, ds, pb, ps, nb, ns); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCheckpointV4ExactPredecessorSignatureAndMinimum(t *testing.T) {
+	d, initial, db, ds := checkpointFixtureV4(t)
+	turn := checkpointTurnV4(t, d, initial, Phase1)
+	next := turn[1]
+	key := adversarialPrivateKey(1)
+	pb, ps, err := SignRecord(initial, d.Coordinator.KeyID, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next.PreviousCheckpoint.Signature.Digest = NewDigest(ps)
+	nb, ns, err := SignRecord(next, d.Coordinator.KeyID, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyCheckpointEdgeV4(d, db, ds, pb, ps, nb, ns); err != nil {
+		t.Fatal(err)
+	}
+	next.PreviousCheckpoint.Signature.Digest = NewDigest([]byte("wrong predecessor signature"))
+	nb, ns, err = SignRecord(next, d.Coordinator.KeyID, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyCheckpointEdgeV4(d, db, ds, pb, ps, nb, ns); err == nil {
+		t.Fatal("wrong signature reference accepted")
+	}
+	closure := checkpointSigned("phase1/closure")
+	closed := nextCheckpointV4(t, initial, CheckpointTransitionV4{Kind: CheckpointPhase1Closed, Record: &closure, Evidence: []ArtifactRef{}})
+	closed.Progress.Phase1Closure = &closure
+	closed.PreviousCheckpoint.Signature.Digest = NewDigest(ps)
+	nb, ns, err = SignRecord(closed, d.Coordinator.KeyID, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyCheckpointEdgeV4(d, db, ds, pb, ps, nb, ns); err == nil {
+		t.Fatal("phase closed before signed contribution minimum")
+	}
+}

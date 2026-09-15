@@ -26,18 +26,42 @@ check by changing the meaning of V3 or a generic "current schema" constant.
 
 ## New-version implementation gate
 
+Current draft: opt-in V4 definition construction and a separate V4 structural
+checkpoint model exist in the library. Normal initialization still emits V3.
+Do not release this slice alone: real-artifact V4 checkpoint authoring and the
+new release/decision verification path are not complete. Structural fixture
+tests are not a completed cryptographic ceremony or normal CLI journey.
+
 - Reserve Definition V4, Checkpoint V4 and `storage-first-v2` for the changed
   trust and submission rules; do not emit them until the whole verifier path
   exists and has negative tests.
-- Give the changed ceremony release claim an explicit new version and trust
-  meaning. Do not silently change ordinary application key-bundle verification.
-- Version final transcript and production decisions where they consume that
-  changed claim. Reuse component evidence/candidate formats only where their
+- Give the changed ceremony release claim final transcript V3, with explicit
+  policy and the exact signed coordinator final-candidate checkpoint references.
+  Keep key manifest V1: its signed setup_transcript_hash binds the new transcript
+  without changing ordinary application key-bundle verification or adding a
+  second authorization signature. Include the checkpoint pair in the closed
+  ceremony release inventory.
+- Explicitly dispatch Definition V4 to final transcript V3. Decision V2 may
+  retain its structure if exact definition/release binding and V4 verification
+  are enforced; it must not fall through to legacy policy. Reuse component
+  evidence/candidate formats only where their
   exact signed meaning stays unchanged.
 - Keep old signing and verification dispatch intact. Unknown versions fail
   closed; missing fields do not select the simplified path.
 - Coordinator replay stays mandatory. Release signer stays required; only its
   duplicate mathematical replay becomes optional in the new path.
+
+V4 delivery history retains terminal dispositions. Its per-turn
+`contribution_result_id` hashes the ceremony, phase, index, participant,
+predecessor and fixed candidate-file labels/digests, not upload attempts or
+paths. Retired delivery permits the same bytes to be redelivered; rejected
+results cannot be accepted through replacement attempts. The signed history is
+bounded to 16 attempts per logical submission and a separate 4,096-slot budget
+across the ceremony. Validators reject excess history rather than dropping old
+rejections. Retirement/rejection need not allocate a replacement, so exhausting
+the budget does not prevent terminal retirement. Closure still requires the
+signed contribution minimum. `VerifyCheckpointEdgeV4` compares the exact
+predecessor record and signature; structural validation alone cannot do that.
 
 The runtime has no dependency on a downstream delivery application's version.
 Provider keys, buckets and upload manifests belong outside proof-tool. Existing

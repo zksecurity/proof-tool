@@ -608,7 +608,7 @@ func ValidateClose(definition CeremonyDefinition, chain Chain, close CloseRecord
 // witness receipt unsatisfiable. See ProductionWitnessObservationWindowSeconds.
 func requiredCloseLead(definition CeremonyDefinition) time.Duration {
 	lead := time.Duration(definition.BeaconPolicy.MinimumWitnessLeadSeconds) * time.Second
-	witnessesEnabled := definition.Schema != DefinitionSchemaV3 ||
+	witnessesEnabled := !definition.UsesSignedAssurancePolicy() ||
 		(definition.AssurancePolicy != nil && definition.AssurancePolicy.PublicWitnessesPerPhase > 0)
 	if definition.Mode == ModeProduction && witnessesEnabled {
 		lead += time.Duration(ProductionWitnessObservationWindowSeconds) * time.Second

@@ -675,6 +675,9 @@ func VerifyRelease(options VerifyReleaseOptions) (*VerifyReleaseResult, error) {
 	if err := requireIdentityKey(definition.Coordinator, coordinatorPublicKey); err != nil {
 		return nil, err
 	}
+	if definition.Schema == DefinitionSchemaV4 {
+		return nil, errors.New("definition v4 requires the versioned trusted-coordinator release verification path")
+	}
 	if options.ExpectedSignatureKeyID != definition.ReleaseSigner.KeyID {
 		return nil, errors.New("expected release signature key id does not match ceremony definition")
 	}
@@ -1088,7 +1091,7 @@ func verifyPassingAudits(
 	inputs []AuditArtifact,
 ) ([]ArtifactRef, time.Time, error) {
 	minimum := 1
-	if definition.Schema == DefinitionSchemaV3 {
+	if definition.UsesSignedAssurancePolicy() {
 		minimum = int(definition.AssurancePolicy.PassingCeremonyAudits)
 	}
 	if len(inputs) < minimum {
