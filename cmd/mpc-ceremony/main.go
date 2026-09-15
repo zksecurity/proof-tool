@@ -271,7 +271,7 @@ command:
 			"contribute": {}, "help": {}, "init": {}, "verify": {},
 		},
 		"decision":   {"help": {}, "prepare": {}, "sign": {}, "verify": {}},
-		"checkpoint": {"help": {}, "prepare": {}, "sign": {}, "verify": {}, "verify-stored": {}},
+		"checkpoint": {"help": {}, "prepare": {}, "sign": {}, "verify": {}, "verify-stored": {}, "prepare-v4": {}, "sign-v4": {}, "verify-stored-v4": {}},
 		"inspect": {
 			"chain": {}, "checkpoint": {}, "checkpoint-transition": {}, "definition": {}, "enrollment": {}, "help": {}, "participant": {},
 		},
@@ -346,7 +346,9 @@ func writeParseError(message string, args []string, stdout, stderr io.Writer) in
 // redacted, including values following a recognized flag.
 func markOperationalGrammar(args []string, safe map[int]struct{}) {
 	for index, arg := range args {
-		if arg == "--related-record" || arg == "--record-type" || arg == "--reviewed-sha256" || arg == "--evidence-root" {
+		switch arg {
+		case "--related-record", "--record-type", "--reviewed-sha256", "--evidence-root",
+			"--release-verification", "--review-checkpoint", "--review-checkpoint-signature", "--proposal", "--rejected-candidate-dir":
 			safe[index] = struct{}{}
 		}
 		if index > 0 && args[index-1] == "--record-type" {

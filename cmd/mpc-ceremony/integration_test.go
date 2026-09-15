@@ -47,6 +47,9 @@ func TestParticipantCLIHelpHasExplicitSafeFlagAllowlist(t *testing.T) {
 		{"decision", "prepare"},
 		{"decision", "sign"},
 		{"decision", "verify"},
+		{"checkpoint", "prepare-v4"},
+		{"checkpoint", "sign-v4"},
+		{"checkpoint", "verify-stored-v4"},
 		{"inspect"},
 		{"inspect", "definition"},
 		{"inspect", "chain"},
@@ -177,6 +180,12 @@ func TestParticipantCLIHelpHasExplicitSafeFlagAllowlist(t *testing.T) {
 		"--released-at",
 		"--review-checkpoint",
 		"--review-checkpoint-signature",
+		"--release-verification",
+		"--proposal",
+		"--rejected-candidate-dir",
+		"--artifact-root",
+		"--checkpoint",
+		"--checkpoint-signature",
 		"--record",
 		"--record-type",
 		"--canonical",
@@ -240,6 +249,9 @@ func TestFinalizationAuditAndReleaseCommandsAreWired(t *testing.T) {
 		{Command: CommandCheckpointSign, Options: CheckpointSignOptions{}},
 		{Command: CommandCheckpointVerify, Options: CheckpointVerifyOptions{}},
 		{Command: CommandCheckpointVerifyStored, Options: CheckpointVerifyStoredOptions{}},
+		{Command: CommandCheckpointPrepareV4, Options: CheckpointOptionsV4{}},
+		{Command: CommandCheckpointSignV4, Options: CheckpointOptionsV4{}},
+		{Command: CommandCheckpointVerifyStoredV4, Options: CheckpointOptionsV4{}},
 	}
 	for _, invocation := range tests {
 		t.Run(string(invocation.Command), func(t *testing.T) {

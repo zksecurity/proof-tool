@@ -121,6 +121,8 @@ func (workflowExecutor) Execute(ctx context.Context, invocation Invocation) (Com
 		return executeSubmissionAccept(invocation.Options.(SubmissionAcceptOptions))
 	case CommandCheckpointPrepare:
 		return executeCheckpointPrepare(invocation.Options.(CheckpointPrepareOptions))
+	case CommandCheckpointPrepareV4, CommandCheckpointSignV4, CommandCheckpointVerifyStoredV4:
+		return executeCheckpointV4(invocation.Command, invocation.Options.(CheckpointOptionsV4))
 	case CommandCheckpointSign:
 		return executeCheckpointSign(invocation.Options.(CheckpointSignOptions))
 	case CommandCheckpointVerify:
@@ -188,18 +190,19 @@ func executeInit(options InitOptions) (CommandResult, error) {
 		RootDir: options.OutDir,
 		Circuit: circuit,
 		Definition: mpcceremony.DefinitionOptions{
-			Mode:            options.Mode,
-			CreatedAt:       options.CreatedAt,
-			SessionNonceHex: nonce,
-			Software:        runningSoftware,
-			Coordinator:     participants.Coordinator,
-			ReleaseSigner:   participants.ReleaseSigner,
-			Auditors:        participants.Auditors,
-			Roster:          participants.Roster,
-			Phase1Policy:    policy.Phase1Policy,
-			Phase2Policy:    policy.Phase2Policy,
-			BeaconPolicy:    policy.BeaconPolicy,
-			AssurancePolicy: assurancePolicy,
+			ReleaseVerification: options.ReleaseVerification,
+			Mode:                options.Mode,
+			CreatedAt:           options.CreatedAt,
+			SessionNonceHex:     nonce,
+			Software:            runningSoftware,
+			Coordinator:         participants.Coordinator,
+			ReleaseSigner:       participants.ReleaseSigner,
+			Auditors:            participants.Auditors,
+			Roster:              participants.Roster,
+			Phase1Policy:        policy.Phase1Policy,
+			Phase2Policy:        policy.Phase2Policy,
+			BeaconPolicy:        policy.BeaconPolicy,
+			AssurancePolicy:     assurancePolicy,
 		},
 		CoordinatorPrivateKeyPath: options.CoordinatorSigningKey,
 	})

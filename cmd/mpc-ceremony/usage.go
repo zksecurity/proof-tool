@@ -238,15 +238,51 @@ exact parent record and detached signature, and enforces the legal structural
 transition. It does not fetch or replay the protocol artifacts referenced by
 that transition.
 `,
+	"checkpoint prepare-v4": `Usage:
+  mpc-ceremony checkpoint prepare-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR --proposal FILE \
+    [--rejected-candidate-dir DIR] --out FRESH_FILE
+
+Checks the exact canonical V4 proposal and its required evidence. Mathematical
+transitions use the authenticated stored circuit. The output is an unsigned
+checked draft, not published state. Existing files are never overwritten.
+The private rejected-candidate directory is required only for a rejection.
+Keep it separate from the public artifact root. Proposal/output files must stay
+outside the closed final candidate, release, and rejected-candidate directories.
+`,
+	"checkpoint sign-v4": `Usage:
+  mpc-ceremony checkpoint sign-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR --proposal FILE \
+    [--rejected-candidate-dir DIR] --coordinator-signing-key KEY --out FRESH_FILE
+
+Repeats all proposal checks before loading the coordinator key and signs the
+exact checked bytes. Keep the proposal and detached signature together. Neither
+is the published current head until the delivery service uploads both and
+successfully updates the head. Existing outputs require inspection, not overwrite.
+`,
+	"checkpoint verify-stored-v4": `Usage:
+  mpc-ceremony checkpoint verify-stored-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE
+
+Authenticates retained checkpoint ancestry and legal metadata transitions.
+This does not verify every referenced artifact, the final release package,
+contribution mathematics, or whether a newer head exists on the delivery service.
+`,
 	"checkpoint": `Usage:
   mpc-ceremony checkpoint <prepare|sign|verify|verify-stored> [flags]
+  mpc-ceremony checkpoint <prepare-v4|sign-v4|verify-stored-v4> [flags]
 
-Guarded storage-first checkpoint operations. Every operation re-authenticates
+Legacy storage-first checkpoint operations re-authenticate
 the exact signed definition, predecessor, both phase chains and all records
 that cause the transition. The authenticated lifecycle runs from initialization
 through both phases, the fully replayed final candidate, and the exact signed
 release tree. Candidate acceptance and finalization replay the contribution
 mathematics and cleanup evidence.
+The explicit V4 commands use canonical protocol proposals rather than legacy
+submission envelopes. prepare-v4 and sign-v4 verify required transition evidence;
+verify-stored-v4 checks signed ancestry/metadata only, not all artifact bytes,
+mathematics or freshness. See each command's help for its exact boundary.
 `,
 	"submission": `Usage:
   mpc-ceremony submission <sign|accept> [flags]
@@ -351,7 +387,8 @@ fully_verified=true. Structural inspect output is diagnostics-only.
     --participants ROSTER.json --policy POLICY.json \
     --coordinator-key-id ID --coordinator-signing-key KEY \
     --created-at RFC3339 --out-dir DIR [--mode rehearsal|production] \
-    [--session-nonce-hex HEX] [--allowed-binary FILE ...]
+    [--session-nonce-hex HEX] [--allowed-binary FILE ...] \
+    [--release-verification coordinator-full-replay-v1]
 
 Compiles a registered repository circuit and writes a fresh signed ceremony
 definition. The authoritative ceremony ID is derived from canonical content,
@@ -359,6 +396,10 @@ including a 32-byte session nonce securely generated when omitted. Production
 mode requires exact clean source builds. The running binary is always allowed;
 each repeated --allowed-binary adds one authenticated binary for another
 platform to the signed definition.
+Omitting --release-verification preserves Definition V3. The explicit value
+opts a fresh ceremony into Definition V4: coordinator full replay remains
+mandatory; the required release signer verifies its exact binding without a
+second contribution replay. This never upgrades an existing ceremony.
 `,
 	"phase1": `Usage:
   mpc-ceremony phase1 <contribute|attest-erasure|verify|close|beacon|seal> [flags]

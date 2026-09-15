@@ -45,6 +45,10 @@ func parseCheckpoint(invocation Invocation, args []string) (Invocation, error) {
 		return Invocation{}, &helpRequest{topic: append([]string{"checkpoint"}, args[1:]...)}
 	}
 	switch args[0] {
+	case "prepare-v4", "sign-v4", "verify-stored-v4":
+		options, err := parseCheckpointV4(args[0], args[1:])
+		invocation.Command, invocation.Options = Command("checkpoint "+args[0]), options
+		return invocation, wrapCommandError(err, "checkpoint", args[0])
 	case "prepare":
 		options, err := parseCheckpointPrepare(args[1:])
 		invocation.Command, invocation.Options = CommandCheckpointPrepare, options
@@ -588,6 +592,9 @@ func buildCheckpointEvidenceWithParent(options CheckpointEvidenceOptions, verify
 	trusted, definitionBytes, definitionSignatureBytes, err := loadExactInspectionCeremony(options.InspectDefinitionOptions)
 	if err != nil {
 		return builtCheckpointEvidence{}, err
+	}
+	if trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+		return builtCheckpointEvidence{}, errors.New("definition v4 requires the explicit V4 checkpoint commands")
 	}
 	definitionRefs, err := checkpointPairRefs(options.ArtifactRoot, options.CeremonyPath, options.CeremonySignaturePath)
 	if err != nil {

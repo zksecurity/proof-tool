@@ -64,6 +64,9 @@ const (
 	CommandCheckpointSign                   Command = "checkpoint sign"
 	CommandCheckpointVerify                 Command = "checkpoint verify"
 	CommandCheckpointVerifyStored           Command = "checkpoint verify-stored"
+	CommandCheckpointPrepareV4              Command = "checkpoint prepare-v4"
+	CommandCheckpointSignV4                 Command = "checkpoint sign-v4"
+	CommandCheckpointVerifyStoredV4         Command = "checkpoint verify-stored-v4"
 )
 
 type SubmissionSignOptions struct {
@@ -106,6 +109,7 @@ type IdentityGenerateOptions struct {
 }
 
 type InitOptions struct {
+	ReleaseVerification   string
 	SessionNonceHex       string
 	CreatedAt             string
 	KeyVersion            string
@@ -646,6 +650,7 @@ type CommandResult struct {
 	CheckpointInspection                *CheckpointInspection                `json:"checkpoint_inspection,omitempty"`
 	CheckpointTransitionInspection      *CheckpointTransitionInspection      `json:"checkpoint_transition_inspection,omitempty"`
 	CheckpointEvidenceInspection        *CheckpointEvidenceInspection        `json:"checkpoint_evidence_inspection,omitempty"`
+	CheckpointInspectionV4              *CheckpointInspectionV4              `json:"checkpoint_inspection_v4,omitempty"`
 	SubmissionInspection                *SubmissionInspection                `json:"submission_inspection,omitempty"`
 	SubmissionAcknowledgementInspection *SubmissionAcknowledgementInspection `json:"submission_acknowledgement_inspection,omitempty"`
 	JourneyInspection                   *JourneyInspection                   `json:"journey_inspection,omitempty"`

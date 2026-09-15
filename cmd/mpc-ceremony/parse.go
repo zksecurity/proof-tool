@@ -849,6 +849,7 @@ func parseInit(args []string) (InitOptions, error) {
 	var options InitOptions
 	var allowedBinaries stringList
 	fs := commandFlagSet("init")
+	fs.StringVar(&options.ReleaseVerification, "release-verification", "", "opt into definition v4 with coordinator-full-replay-v1; omitted preserves v3")
 	fs.StringVar(&options.SessionNonceHex, "session-nonce-hex", "", "optional 32-byte session nonce as hex; generated securely when omitted")
 	fs.StringVar(&options.CreatedAt, "created-at", "", "ceremony creation timestamp in RFC3339")
 	fs.StringVar(&options.KeyVersion, "key-version", "", "repository key version (ownership-destination-v2, or rehearsal-tiny-v1 with --mode rehearsal)")
@@ -863,6 +864,9 @@ func parseInit(args []string) (InitOptions, error) {
 		return options, err
 	}
 	options.AllowedBinaryPaths = append([]string(nil), allowedBinaries...)
+	if options.ReleaseVerification != "" && options.ReleaseVerification != mpcceremony.CoordinatorReplayReleaseV1 {
+		return options, errors.New("--release-verification must be coordinator-full-replay-v1 or omitted")
+	}
 	for _, path := range options.AllowedBinaryPaths {
 		if err := validatePathValue("--allowed-binary", path); err != nil {
 			return options, err

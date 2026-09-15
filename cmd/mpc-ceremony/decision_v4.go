@@ -97,7 +97,13 @@ func validateDecisionOutputV4(root, out string) error {
 	if root == "" {
 		return errors.New("--evidence-root is required for definition v4 decisions")
 	}
-	packagePath, err := filepath.Abs(filepath.Join(root, "final", "release"))
+	return validatePathOutsideTree(root, "final/release", out)
+}
+
+// The subtree may not exist yet, but root and the supplied path's parent must.
+// This guards accidental placement, not a malicious concurrent parent swap.
+func validatePathOutsideTree(root, subtree, out string) error {
+	packagePath, err := filepath.Abs(filepath.Join(root, filepath.FromSlash(subtree)))
 	if err != nil {
 		return err
 	}
@@ -110,7 +116,7 @@ func validateDecisionOutputV4(root, out string) error {
 		return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 	}
 	if inside(packagePath, outputPath) {
-		return errors.New("decision output must be outside the immutable final/release package")
+		return errors.New("path must be outside the closed artifact tree")
 	}
 	resolvedRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
@@ -124,8 +130,8 @@ func validateDecisionOutputV4(root, out string) error {
 	if err != nil {
 		return err
 	}
-	if inside(filepath.Join(resolvedRoot, "final", "release"), filepath.Join(parent, filepath.Base(outputPath))) {
-		return errors.New("decision output resolves inside the immutable final/release package")
+	if inside(filepath.Join(resolvedRoot, filepath.FromSlash(subtree)), filepath.Join(parent, filepath.Base(outputPath))) {
+		return errors.New("path resolves inside the closed artifact tree")
 	}
 	return nil
 }

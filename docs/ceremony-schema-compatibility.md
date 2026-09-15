@@ -103,6 +103,19 @@ the signed definition. These commands create/check local packages, not public
 publication or production authorization; legacy V3 signer replay is unchanged.
 Normal initialization still emits V3. Do not release this slice alone: remaining
 production integration and normal storage-first CLI guidance are incomplete.
+An explicit `init --release-verification coordinator-full-replay-v1` now opts a
+fresh ceremony into V4; it never upgrades an existing definition. The separate
+`checkpoint prepare-v4`, `sign-v4`, and `verify-stored-v4` commands leave legacy
+parsers unchanged. Signing repeats preparation and preserves exact canonical
+bytes before key loading. Only the six mathematical transition types load the
+authenticated stored R1CS. Structural inspection emits a versioned projection
+with explicit false artifact/replay/freshness claims. Prepared and signed local
+proposals are not published current heads. The tiny executable regression creates
+V3 and V4 ceremonies, then prepares/signs/inspects initial V4 state and rejects
+changed genesis before signing; this is not yet a whole storage-backed role journey.
+Proposal/output paths cannot enter closed candidate/release/rejection trees,
+including symlink aliases. Private rejected candidates must be disjoint from
+the public artifact root. Existing output files are retained for inspection.
 These tests are not a complete user ceremony.
 
 - Reserve Definition V4, Checkpoint V4 and `storage-first-v2` for the changed
