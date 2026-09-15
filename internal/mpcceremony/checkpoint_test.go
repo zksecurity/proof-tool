@@ -250,14 +250,7 @@ func TestCheckpointPhase1LegalSequence(t *testing.T) {
 
 func TestCheckpointPhase1ClosureIsOneWayAndExact(t *testing.T) {
 	previous := phase1CheckpointSequence(t)[3]
-	closure := checkpointSigned("40-phase1-closure")
-	previousRef := checkpointReference(t, previous, "0003")
-	next := cloneCheckpoint(t, previous)
-	next.Sequence++
-	next.PreviousCheckpoint = &previousRef
-	next.Transition = CheckpointTransition{Kind: CheckpointPhase1Closed, Phase: Phase1, Record: &closure}
-	next.Phase1Closure = &closure
-	next.AcceptedArtifacts = appendCheckpointArtifacts(next.AcceptedArtifacts, closure.Record, closure.Signature)
+	next := phase1ClosedCheckpoint(t, previous)
 	if err := ValidateCheckpointTransition(previous, next); err != nil {
 		t.Fatalf("valid phase1 closure: %v", err)
 	}
@@ -293,6 +286,58 @@ func TestCheckpointPhase1ClosureIsOneWayAndExact(t *testing.T) {
 	}
 	if err := validateOutboundTransition(next, afterClose); err == nil || !strings.Contains(err.Error(), "after closure") {
 		t.Fatalf("phase1 turn after closure err=%v", err)
+	}
+}
+
+func phase1ClosedCheckpoint(t *testing.T, previous Checkpoint) Checkpoint {
+	t.Helper()
+	closure := checkpointSigned("40-phase1-closure")
+	previousRef := checkpointReference(t, previous, "0003")
+	next := cloneCheckpoint(t, previous)
+	next.Sequence++
+	next.PreviousCheckpoint = &previousRef
+	next.Transition = CheckpointTransition{Kind: CheckpointPhase1Closed, Phase: Phase1, Record: &closure}
+	next.Phase1Closure = &closure
+	next.AcceptedArtifacts = appendCheckpointArtifacts(next.AcceptedArtifacts, closure.Record, closure.Signature)
+	return next
+}
+
+func TestCheckpointPhase1BeaconRequiresExactClosureAndRawResponse(t *testing.T) {
+	previous := phase1ClosedCheckpoint(t, phase1CheckpointSequence(t)[3])
+	beacon := checkpointSigned("50-phase1-beacon")
+	raw := checkpointArtifact("51-phase1-raw-response.bin", "raw beacon")
+	previousRef := checkpointReference(t, previous, "0004")
+	next := cloneCheckpoint(t, previous)
+	next.Sequence++
+	next.PreviousCheckpoint = &previousRef
+	next.Transition = CheckpointTransition{Kind: CheckpointPhase1BeaconRecorded, Phase: Phase1, Record: &beacon, Evidence: []ArtifactRef{raw}}
+	next.Phase1Beacon = &beacon
+	next.AcceptedArtifacts = appendCheckpointArtifacts(next.AcceptedArtifacts, beacon.Record, beacon.Signature, raw)
+	if err := ValidateCheckpointTransition(previous, next); err != nil {
+		t.Fatalf("valid phase1 beacon: %v", err)
+	}
+
+	mutations := []struct {
+		name   string
+		mutate func(*Checkpoint)
+	}{
+		{"changed closure", func(c *Checkpoint) {
+			c.Phase1Closure = func() *SignedArtifactRefs { value := checkpointSigned("other-closure"); return &value }()
+		}},
+		{"missing raw response", func(c *Checkpoint) { c.Transition.Evidence = nil }},
+		{"changed slots", func(c *Checkpoint) { c.Submissions = c.Submissions[:1] }},
+		{"unexpected artifact", func(c *Checkpoint) {
+			c.AcceptedArtifacts = appendCheckpointArtifacts(c.AcceptedArtifacts, checkpointArtifact("unexpected-beacon.json", "unexpected"))
+		}},
+	}
+	for _, test := range mutations {
+		t.Run(test.name, func(t *testing.T) {
+			changed := cloneCheckpoint(t, next)
+			test.mutate(&changed)
+			if err := ValidateCheckpointTransition(previous, changed); err == nil {
+				t.Fatal("mutated beacon unexpectedly accepted")
+			}
+		})
 	}
 }
 

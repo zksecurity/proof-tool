@@ -469,6 +469,8 @@ type CheckpointInspection struct {
 	PreviousCheckpoint *mpcceremony.SignedArtifactRefs        `json:"previous_checkpoint"`
 	Transition         mpcceremony.CheckpointTransition       `json:"transition"`
 	Phase1             mpcceremony.CheckpointPhaseState       `json:"phase1"`
+	Phase1Closure      *mpcceremony.SignedArtifactRefs        `json:"phase1_closure,omitempty"`
+	Phase1Beacon       *mpcceremony.SignedArtifactRefs        `json:"phase1_beacon,omitempty"`
 	Submissions        []mpcceremony.CheckpointSubmissionSlot `json:"submissions"`
 	AcceptedArtifacts  []mpcceremony.ArtifactRef              `json:"accepted_artifacts"`
 }

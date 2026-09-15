@@ -66,6 +66,7 @@ const (
 	CheckpointPhase1ReceiptAccepted   CheckpointTransitionKind = "phase1-receipt-accepted"
 	CheckpointPhase1CandidateAccepted CheckpointTransitionKind = "phase1-candidate-accepted"
 	CheckpointPhase1Closed            CheckpointTransitionKind = "phase1-closed"
+	CheckpointPhase1BeaconRecorded    CheckpointTransitionKind = "phase1-beacon-recorded"
 )
 
 type CheckpointSubmissionKind string
@@ -219,6 +220,19 @@ func (t CheckpointTransition) Validate() error {
 		}
 		return nil
 	}
+	if t.Kind == CheckpointPhase1BeaconRecorded {
+		if t.Phase != Phase1 || t.Index != 0 || t.ParticipantID != "" || t.AttemptID != "" ||
+			t.NextAttemptID != "" || t.Record == nil || t.Acknowledgement != nil || len(t.Evidence) != 1 {
+			return errors.New("phase1 beacon transition requires only the signed beacon record and one raw response")
+		}
+		if err := t.Record.Validate(); err != nil {
+			return fmt.Errorf("transition record: %w", err)
+		}
+		if err := t.Evidence[0].Validate(); err != nil {
+			return fmt.Errorf("transition beacon evidence: %w", err)
+		}
+		return nil
+	}
 	if t.Phase != Phase1 {
 		return fmt.Errorf("transition phase %q, want phase1", t.Phase)
 	}
@@ -303,6 +317,7 @@ type Checkpoint struct {
 	Transition         CheckpointTransition       `json:"transition"`
 	Phase1             CheckpointPhaseState       `json:"phase1"`
 	Phase1Closure      *SignedArtifactRefs        `json:"phase1_closure,omitempty"`
+	Phase1Beacon       *SignedArtifactRefs        `json:"phase1_beacon,omitempty"`
 	AcceptedArtifacts  []ArtifactRef              `json:"accepted_artifacts"`
 	Submissions        []CheckpointSubmissionSlot `json:"submissions"`
 }
@@ -361,8 +376,19 @@ func (c Checkpoint) Validate() error {
 			return errors.New("phase1 closure must be present in accepted_artifacts")
 		}
 	}
-	if c.Sequence == 0 && c.Phase1Closure != nil {
-		return errors.New("initial checkpoint must not contain a phase1 closure")
+	if c.Phase1Beacon != nil {
+		if c.Phase1Closure == nil {
+			return errors.New("phase1 beacon requires a committed closure")
+		}
+		if err := c.Phase1Beacon.Validate(); err != nil {
+			return fmt.Errorf("phase1_beacon: %w", err)
+		}
+		if !slices.Contains(c.AcceptedArtifacts, c.Phase1Beacon.Record) || !slices.Contains(c.AcceptedArtifacts, c.Phase1Beacon.Signature) {
+			return errors.New("phase1 beacon must be present in accepted_artifacts")
+		}
+	}
+	if c.Sequence == 0 && (c.Phase1Closure != nil || c.Phase1Beacon != nil) {
+		return errors.New("initial checkpoint must not contain phase1 closure or beacon state")
 	}
 	if c.Sequence == 0 && (c.Phase1.AcceptedCount != 0 || len(c.Submissions) != 0) {
 		return errors.New("initial checkpoint must start before contributions and submissions")
@@ -550,9 +576,31 @@ func ValidateCheckpointTransition(previous, next Checkpoint) error {
 		return validateCandidateTransition(previous, next)
 	case CheckpointPhase1Closed:
 		return validatePhase1ClosedTransition(previous, next)
+	case CheckpointPhase1BeaconRecorded:
+		return validatePhase1BeaconTransition(previous, next)
 	default:
 		return fmt.Errorf("transition %q cannot follow another checkpoint", next.Transition.Kind)
 	}
+}
+
+func validatePhase1BeaconTransition(previous, next Checkpoint) error {
+	if previous.Phase1Closure == nil || next.Phase1Closure == nil || *previous.Phase1Closure != *next.Phase1Closure {
+		return errors.New("phase1 beacon must preserve an existing exact closure")
+	}
+	if previous.Phase1Beacon != nil || next.Phase1Beacon == nil {
+		return errors.New("phase1 beacon must be added exactly once")
+	}
+	if !samePhaseState(previous.Phase1, next.Phase1) || !slotsEqual(previous.Submissions, next.Submissions) {
+		return errors.New("phase1 beacon must preserve the accepted head and submission slots")
+	}
+	if next.Transition.Record == nil || *next.Transition.Record != *next.Phase1Beacon {
+		return errors.New("phase1 beacon transition must name the committed beacon")
+	}
+	expected := append(signedArtifacts(next.Phase1Beacon), next.Transition.Evidence...)
+	if !exactArtifactDelta(previous.AcceptedArtifacts, next.AcceptedArtifacts, expected...) {
+		return errors.New("phase1 beacon accepted an unexpected artifact set")
+	}
+	return nil
 }
 
 func validatePhase1ClosedTransition(previous, next Checkpoint) error {
