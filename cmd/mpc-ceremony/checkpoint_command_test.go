@@ -87,6 +87,32 @@ func TestCheckpointArtifactBytesRemainBoundAcrossPathReplacement(t *testing.T) {
 	}
 }
 
+func TestCheckpointArtifactBytesRejectSymlinkComponents(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("Unix checkpoint execution target")
+	}
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	writeDecisionTestFile(t, filepath.Join(outside, "record.json"), []byte(`{"outside":true}`), 0o600)
+	if err := os.Symlink(outside, filepath.Join(root, "redirect")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := checkpointArtifactBytes(root, filepath.Join(root, "redirect", "record.json"), maxOperationalRecordBytes); err == nil {
+		t.Fatal("checkpoint artifact traversal followed a symbolic-link component")
+	}
+	writeDecisionTestFile(t, filepath.Join(root, "record.json"), []byte(`{"inside":true}`), 0o600)
+	linkedRoot := filepath.Join(t.TempDir(), "linked-root")
+	if err := os.Symlink(root, linkedRoot); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := checkpointArtifactBytes(linkedRoot, filepath.Join(linkedRoot, "record.json"), maxOperationalRecordBytes); err == nil {
+		t.Fatal("checkpoint artifact traversal accepted a symbolic-link artifact root")
+	}
+}
+
 func TestCheckpointSignRejectsArbitraryValidLookingCheckpoint(t *testing.T) {
 	fixture := writeCheckpointCLIFixture(t)
 	packet := filepath.Join(fixture.root, "prepared", "cp0")
@@ -280,7 +306,7 @@ func TestCheckpointPrepareReceiptAcceptedAuthenticatesInnerEvidence(t *testing.T
 	)
 }
 
-func TestCheckpointCommandFullPhase1CandidateAcceptance(t *testing.T) {
+func TestCheckpointCommandFullPhase1LifecycleThroughSeal(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("full signed workflow fixture requires Linux executable identity")
 	}
@@ -398,20 +424,15 @@ func TestCheckpointCommandFullPhase1CandidateAcceptance(t *testing.T) {
 		t.Fatalf("cp3 stored verification = %#v", verified.CheckpointEvidenceInspection)
 	}
 
-	closeResult := runCheckpointCommandExecutable(t, fixture.executable, append([]string{"--format", "json", "phase1", "close"}, append(fixture.trustArgs,
-		"--transcript-dir", fixture.root,
-		"--chain", chainPath,
-		"--chain-signature", chainSignaturePath,
-		"--coordinator-signing-key", keyPath,
-		"--beacon-round-lead", "12",
-	)...))
+	closePath := filepath.Join(fixture.root, "phase1", "closure", "record.json")
+	closeSignaturePath := filepath.Join(fixture.root, "phase1", "closure", "record.sig")
 	closureArgs := append(append([]string{}, fixture.trustArgs...),
 		"--artifact-root", fixture.root, "--relay-release-id", "role-images-test",
 		"--transition", string(mpcceremony.CheckpointPhase1Closed),
 		"--previous-checkpoint", result.Outputs["checkpoint"], "--previous-checkpoint-signature", cp3SignaturePath,
 		"--chain", chainPath, "--chain-signature", chainSignaturePath,
 		"--head-payload", filepath.Join(fixture.root, filepath.FromSlash(accepted.OutputPayload.Name)),
-		"--transition-record", closeResult.Outputs["closure"], "--transition-record-signature", closeResult.Outputs["closure_signature"],
+		"--transition-record", closePath, "--transition-record-signature", closeSignaturePath,
 	)
 	cp4Packet := filepath.Join(fixture.root, "prepared", "cp4")
 	cp4 := runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "prepare"}, closureArgs...), "--out-dir", cp4Packet))
@@ -424,6 +445,55 @@ func TestCheckpointCommandFullPhase1CandidateAcceptance(t *testing.T) {
 	if verified.CheckpointEvidenceInspection == nil || !verified.CheckpointEvidenceInspection.FullyVerified || verified.CheckpointEvidenceInspection.Sequence != 4 {
 		t.Fatalf("cp4 stored verification = %#v", verified.CheckpointEvidenceInspection)
 	}
+
+	beaconArgs := append(append([]string{}, fixture.trustArgs...),
+		"--artifact-root", fixture.root, "--relay-release-id", "role-images-test",
+		"--transition", string(mpcceremony.CheckpointPhase1BeaconRecorded),
+		"--previous-checkpoint", cp4.Outputs["checkpoint"], "--previous-checkpoint-signature", cp4SignaturePath,
+		"--chain", chainPath, "--chain-signature", chainSignaturePath,
+		"--head-payload", filepath.Join(fixture.root, filepath.FromSlash(accepted.OutputPayload.Name)),
+		"--transition-record", filepath.Join(fixture.root, "phase1", "beacon", "record.json"),
+		"--transition-record-signature", filepath.Join(fixture.root, "phase1", "beacon", "record.sig"),
+	)
+	cp5Packet := filepath.Join(fixture.root, "prepared", "cp5")
+	cp5 := runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "prepare"}, beaconArgs...), "--out-dir", cp5Packet))
+	cp5SignaturePath := filepath.Join(fixture.root, "state", "signed-cp5.sig")
+	runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "sign"}, beaconArgs...),
+		"--checkpoint", cp5.Outputs["checkpoint"], "--signing-request", cp5.Outputs["signing_request"],
+		"--coordinator-signing-key", keyPath, "--out", cp5SignaturePath))
+
+	sealArgs := append(append([]string{}, fixture.trustArgs...),
+		"--artifact-root", fixture.root, "--relay-release-id", "role-images-test",
+		"--transition", string(mpcceremony.CheckpointPhase1Sealed),
+		"--previous-checkpoint", cp5.Outputs["checkpoint"], "--previous-checkpoint-signature", cp5SignaturePath,
+		"--chain", chainPath, "--chain-signature", chainSignaturePath,
+		"--head-payload", filepath.Join(fixture.root, filepath.FromSlash(accepted.OutputPayload.Name)),
+		"--transition-record", filepath.Join(fixture.root, "phase1", "sealed", "seal.json"),
+		"--transition-record-signature", filepath.Join(fixture.root, "phase1", "sealed", "seal.sig"),
+	)
+	cp6Packet := filepath.Join(fixture.root, "prepared", "cp6")
+	cp6 := runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "prepare"}, sealArgs...), "--out-dir", cp6Packet))
+	cp6SignaturePath := filepath.Join(fixture.root, "state", "signed-cp6.sig")
+	runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "sign"}, sealArgs...),
+		"--checkpoint", cp6.Outputs["checkpoint"], "--signing-request", cp6.Outputs["signing_request"],
+		"--coordinator-signing-key", keyPath, "--out", cp6SignaturePath))
+	verified = runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "verify-stored"}, fixture.trustArgs...),
+		"--checkpoint", cp6.Outputs["checkpoint"], "--checkpoint-signature", cp6SignaturePath, "--artifact-root", fixture.root))
+	if verified.CheckpointEvidenceInspection == nil || !verified.CheckpointEvidenceInspection.FullyVerified || verified.CheckpointEvidenceInspection.Sequence != 6 {
+		t.Fatalf("cp6 stored verification = %#v", verified.CheckpointEvidenceInspection)
+	}
+	phase2 := runCheckpointCommandExecutable(t, fixture.executable, append([]string{"--format", "json", "phase2", "init"}, append(fixture.trustArgs,
+		"--phase1-transcript-dir", fixture.root,
+		"--phase1-seal", filepath.Join(fixture.root, "phase1", "sealed", "seal.json"),
+		"--phase1-seal-signature", filepath.Join(fixture.root, "phase1", "sealed", "seal.sig"),
+		"--coordinator-signing-key", keyPath,
+		"--out-dir", filepath.Join(fixture.root, "phase2"),
+	)...))
+	if phase2.Outputs["phase2_genesis"] == "" || phase2.Outputs["phase2_chain"] == "" {
+		t.Fatalf("Phase 2 initialization after cp6 outputs = %#v", phase2.Outputs)
+	}
+	assertChangedCheckpointEvidenceFails(t, fixture.executable, sealArgs, "phase1/sealed/seal.sig", "seal-signature")
+	assertChangedCheckpointEvidenceFails(t, fixture.executable, sealArgs, "phase1/sealed/commons.bin", "sealed-commons")
 
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, args, accepted.OutputPayload.Name, "candidate-payload")
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, args, filepath.ToSlash(mustRelativeTestPath(t, fixture.root, manifestPath)), "manifest")

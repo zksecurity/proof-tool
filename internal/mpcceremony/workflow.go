@@ -2013,6 +2013,98 @@ type SealPhase1FilesResult struct {
 	SignaturePath string
 }
 
+type VerifyPhase1SealFilesOptions struct {
+	Trust                     TrustPaths
+	Circuit                   *CompiledCircuit
+	TranscriptRoot            string
+	Phase1ChainPath           string
+	Phase1ChainSignaturePath  string
+	Phase1ClosePath           string
+	Phase1CloseSignaturePath  string
+	Phase1BeaconPath          string
+	Phase1BeaconSignaturePath string
+	Phase1SealPath            string
+	Phase1SealSignaturePath   string
+}
+
+type VerifyPhase1SealFilesResult struct {
+	Seal    SealRecord
+	Close   CloseRecord
+	Commons ArtifactRef
+}
+
+// VerifyPhase1SealFiles performs the same full, read-only Phase 1 replay used
+// before Phase 2. It proves that the signed seal's commons file was derived
+// from the authenticated accepted chain and recorded beacon; it never signs or
+// writes ceremony state.
+func VerifyPhase1SealFiles(options VerifyPhase1SealFilesOptions) (VerifyPhase1SealFilesResult, error) {
+	trusted, err := loadOperationalCeremony(options.Trust)
+	if err != nil {
+		return VerifyPhase1SealFilesResult{}, err
+	}
+	if err := validateWorkflowCircuit(trusted, options.Circuit); err != nil {
+		return VerifyPhase1SealFilesResult{}, err
+	}
+	var seal SealRecord
+	if err := loadCoordinatorSignedRecord(trusted, options.Phase1SealPath, options.Phase1SealSignaturePath, &seal); err != nil {
+		return VerifyPhase1SealFilesResult{}, err
+	}
+	if seal.CeremonyID != trusted.Definition.CeremonyID || seal.Phase != Phase1 {
+		return VerifyPhase1SealFilesResult{}, errors.New("Phase 1 seal ceremony or phase mismatch")
+	}
+	var closeRecord CloseRecord
+	if err := loadCoordinatorSignedRecord(trusted, options.Phase1ClosePath, options.Phase1CloseSignaturePath, &closeRecord); err != nil {
+		return VerifyPhase1SealFilesResult{}, fmt.Errorf("load exact Phase 1 closure: %w", err)
+	}
+	chain, replayedHead, err := loadReplayPhase1FilesState(trusted, options.Circuit, PhaseTranscriptPaths{
+		RootDir: options.TranscriptRoot, ChainPath: options.Phase1ChainPath, ChainSignaturePath: options.Phase1ChainSignaturePath,
+	})
+	if err != nil {
+		return VerifyPhase1SealFilesResult{}, fmt.Errorf("replay exact closed Phase 1 chain: %w", err)
+	}
+	if err := ValidateClose(trusted.Definition, chain, closeRecord); err != nil {
+		return VerifyPhase1SealFilesResult{}, fmt.Errorf("validate exact Phase 1 closure: %w", err)
+	}
+	var beacon BeaconRecord
+	if err := loadCoordinatorSignedRecord(trusted, options.Phase1BeaconPath, options.Phase1BeaconSignaturePath, &beacon); err != nil {
+		return VerifyPhase1SealFilesResult{}, fmt.Errorf("load exact Phase 1 beacon: %w", err)
+	}
+	if err := VerifyBeaconRecordFiles(trusted, options.TranscriptRoot, closeRecord, beacon); err != nil {
+		return VerifyPhase1SealFilesResult{}, fmt.Errorf("verify exact Phase 1 beacon: %w", err)
+	}
+	if err := ValidateSeal(closeRecord, beacon, seal); err != nil {
+		return VerifyPhase1SealFilesResult{}, fmt.Errorf("validate Phase 1 seal: %w", err)
+	}
+	challenge, err := hex.DecodeString(beacon.ChallengeHex)
+	if err != nil || len(challenge) != contributionChallengeSize {
+		return VerifyPhase1SealFilesResult{}, fmt.Errorf("Phase 1 beacon challenge must be exactly %d bytes", contributionChallengeSize)
+	}
+	derivedCommons, err := sealReplayedPhase1Head(options.Circuit.Binding.DomainSize, challenge, replayedHead)
+	if err != nil {
+		return VerifyPhase1SealFilesResult{}, fmt.Errorf("derive Phase 1 commons: %w", err)
+	}
+	derivedDigest, err := writerDigest(derivedCommons)
+	if err != nil {
+		return VerifyPhase1SealFilesResult{}, fmt.Errorf("digest derived Phase 1 commons: %w", err)
+	}
+	commons, err := phase1CommonsOutput(seal)
+	if err != nil {
+		return VerifyPhase1SealFilesResult{}, err
+	}
+	commonsPath, err := resolveArtifactPath(options.TranscriptRoot, commons.Name)
+	if err != nil {
+		return VerifyPhase1SealFilesResult{}, err
+	}
+	_, storedDigest, err := ReadCommonsFile(commonsPath, CommonsShape{DomainN: options.Circuit.Binding.DomainSize})
+	if err != nil {
+		return VerifyPhase1SealFilesResult{}, err
+	}
+	if modelDigest(storedDigest) != commons.Digest || derivedDigest != commons.Digest {
+		return VerifyPhase1SealFilesResult{}, errors.New("Phase 1 commons do not match the signed seal and authenticated derivation")
+	}
+	return VerifyPhase1SealFilesResult{Seal: seal, Close: closeRecord, Commons: commons}, nil
+}
+
 // SealPhase1Files verifies the signed closure and future beacon, replays Phase
 // 1 from immutable files, and publishes native commons plus a signed seal.
 func SealPhase1Files(options SealPhase1FilesOptions) (result SealPhase1FilesResult, err error) {
@@ -3236,6 +3328,9 @@ func loadAuthenticatedPhase1CommonsForCoordinator(
 }
 
 func phase1CommonsOutput(seal SealRecord) (ArtifactRef, error) {
+	if seal.Phase != Phase1 || len(seal.Outputs) != 1 {
+		return ArtifactRef{}, errors.New("Phase 1 seal must contain exactly one commons output")
+	}
 	var commonsRef *ArtifactRef
 	for i := range seal.Outputs {
 		if strings.HasSuffix(seal.Outputs[i].Name, "/commons.bin") ||

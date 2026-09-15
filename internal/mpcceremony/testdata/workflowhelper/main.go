@@ -503,24 +503,21 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	if err != nil {
 		return fmt.Errorf("Phase 1 participant 1: %w", err)
 	}
-	// Checkpoint command tests need one authentic contribution produced by the
-	// separately built mpc-ceremony executable, but not the later beacon,
-	// Phase 2, audit, and release fixtures owned by this general helper.
-	if os.Getenv("MPC_WORKFLOW_PHASE1_ONE") == "1" {
-		return nil
-	}
-	phase1Paths, err = contributeAndAccept(
-		mpcceremony.Phase1,
-		2,
-		phase1Paths,
-		"",
-		"",
-		"2023-08-23T15:03:00Z",
-		"2023-08-23T15:03:01Z",
-		"2023-08-23T15:04:00Z",
-	)
-	if err != nil {
-		return fmt.Errorf("Phase 1 participant 2: %w", err)
+	checkpointPhase1One := os.Getenv("MPC_WORKFLOW_PHASE1_ONE") == "1"
+	if !checkpointPhase1One {
+		phase1Paths, err = contributeAndAccept(
+			mpcceremony.Phase1,
+			2,
+			phase1Paths,
+			"",
+			"",
+			"2023-08-23T15:03:00Z",
+			"2023-08-23T15:03:01Z",
+			"2023-08-23T15:04:00Z",
+		)
+		if err != nil {
+			return fmt.Errorf("Phase 1 participant 2: %w", err)
+		}
 	}
 	phase1Chain, err := mpcceremony.LoadReplayPhase1Files(trusted, circuit, phase1Paths)
 	if err != nil {
@@ -541,6 +538,36 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	round42Path := filepath.Join(outputRoot, "quicknet-round-42.json")
 	if err := os.WriteFile(round42Path, []byte(quicknetRound42), 0o600); err != nil {
 		return err
+	}
+	if checkpointPhase1One && testCommand != "" {
+		if err := runTestCommand("phase1", "beacon",
+			"--ceremony", trust.DefinitionPath,
+			"--ceremony-signature", trust.DefinitionSignaturePath,
+			"--coordinator-public-key-file", trust.CoordinatorPublicKeyPath,
+			"--closure", phase1Close.ClosePath,
+			"--closure-signature", phase1Close.SignaturePath,
+			"--raw-response", round42Path,
+			"--published-at", "2023-08-23T15:11:30Z",
+			"--coordinator-signing-key", coordinatorKeyPath,
+			"--transcript-dir", ceremonyRoot,
+		); err != nil {
+			return fmt.Errorf("record checkpoint Phase 1 beacon: %w", err)
+		}
+		if err := runTestCommand("phase1", "seal",
+			"--ceremony", trust.DefinitionPath,
+			"--ceremony-signature", trust.DefinitionSignaturePath,
+			"--coordinator-public-key-file", trust.CoordinatorPublicKeyPath,
+			"--transcript-dir", ceremonyRoot,
+			"--closure", phase1Close.ClosePath,
+			"--closure-signature", phase1Close.SignaturePath,
+			"--beacon", filepath.Join(ceremonyRoot, "phase1", "beacon", "record.json"),
+			"--beacon-signature", filepath.Join(ceremonyRoot, "phase1", "beacon", "record.sig"),
+			"--coordinator-signing-key", coordinatorKeyPath,
+			"--out-dir", filepath.Join(ceremonyRoot, "phase1", "sealed"),
+		); err != nil {
+			return fmt.Errorf("seal checkpoint Phase 1: %w", err)
+		}
+		return nil
 	}
 	phase1Beacon, err := mpcceremony.RecordBeaconFiles(mpcceremony.RecordBeaconFilesOptions{
 		Trust:                     trust,
@@ -581,6 +608,11 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	}
 	if sealProgress == 0 {
 		return errors.New("Phase 1 seal replayed without reporting progress")
+	}
+	// The checkpoint fixture needs one authentic turn through the deterministic
+	// historical Phase 1 seal, but not the later Phase 2 and release fixtures.
+	if checkpointPhase1One {
+		return nil
 	}
 
 	// Phase 2 initialization reports stages rather than contributions, because

@@ -244,9 +244,9 @@ that transition.
 Guarded storage-first checkpoint operations. Every operation re-authenticates
 the exact signed definition, predecessor, Phase 1 chain and head, and all
 transition-defining records. This implementation supports Phase 1 from the
-initial checkpoint through accepted participant turns, closure, and verified
-beacon evidence. Candidate acceptance replays the contribution mathematics
-and cleanup evidence.
+initial checkpoint through accepted participant turns, closure, verified
+beacon evidence, and the fully replayed Phase 1 seal. Candidate acceptance
+replays the contribution mathematics and cleanup evidence.
 `,
 	"checkpoint prepare": `Usage:
   mpc-ceremony checkpoint prepare --ceremony FILE --ceremony-signature FILE \
@@ -272,6 +272,10 @@ For phase1-closed supply the previous checkpoint pair and signed Phase 1 close
 record pair. For phase1-beacon-recorded supply the previous checkpoint pair
 and signed Phase 1 beacon record pair; the raw response named by the beacon
 record must exist under the artifact root.
+
+For phase1-sealed supply the previous checkpoint pair and signed Phase 1 seal
+record pair. Relay fully replays Phase 1 and requires the exact commons.bin
+named by that seal under the artifact root.
 `,
 	"checkpoint sign": `Usage:
   mpc-ceremony checkpoint sign [all checkpoint prepare evidence flags] \

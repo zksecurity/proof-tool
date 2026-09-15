@@ -31,7 +31,7 @@ Protect `main` with required review, required CI checks, CODEOWNERS review for
 release workflows, no direct pushes, and no force pushes. GitHub Actions is
 therefore part of the trusted release boundary.
 
-New ceremony definitions use schema v2. The coordinator runs either released
+New ceremony definitions use schema v3. The coordinator runs either released
 binary and passes the other with repeated `--allowed-binary FILE` flags during
 `init` (or `rehearsal init`). Initialization reads the embedded Go build
 metadata and rejects different source commits, dependency versions, Go
@@ -118,3 +118,17 @@ lead reduces the time available for public observation and review, so the
 coordinator-facing tool must warn before signing it. When production witnesses
 are enabled, close validation also reserves the fixed witness-observation
 window in addition to the configured lead.
+
+Storage-first verification requires Relay to place the canonical accepted
+artifact tree in a private local staging directory and prevent other local
+processes from changing it during verification. Checkpoint metadata reads use
+descriptor-relative, no-follow access on Linux and macOS. The existing large
+transcript replay path still reopens files by pathname, so the system does not
+claim protection against a malicious local process or compromised host racing
+the verifier. Signed hashes and full replay continue to detect backend
+corruption and ordinary local changes.
+
+The signed checkpoint graph uses the same canonical Phase 1 paths consumed by
+Phase 2 (`phase1/chain-NNNN.*`, `phase1/closure/*`, `phase1/beacon/*`, and
+`phase1/sealed/*`). Checkpoint creation rejects alternate aliases, so a fully
+verified Phase 1 graph cannot depend on hidden duplicate files before Phase 2.

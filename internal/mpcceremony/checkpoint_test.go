@@ -402,6 +402,65 @@ func TestCheckpointPhase1BeaconRequiresExactClosureAndRawResponse(t *testing.T) 
 	}
 }
 
+func TestCheckpointPhase1SealRequiresExactBeaconAndCommons(t *testing.T) {
+	base := phase1ClosedCheckpoint(t, phase1CheckpointSequence(t)[3])
+	beaconRefs := checkpointSigned("50-phase1-beacon")
+	raw := checkpointArtifact("51-phase1-raw-response.json", "raw beacon")
+	beacon := cloneCheckpoint(t, base)
+	beacon.Sequence++
+	parent := checkpointReference(t, base, "0004")
+	beacon.PreviousCheckpoint = &parent
+	beacon.Transition = CheckpointTransition{Kind: CheckpointPhase1BeaconRecorded, Phase: Phase1, Record: &beaconRefs, Evidence: []ArtifactRef{raw}}
+	beacon.Phase1Beacon = &beaconRefs
+	beacon.AcceptedArtifacts = appendCheckpointArtifacts(beacon.AcceptedArtifacts, beaconRefs.Record, beaconRefs.Signature, raw)
+
+	sealRefs := checkpointSigned("60-phase1-seal")
+	commons := checkpointArtifact("phase1/sealed/commons.bin", "derived commons")
+	sealed := cloneCheckpoint(t, beacon)
+	sealed.Sequence++
+	sealParent := checkpointReference(t, beacon, "0005")
+	sealed.PreviousCheckpoint = &sealParent
+	sealed.Transition = CheckpointTransition{Kind: CheckpointPhase1Sealed, Phase: Phase1, Record: &sealRefs, Evidence: []ArtifactRef{commons}}
+	sealed.Phase1Seal = &sealRefs
+	sealed.AcceptedArtifacts = appendCheckpointArtifacts(sealed.AcceptedArtifacts, sealRefs.Record, sealRefs.Signature, commons)
+	if err := ValidateCheckpointTransition(beacon, sealed); err != nil {
+		t.Fatalf("valid phase1 seal: %v", err)
+	}
+
+	mutations := []struct {
+		name   string
+		mutate func(*Checkpoint)
+	}{
+		{"changed beacon", func(c *Checkpoint) {
+			c.Phase1Beacon = func() *SignedArtifactRefs { value := checkpointSigned("other-beacon"); return &value }()
+		}},
+		{"missing commons", func(c *Checkpoint) { c.Transition.Evidence = nil }},
+		{"changed head", func(c *Checkpoint) { c.Phase1.HeadRecordID = "sha256:" + strings.Repeat("8", 64) }},
+		{"unexpected artifact", func(c *Checkpoint) {
+			c.AcceptedArtifacts = appendCheckpointArtifacts(c.AcceptedArtifacts, checkpointArtifact("unexpected-seal.json", "unexpected"))
+		}},
+	}
+	for _, test := range mutations {
+		t.Run(test.name, func(t *testing.T) {
+			changed := cloneCheckpoint(t, sealed)
+			test.mutate(&changed)
+			if err := ValidateCheckpointTransition(beacon, changed); err == nil {
+				t.Fatal("mutated phase1 seal unexpectedly accepted")
+			}
+		})
+	}
+}
+
+func TestPhase1SealRejectsUnverifiedExtraOutputs(t *testing.T) {
+	seal := SealRecord{Phase: Phase1, Outputs: []ArtifactRef{
+		checkpointArtifact("phase1/sealed/commons.bin", "commons"),
+		checkpointArtifact("phase1/sealed/unverified.bin", "unverified"),
+	}}
+	if _, err := phase1CommonsOutput(seal); err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("extra Phase 1 seal output err=%v", err)
+	}
+}
+
 func TestCheckpointPredecessorIncludesFetchableSignatureReference(t *testing.T) {
 	checkpoints := phase1CheckpointSequence(t)
 	parent := checkpoints[1].PreviousCheckpoint
