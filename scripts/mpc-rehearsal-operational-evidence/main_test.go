@@ -3,7 +3,20 @@ package main
 import (
 	"testing"
 	"time"
+
+	"proof-tool/internal/mpcceremony"
 )
+
+func TestLegacyDefinitionUsesOldNonzeroObserverDefaults(t *testing.T) {
+	definition := mpcceremony.CeremonyDefinition{Schema: mpcceremony.DefinitionSchemaV2}
+	policy := rehearsalAssurance(definition)
+	if policy.PublicWitnessesPerPhase != 2 || policy.MirrorsPerAcceptedHead != 2 || policy.PassingCeremonyAudits != 1 {
+		t.Fatalf("legacy rehearsal policy = %#v", policy)
+	}
+	if cloneRehearsalAssurance(definition) != nil {
+		t.Fatal("legacy bundle unexpectedly gained a v3 assurance field")
+	}
+}
 
 func TestTwoInteriorTimestampsSupportsSubsecondAuthenticatedGap(t *testing.T) {
 	lower := time.Date(2026, time.July, 23, 12, 0, 0, 0, time.UTC)

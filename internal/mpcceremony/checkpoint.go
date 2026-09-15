@@ -11,6 +11,7 @@ import (
 
 const (
 	CheckpointSchemaV1               = "proof-tool-mpc-checkpoint-v1"
+	CheckpointSchema                 = "proof-tool-mpc-checkpoint-v2"
 	StorageFirstWorkflowV1           = "storage-first-v1"
 	CheckpointSigningRequestSchemaV1 = "proof-tool-mpc-checkpoint-signing-request-v1"
 	// A full 255-participant Phase 1 retains roughly twenty immutable public
@@ -285,6 +286,7 @@ type Checkpoint struct {
 	Workflow           string                     `json:"workflow"`
 	CeremonyID         string                     `json:"ceremony_id"`
 	Definition         SignedArtifactRefs         `json:"definition"`
+	AssurancePolicy    *AssurancePolicy           `json:"assurance_policy,omitempty"`
 	RelayReleaseID     string                     `json:"relay_release_id"`
 	Sequence           uint64                     `json:"sequence"`
 	PreviousCheckpoint *SignedArtifactRefs        `json:"previous_checkpoint"`
@@ -295,8 +297,17 @@ type Checkpoint struct {
 }
 
 func (c Checkpoint) Validate() error {
-	if c.Schema != CheckpointSchemaV1 {
-		return fmt.Errorf("checkpoint schema %q, want %q", c.Schema, CheckpointSchemaV1)
+	switch c.Schema {
+	case CheckpointSchema:
+		if c.AssurancePolicy == nil {
+			return errors.New("checkpoint v2 requires assurance_policy")
+		}
+	case CheckpointSchemaV1:
+		if c.AssurancePolicy != nil {
+			return errors.New("checkpoint v1 must not contain assurance_policy")
+		}
+	default:
+		return fmt.Errorf("checkpoint schema %q, want %q or %q", c.Schema, CheckpointSchemaV1, CheckpointSchema)
 	}
 	if c.Workflow != StorageFirstWorkflowV1 {
 		return fmt.Errorf("checkpoint workflow %q, want %q", c.Workflow, StorageFirstWorkflowV1)
@@ -457,7 +468,23 @@ func VerifySignedCheckpoint(definition CeremonyDefinition, definitionBytes, defi
 	if checkpoint.Definition.Record.Digest != NewDigest(definitionBytes) || checkpoint.Definition.Signature.Digest != NewDigest(definitionSignatureBytes) {
 		return Checkpoint{}, errors.New("checkpoint definition references do not match authenticated definition bytes")
 	}
+	if err := validateCheckpointDefinitionVersion(definition, checkpoint); err != nil {
+		return Checkpoint{}, err
+	}
 	return checkpoint, nil
+}
+
+func validateCheckpointDefinitionVersion(definition CeremonyDefinition, checkpoint Checkpoint) error {
+	if definition.Schema == DefinitionSchema {
+		if checkpoint.Schema != CheckpointSchema || checkpoint.AssurancePolicy == nil || *checkpoint.AssurancePolicy != *definition.AssurancePolicy {
+			return errors.New("definition v3 requires a checkpoint v2 with exactly matching assurance_policy")
+		}
+		return nil
+	}
+	if checkpoint.Schema != CheckpointSchemaV1 || checkpoint.AssurancePolicy != nil {
+		return errors.New("legacy definition requires checkpoint v1 semantics")
+	}
+	return nil
 }
 
 // ValidateCheckpointTransition verifies the legal structural edge between two
@@ -485,6 +512,9 @@ func ValidateCheckpointTransition(previous, next Checkpoint) error {
 		next.CeremonyID != previous.CeremonyID || next.Definition != previous.Definition ||
 		next.RelayReleaseID != previous.RelayReleaseID {
 		return errors.New("checkpoint immutable ceremony, workflow, definition, or release binding changed")
+	}
+	if !reflect.DeepEqual(next.AssurancePolicy, previous.AssurancePolicy) {
+		return errors.New("checkpoint assurance policy changed")
 	}
 	if !artifactSubset(previous.AcceptedArtifacts, next.AcceptedArtifacts) {
 		return errors.New("accepted artifact inventory is not append-only")

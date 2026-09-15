@@ -297,8 +297,8 @@ func compareCandidateToReplay(
 	return nil
 }
 
-// SignRelease validates at least one enrolled, signed passing
-// audits, assembles the final setup transcript and key manifest without
+// SignRelease validates the signed definition's required passing-audit count,
+// assembles the final setup transcript and key manifest without
 // replacing candidate files, then signs the exact manifest with the distinct
 // pre-existing release key.
 func SignRelease(options SignReleaseOptions) (*SignReleaseResult, error) {
@@ -347,7 +347,11 @@ func SignRelease(options SignReleaseOptions) (*SignReleaseResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := validateReleaseChronology(options.ReleasedAt, latestAudit); err != nil {
+	candidateTime, err := time.Parse(time.RFC3339Nano, candidate.FinalizedAt)
+	if err != nil {
+		return nil, fmt.Errorf("candidate finalized_at: %w", err)
+	}
+	if err := validateReleaseChronology(options.ReleasedAt, candidateTime, latestAudit); err != nil {
 		return nil, err
 	}
 	operationalEvidence, err := verifyReleaseOperationalEvidence(
@@ -419,8 +423,8 @@ func SignRelease(options SignReleaseOptions) (*SignReleaseResult, error) {
 		return nil, errors.New("bundled operational evidence differs from verified release input")
 	}
 	transcript, err := NewFinalTranscript(FinalTranscript{
-		Schema:              FinalTranscriptSchema,
 		CeremonyID:          definition.CeremonyID,
+		AssurancePolicy:     cloneAssurancePolicy(definition.AssurancePolicy),
 		Definition:          definitionRef,
 		Circuit:             definition.Circuit,
 		Phase1:              candidate.Phase1,
@@ -598,7 +602,8 @@ func VerifyRelease(options VerifyReleaseOptions) (*VerifyReleaseResult, error) {
 		return nil, err
 	}
 	transcriptTime, _ := time.Parse(time.RFC3339Nano, transcript.FinalizedAt)
-	if err := validateReleaseChronology(transcriptTime, latestAudit); err != nil {
+	candidateTime, _ := time.Parse(time.RFC3339Nano, candidate.FinalizedAt)
+	if err := validateReleaseChronology(transcriptTime, candidateTime, latestAudit); err != nil {
 		return nil, fmt.Errorf("final transcript: %w", err)
 	}
 	operationalEvidence, err := verifyReleaseOperationalEvidence(
@@ -614,6 +619,7 @@ func VerifyRelease(options VerifyReleaseOptions) (*VerifyReleaseResult, error) {
 		return nil, fmt.Errorf("required operational evidence: %w", err)
 	}
 	if transcript.CeremonyID != definition.CeremonyID ||
+		!reflect.DeepEqual(transcript.AssurancePolicy, definition.AssurancePolicy) ||
 		transcript.Definition != definitionRef ||
 		!equalCircuitBinding(transcript.Circuit, definition.Circuit) ||
 		!reflect.DeepEqual(transcript.Phase1, candidate.Phase1) ||
@@ -897,8 +903,15 @@ func verifyPassingAudits(
 	candidate CandidateMetadata,
 	inputs []AuditArtifact,
 ) ([]ArtifactRef, time.Time, error) {
-	if len(inputs) < 1 {
-		return nil, time.Time{}, errors.New("at least one independently signed audit report is required")
+	minimum := 1
+	if definition.Schema == DefinitionSchema {
+		minimum = int(definition.AssurancePolicy.PassingCeremonyAudits)
+	}
+	if len(inputs) < minimum {
+		return nil, time.Time{}, fmt.Errorf("have %d passing ceremony audits, need %d", len(inputs), minimum)
+	}
+	if minimum == 0 && len(inputs) != 0 {
+		return nil, time.Time{}, errors.New("ceremony audit artifacts are forbidden when audits are disabled")
 	}
 	replayRoot, err := replayRootSHA256(candidate)
 	if err != nil {
@@ -988,8 +1001,11 @@ func verifyPassingAudits(
 	return refs, latestAudit, nil
 }
 
-func validateReleaseChronology(releasedAt, latestAudit time.Time) error {
-	if !releasedAt.After(latestAudit) {
+func validateReleaseChronology(releasedAt, candidateFinalizedAt, latestAudit time.Time) error {
+	if !releasedAt.After(candidateFinalizedAt) {
+		return errors.New("released_at must strictly postdate candidate finalization")
+	}
+	if !latestAudit.IsZero() && !releasedAt.After(latestAudit) {
 		return errors.New("released_at must strictly postdate every accepted independent audit")
 	}
 	return nil

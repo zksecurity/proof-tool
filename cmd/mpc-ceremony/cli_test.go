@@ -666,16 +666,14 @@ func TestReleaseSignRequiresPairedIndependentAudits(t *testing.T) {
 		"--released-at", "2026-07-28T12:00:00Z",
 		"--release-dir", "release",
 	}
+	if _, err := parseInvocation(base); err != nil {
+		t.Fatalf("zero audit flags must be parsed before the signed policy is loaded: %v", err)
+	}
 	tests := []struct {
 		name string
 		args []string
 		want string
 	}{
-		{
-			name: "zero audits",
-			args: append([]string(nil), base...),
-			want: "at least once",
-		},
 		{
 			name: "mismatched signatures",
 			args: append(append([]string(nil), base...),

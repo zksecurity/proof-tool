@@ -146,6 +146,67 @@ func TestSignedLifecycleReleaseRejectsCrossArtifactTampering(t *testing.T) {
 	}
 }
 
+func TestSignedLifecycleWithAllOptionalAssuranceDisabled(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping complete all-zero assurance lifecycle")
+	}
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve lifecycle test source")
+	}
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
+	binaryDir := t.TempDir()
+	workflowHelper := filepath.Join(binaryDir, "workflow-helper")
+	operationalHelper := filepath.Join(binaryDir, "operational-helper")
+	for output, pkg := range map[string]string{
+		workflowHelper:    "./internal/mpcceremony/testdata/workflowhelper",
+		operationalHelper: "./scripts/mpc-rehearsal-operational-evidence",
+	} {
+		command := exec.Command("go", "build", "-o", output, pkg)
+		command.Dir = repoRoot
+		if combined, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("build %s: %v\n%s", pkg, err, combined)
+		}
+	}
+
+	workflowRoot := filepath.Join(t.TempDir(), "workflow")
+	command := exec.Command(workflowHelper, workflowRoot, operationalHelper)
+	command.Dir = repoRoot
+	command.Env = append(os.Environ(), "PROOF_TOOL_TEST_ZERO_ASSURANCE=1")
+	if combined, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("run all-zero signed lifecycle: %v\n%s", err, combined)
+	}
+	ceremonyRoot := filepath.Join(workflowRoot, "ceremony")
+	coordinatorPublicKeyPath := filepath.Join(workflowRoot, "identity-keys", "trusted-coordinator.ed25519.public.hex")
+	trusted, err := LoadSignedDefinition(TrustPaths{
+		DefinitionPath: filepath.Join(ceremonyRoot, "ceremony.json"), DefinitionSignaturePath: filepath.Join(ceremonyRoot, "ceremony.sig"),
+		CoordinatorPublicKeyPath: coordinatorPublicKeyPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trusted.Definition.AssurancePolicy == nil || *trusted.Definition.AssurancePolicy != (AssurancePolicy{}) || len(trusted.Definition.Auditors) != 0 {
+		t.Fatalf("unexpected disabled assurance definition: %#v", trusted.Definition.AssurancePolicy)
+	}
+	coordinatorPublicKey, err := os.ReadFile(coordinatorPublicKeyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyRelease(VerifyReleaseOptions{
+		DefinitionPath: filepath.Join(ceremonyRoot, "ceremony.json"), DefinitionSignaturePath: filepath.Join(ceremonyRoot, "ceremony.sig"),
+		CoordinatorPublicKeyHex: strings.TrimSpace(string(coordinatorPublicKey)), KeysDir: filepath.Join(workflowRoot, "release"),
+		TrustedPublicKeyHex: trusted.Definition.ReleaseSigner.Ed25519PublicKeyHex, ExpectedSignatureKeyID: trusted.Definition.ReleaseSigner.KeyID,
+		RequireProvingKey: true,
+	}); err != nil {
+		t.Fatalf("verify all-zero signed lifecycle release: %v", err)
+	}
+	for _, id := range []string{"auditor-01", "witness-01", "mirror-01"} {
+		if _, err := os.Lstat(filepath.Join(workflowRoot, "identity-keys", id+".ed25519.private.hex")); !os.IsNotExist(err) {
+			t.Fatalf("disabled role key %q exists or cannot be inspected: %v", id, err)
+		}
+	}
+}
+
 func copyRegularTree(t *testing.T, source, destination string) {
 	t.Helper()
 	err := filepath.WalkDir(source, func(path string, entry fs.DirEntry, walkErr error) error {

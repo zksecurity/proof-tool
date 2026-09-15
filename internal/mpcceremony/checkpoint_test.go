@@ -1,10 +1,70 @@
 package mpcceremony
 
 import (
+	"bytes"
 	"slices"
 	"strings"
 	"testing"
 )
+
+func TestCheckpointSchemasPreserveLegacyAndForbidCrossVersionUse(t *testing.T) {
+	currentDefinition := adversarialDefinition(t)
+	current := phase1CheckpointSequence(t)[0]
+	current.AssurancePolicy = cloneAssurancePolicy(currentDefinition.AssurancePolicy)
+	if err := validateCheckpointDefinitionVersion(currentDefinition, current); err != nil {
+		t.Fatal(err)
+	}
+
+	legacyCheckpoint := current
+	legacyCheckpoint.Schema = CheckpointSchemaV1
+	legacyCheckpoint.AssurancePolicy = nil
+	if err := legacyCheckpoint.Validate(); err != nil {
+		t.Fatalf("legacy checkpoint rejected: %v", err)
+	}
+	raw, err := MarshalCanonical(legacyCheckpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte("assurance_policy")) {
+		t.Fatal("legacy checkpoint canonical bytes gained a new field")
+	}
+	if err := validateCheckpointDefinitionVersion(currentDefinition, legacyCheckpoint); err == nil {
+		t.Fatal("definition v3 accepted checkpoint v1")
+	}
+
+	legacyDefinition := currentDefinition
+	legacyDefinition.Schema = DefinitionSchemaV2
+	legacyDefinition.AssurancePolicy = nil
+	legacyDefinition.CeremonyID = ""
+	legacyID, err := ComputeCeremonyID(legacyDefinition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyDefinition.CeremonyID = legacyID
+	if err := validateCheckpointDefinitionVersion(legacyDefinition, current); err == nil {
+		t.Fatal("legacy definition accepted checkpoint v2")
+	}
+	if err := validateCheckpointDefinitionVersion(legacyDefinition, legacyCheckpoint); err != nil {
+		t.Fatalf("legacy definition/checkpoint pairing rejected: %v", err)
+	}
+
+	mismatch := current
+	other := *mismatch.AssurancePolicy
+	other.PublicWitnessesPerPhase++
+	mismatch.AssurancePolicy = &other
+	if err := validateCheckpointDefinitionVersion(currentDefinition, mismatch); err == nil {
+		t.Fatal("checkpoint v2 accepted changed assurance policy")
+	}
+
+	next := current
+	next.Schema = CheckpointSchemaV1
+	next.AssurancePolicy = nil
+	next.Sequence = 1
+	next.PreviousCheckpoint = &SignedArtifactRefs{}
+	if err := ValidateCheckpointTransition(current, next); err == nil {
+		t.Fatal("checkpoint transition switched schema versions")
+	}
+}
 
 func checkpointArtifact(name, contents string) ArtifactRef {
 	return ArtifactRef{Name: name, Digest: NewDigest([]byte(contents))}
@@ -66,13 +126,14 @@ func phase1CheckpointSequence(t *testing.T) [4]Checkpoint {
 	candidateAttempt := strings.Repeat("b", 32)
 
 	cp0 := Checkpoint{
-		Schema:         CheckpointSchemaV1,
-		Workflow:       StorageFirstWorkflowV1,
-		CeremonyID:     "sha256:" + strings.Repeat("c", 64),
-		Definition:     definition,
-		RelayReleaseID: "role-images-7ba406f",
-		Sequence:       0,
-		Transition:     CheckpointTransition{Kind: CheckpointInitial},
+		Schema:          CheckpointSchema,
+		Workflow:        StorageFirstWorkflowV1,
+		CeremonyID:      "sha256:" + strings.Repeat("c", 64),
+		Definition:      definition,
+		AssurancePolicy: &AssurancePolicy{PublicWitnessesPerPhase: 1, MirrorsPerAcceptedHead: 1, PassingCeremonyAudits: 1},
+		RelayReleaseID:  "role-images-7ba406f",
+		Sequence:        0,
+		Transition:      CheckpointTransition{Kind: CheckpointInitial},
 		Phase1: CheckpointPhaseState{
 			Phase: Phase1, AcceptedCount: 0, HeadRecordID: head0,
 			HeadPayload: genesis, Chain: chain0,
@@ -301,6 +362,7 @@ func TestVerifySignedCheckpointBindsDefinitionAndCoordinator(t *testing.T) {
 	}
 	cp := phase1CheckpointSequence(t)[0]
 	cp.CeremonyID = definition.CeremonyID
+	cp.AssurancePolicy = cloneAssurancePolicy(definition.AssurancePolicy)
 	cp.Definition = SignedArtifactRefs{
 		Record:    ArtifactRef{Name: "ceremony.json", Digest: NewDigest(definitionBytes)},
 		Signature: ArtifactRef{Name: "ceremony.sig", Digest: NewDigest(definitionSignature)},
@@ -312,6 +374,16 @@ func TestVerifySignedCheckpointBindsDefinitionAndCoordinator(t *testing.T) {
 	}
 	if _, err := VerifySignedCheckpoint(definition, definitionBytes, definitionSignature, cpBytes, cpSignature); err != nil {
 		t.Fatalf("verify checkpoint: %v", err)
+	}
+	wrongPolicy := cp
+	wrongPolicy.AssurancePolicy = cloneAssurancePolicy(cp.AssurancePolicy)
+	wrongPolicy.AssurancePolicy.MirrorsPerAcceptedHead = 0
+	wrongBytes, wrongPolicySignature, err := SignRecord(wrongPolicy, definition.Coordinator.KeyID, definitionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifySignedCheckpoint(definition, definitionBytes, definitionSignature, wrongBytes, wrongPolicySignature); err == nil {
+		t.Fatal("checkpoint accepted an assurance policy different from the signed definition")
 	}
 
 	tamperedDefinition := append([]byte(nil), definitionBytes...)

@@ -137,6 +137,13 @@ func executeInit(options InitOptions) (CommandResult, error) {
 	if err != nil {
 		return CommandResult{}, err
 	}
+	assurancePolicy, err := policy.ResolvedAssurancePolicy(options.Mode)
+	if err != nil {
+		return CommandResult{}, fmt.Errorf("assurance policy: %w", err)
+	}
+	if err := assurancePolicy.Validate(options.Mode, len(participants.Auditors)); err != nil {
+		return CommandResult{}, fmt.Errorf("assurance policy: %w", err)
+	}
 	if participants.Coordinator.KeyID != options.CoordinatorKeyID {
 		return CommandResult{}, fmt.Errorf(
 			"--coordinator-key-id %q does not match participants coordinator key id %q",
@@ -188,6 +195,7 @@ func executeInit(options InitOptions) (CommandResult, error) {
 			Phase1Policy:    policy.Phase1Policy,
 			Phase2Policy:    policy.Phase2Policy,
 			BeaconPolicy:    policy.BeaconPolicy,
+			AssurancePolicy: assurancePolicy,
 		},
 		CoordinatorPrivateKeyPath: options.CoordinatorSigningKey,
 	})

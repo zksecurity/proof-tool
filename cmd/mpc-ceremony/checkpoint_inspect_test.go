@@ -172,13 +172,14 @@ func writeCheckpointCLIFixture(t *testing.T) checkpointCLIFixture {
 	}
 	sortCheckpointCLIArtifacts(accepted)
 	cp0 := mpcceremony.Checkpoint{
-		Schema:         mpcceremony.CheckpointSchemaV1,
-		Workflow:       mpcceremony.StorageFirstWorkflowV1,
-		CeremonyID:     definition.CeremonyID,
-		Definition:     definitionRefs,
-		RelayReleaseID: "role-images-test",
-		Sequence:       0,
-		Transition:     mpcceremony.CheckpointTransition{Kind: mpcceremony.CheckpointInitial},
+		Schema:          mpcceremony.CheckpointSchema,
+		Workflow:        mpcceremony.StorageFirstWorkflowV1,
+		CeremonyID:      definition.CeremonyID,
+		Definition:      definitionRefs,
+		AssurancePolicy: definition.AssurancePolicy,
+		RelayReleaseID:  "role-images-test",
+		Sequence:        0,
+		Transition:      mpcceremony.CheckpointTransition{Kind: mpcceremony.CheckpointInitial},
 		Phase1: mpcceremony.CheckpointPhaseState{
 			Phase: mpcceremony.Phase1, AcceptedCount: 0,
 			HeadRecordID: mpcceremony.NewDigest([]byte("phase1 genesis head")).SHA256,

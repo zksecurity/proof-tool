@@ -513,9 +513,10 @@ func buildCheckpointEvidenceWithParent(options CheckpointEvidenceOptions, verify
 			return builtCheckpointEvidence{}, errors.New("initial checkpoint requires the authenticated phase1 genesis chain")
 		}
 		checkpoint := mpcceremony.Checkpoint{
-			Schema: mpcceremony.CheckpointSchemaV1, Workflow: mpcceremony.StorageFirstWorkflowV1,
+			Schema: checkpointSchemaForDefinition(trusted.Definition), Workflow: mpcceremony.StorageFirstWorkflowV1,
 			CeremonyID: trusted.Definition.CeremonyID, Definition: definitionRefs,
-			RelayReleaseID: options.RelayReleaseID, Sequence: 0,
+			AssurancePolicy: trusted.Definition.AssurancePolicy,
+			RelayReleaseID:  options.RelayReleaseID, Sequence: 0,
 			Transition: mpcceremony.CheckpointTransition{Kind: mpcceremony.CheckpointInitial}, Phase1: phaseState,
 			AcceptedArtifacts: checkpointSortedArtifacts(definitionRefs.Record, definitionRefs.Signature, headPayload, chainRefs.Record, chainRefs.Signature),
 			Submissions:       []mpcceremony.CheckpointSubmissionSlot{},
@@ -571,6 +572,13 @@ func buildCheckpointEvidenceWithParent(options CheckpointEvidenceOptions, verify
 	default:
 		return builtCheckpointEvidence{}, fmt.Errorf("unsupported guarded checkpoint transition %q", kind)
 	}
+}
+
+func checkpointSchemaForDefinition(definition mpcceremony.CeremonyDefinition) string {
+	if definition.Schema == mpcceremony.DefinitionSchema {
+		return mpcceremony.CheckpointSchema
+	}
+	return mpcceremony.CheckpointSchemaV1
 }
 
 func buildOutboundCheckpoint(options CheckpointEvidenceOptions, trusted *mpcceremony.TrustedCeremony, previous mpcceremony.Checkpoint, previousRefs mpcceremony.SignedArtifactRefs, phaseState mpcceremony.CheckpointPhaseState) (builtCheckpointEvidence, error) {

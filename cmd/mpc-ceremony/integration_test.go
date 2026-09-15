@@ -197,6 +197,7 @@ func TestParticipantCLIHelpHasExplicitSafeFlagAllowlist(t *testing.T) {
 		"--accepted-at",
 		"--allowed-binary",
 		"--contributed-at",
+		"--disable-optional-assurance",
 	}
 	flagPattern := regexp.MustCompile(`--[a-z0-9-]+`)
 	seenSet := make(map[string]struct{})

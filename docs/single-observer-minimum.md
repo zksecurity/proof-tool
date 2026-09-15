@@ -1,23 +1,34 @@
-# Single-observer minimums (unreleased)
+# Optional ceremony controls (experimental)
 
-Both rehearsal and production require at least one enrolled auditor, one public
-witness per phase, and one mirror operator providing a signed receipt for every
-accepted contribution. The same witness and mirror may serve both phases. A
-higher explicitly selected witness quorum remains binding. Zero is rejected.
+Definition v3 signs one explicit assurance policy with four independent
+minimums:
 
-Release signing requires at least one verified passing transcript audit.
-Production decisions also require at least one distinct external audit signoff;
-this is a separate report requirement, not evidence supplied by a mirror or
-witness. Every supplied report is still validated, including additional reports.
-The `release sign` command accepts one matching audit report/signature pair and
-rejects zero, matching the verifier's threshold.
+- public witnesses per phase;
+- mirror receipts per accepted head;
+- passing ceremony audits; and
+- external security-audit signoffs.
 
-Production still requires at least two participants per phase, every scheduled
-contribution, distinct signing identities and the existing independence checks.
-Beacon lead times and multi-relay observation requirements are unchanged.
+Zero explicitly disables a control. Omitting the policy never means zero.
+When ceremony audits are disabled, the signed auditor roster must also be
+empty. Rehearsals must disable external security-audit signoffs because they
+cannot satisfy a production review requirement honestly.
 
-This policy changes verifier behavior and needs a new proof-tool release. Existing
-ceremonies must continue using their approved proof-tool build. The companion CLI
-must pin the new release and advertise the new `two-phase-v2` ruleset (version 2);
-Tessera must provision that exact compatible CLI release before activating it.
-Do not reinterpret old ceremonies using a newer verifier.
+The policy is part of the ceremony ID. Checkpoints, operational evidence,
+final transcripts, and production decisions repeat it and must match the
+signed definition exactly. Evidence for a disabled control is rejected; an
+enabled control must meet its signed minimum. A production decision displays a
+disabled gate as `NOT_REQUIRED`, with no evidence, and may not use that status
+for an enabled control.
+
+Disabling witnesses does not disable the future drand beacon or its
+verification. It does remove independent evidence that the coordinator
+published the closure before learning the beacon value. The signed timestamps
+remain operator claims, not trusted external time.
+
+Definition v1/v2, operational-bundle v2, final-transcript v1, and
+production-decision v1 keep their original one-or-more requirements. They are
+not reinterpreted using the optional-role policy.
+
+This work is experimental until the full Proof-tool release path, Relay role
+journeys, storage backends, and Tessera contract are updated and tested as one
+released pairing.

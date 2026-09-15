@@ -20,6 +20,7 @@ func main() {
 		300,
 		fmt.Sprintf("signed rehearsal witness/round lead in seconds (minimum %d)", mpcrehearsal.MinimumBeaconLeadSeconds),
 	)
+	disableOptionalAssurance := flag.Bool("disable-optional-assurance", false, "sign explicit zero witness, mirror, and ceremony-audit requirements")
 	flag.Parse()
 	if *outDir == "" || flag.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "usage: mpc-rehearsal-config --out-dir FRESH_DIR [--participants 3]")
@@ -29,7 +30,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "beacon witness lead exceeds uint32")
 		os.Exit(2)
 	}
-	if err := generate(*outDir, *participantCount, uint32(*beaconWitnessLead)); err != nil {
+	if err := mpcrehearsal.GenerateWithAssurance(*outDir, *participantCount, uint32(*beaconWitnessLead), !*disableOptionalAssurance); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

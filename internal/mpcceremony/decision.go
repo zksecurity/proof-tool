@@ -21,8 +21,10 @@ import (
 )
 
 const (
-	ProductionDecisionSchema          = "proof-tool-mpc-production-decision-v1"
-	ProductionDecisionDraftSchema     = "proof-tool-mpc-production-decision-draft-v1"
+	ProductionDecisionSchemaV1        = "proof-tool-mpc-production-decision-v1"
+	ProductionDecisionSchema          = "proof-tool-mpc-production-decision-v2"
+	ProductionDecisionDraftSchemaV1   = "proof-tool-mpc-production-decision-draft-v1"
+	ProductionDecisionDraftSchema     = "proof-tool-mpc-production-decision-draft-v2"
 	ProductionDecisionSignatureSchema = "proof-tool-mpc-production-decision-signature-v1"
 	// MaxProductionReleaseArtifacts must admit the largest release tree the
 	// earlier layers can produce, or a fully valid signed release strands at
@@ -44,9 +46,10 @@ const (
 type ProductionGateStatus string
 
 const (
-	GatePASS    ProductionGateStatus = "PASS"
-	GateFAIL    ProductionGateStatus = "FAIL"
-	GatePENDING ProductionGateStatus = "PENDING"
+	GatePASS        ProductionGateStatus = "PASS"
+	GateFAIL        ProductionGateStatus = "FAIL"
+	GatePENDING     ProductionGateStatus = "PENDING"
+	GateNotRequired ProductionGateStatus = "NOT_REQUIRED"
 )
 
 type ProductionGate string
@@ -332,6 +335,18 @@ func (g ProductionGateResult) Validate() error {
 		if strings.TrimSpace(g.Rationale) == "" || g.Rationale != strings.TrimSpace(g.Rationale) {
 			return fmt.Errorf("%s gate %q requires a non-empty trimmed rationale", g.Status, g.Gate)
 		}
+	case GateNotRequired:
+		switch g.Gate {
+		case GateIndependentAudits, GateExternalAudit, GatePublicWitnessing, GateImmutableMirrors:
+		default:
+			return fmt.Errorf("gate %q is never optional", g.Gate)
+		}
+		if len(g.Evidence) != 0 {
+			return fmt.Errorf("NOT_REQUIRED gate %q must not contain evidence", g.Gate)
+		}
+		if strings.TrimSpace(g.Rationale) == "" || g.Rationale != strings.TrimSpace(g.Rationale) {
+			return fmt.Errorf("NOT_REQUIRED gate %q requires a non-empty trimmed rationale", g.Gate)
+		}
 	default:
 		return fmt.Errorf("unsupported production gate status %q", g.Status)
 	}
@@ -361,6 +376,7 @@ type ProductionDecision struct {
 	Schema                string                    `json:"schema"`
 	DecisionID            string                    `json:"decision_id"`
 	CeremonyID            string                    `json:"ceremony_id"`
+	AssurancePolicy       *AssurancePolicy          `json:"assurance_policy,omitempty"`
 	Release               SignedReleaseEvidence     `json:"release"`
 	SourceRelease         SourceReleaseEvidence     `json:"source_release"`
 	OperationalEvidence   SignedLocatedArtifact     `json:"operational_evidence"`
@@ -380,6 +396,7 @@ type ProductionDecision struct {
 type ProductionDecisionDraft struct {
 	Schema                string                     `json:"schema"`
 	CeremonyID            string                     `json:"ceremony_id"`
+	AssurancePolicy       *AssurancePolicy           `json:"assurance_policy,omitempty"`
 	Release               SignedReleaseEvidenceDraft `json:"release"`
 	SourceRelease         SourceReleaseEvidence      `json:"source_release"`
 	OperationalEvidence   SignedLocatedArtifact      `json:"operational_evidence"`
@@ -399,19 +416,36 @@ func (d ProductionDecisionDraft) Validate() error {
 }
 
 func (d ProductionDecisionDraft) decision() (ProductionDecision, error) {
-	if d.Schema != ProductionDecisionDraftSchema {
+	if d.Schema != ProductionDecisionDraftSchema && d.Schema != ProductionDecisionDraftSchemaV1 {
 		return ProductionDecision{}, fmt.Errorf(
 			"production decision draft schema %q, want %q",
 			d.Schema,
 			ProductionDecisionDraftSchema,
 		)
 	}
+	if d.Schema == ProductionDecisionDraftSchema &&
+		(d.Audits == nil || d.ExternalAudits == nil || d.Gates == nil) {
+		return ProductionDecision{}, errors.New("production decision draft v2 requires explicit audits, external_audits, and gates arrays")
+	}
+	if d.Schema == ProductionDecisionDraftSchema {
+		for _, gate := range d.Gates {
+			if gate.Evidence == nil {
+				return ProductionDecision{}, fmt.Errorf("draft gate %q requires an explicit evidence array", gate.Gate)
+			}
+		}
+	}
 	release, err := d.Release.release()
 	if err != nil {
 		return ProductionDecision{}, fmt.Errorf("draft release: %w", err)
 	}
+	decisionSchema := ProductionDecisionSchema
+	if d.Schema == ProductionDecisionDraftSchemaV1 {
+		decisionSchema = ProductionDecisionSchemaV1
+	}
 	return NewProductionDecision(ProductionDecision{
+		Schema:                decisionSchema,
 		CeremonyID:            d.CeremonyID,
+		AssurancePolicy:       cloneAssurancePolicy(d.AssurancePolicy),
 		Release:               release,
 		SourceRelease:         d.SourceRelease,
 		OperationalEvidence:   d.OperationalEvidence,
@@ -455,7 +489,22 @@ func PrepareProductionDecision(
 }
 
 func NewProductionDecision(value ProductionDecision) (ProductionDecision, error) {
-	value.Schema = ProductionDecisionSchema
+	if value.Schema == "" {
+		value.Schema = ProductionDecisionSchema
+	}
+	if value.Schema == ProductionDecisionSchema {
+		if value.Audits == nil {
+			value.Audits = []ProductionAuditEvidence{}
+		}
+		if value.ExternalAudits == nil {
+			value.ExternalAudits = []ExternalAuditEvidence{}
+		}
+		for index := range value.Gates {
+			if value.Gates[index].Evidence == nil {
+				value.Gates[index].Evidence = []LocatedArtifactRef{}
+			}
+		}
+	}
 	value.DecisionID = ""
 	id, err := computeProductionDecisionID(value)
 	if err != nil {
@@ -466,8 +515,20 @@ func NewProductionDecision(value ProductionDecision) (ProductionDecision, error)
 }
 
 func (d ProductionDecision) Validate() error {
-	if d.Schema != ProductionDecisionSchema {
-		return fmt.Errorf("production decision schema %q, want %q", d.Schema, ProductionDecisionSchema)
+	switch d.Schema {
+	case ProductionDecisionSchema:
+		if d.AssurancePolicy == nil {
+			return errors.New("production decision v2 requires assurance_policy")
+		}
+		if d.Audits == nil || d.ExternalAudits == nil || d.Gates == nil {
+			return errors.New("production decision v2 requires explicit audits, external_audits, and gates arrays")
+		}
+	case ProductionDecisionSchemaV1:
+		if d.AssurancePolicy != nil {
+			return errors.New("production decision v1 must not contain assurance_policy")
+		}
+	default:
+		return fmt.Errorf("production decision schema %q is unsupported", d.Schema)
 	}
 	if err := validateHashID("decision_id", d.DecisionID); err != nil {
 		return err
@@ -493,7 +554,7 @@ func (d ProductionDecision) Validate() error {
 	}
 	// One is the floor, not the ceiling. Validate every supplied audit;
 	// additional auditors remain supported and must use distinct identities.
-	if len(d.Audits) < 1 {
+	if d.Schema == ProductionDecisionSchemaV1 && len(d.Audits) < 1 {
 		return fmt.Errorf("production decision requires at least one audit, got %d", len(d.Audits))
 	}
 	auditKeyIDs := make(map[string]struct{}, len(d.Audits))
@@ -509,7 +570,7 @@ func (d ProductionDecision) Validate() error {
 		}
 		auditKeyIDs[audit.AuditorKeyID] = struct{}{}
 	}
-	if len(d.ExternalAudits) < 1 {
+	if d.Schema == ProductionDecisionSchemaV1 && len(d.ExternalAudits) < 1 {
 		return fmt.Errorf("production decision requires at least one external audit, got %d", len(d.ExternalAudits))
 	}
 	externalFingerprints := make(map[string]struct{}, len(d.ExternalAudits))
@@ -540,7 +601,7 @@ func (d ProductionDecision) Validate() error {
 	if len(d.Gates) != len(requiredProductionGates) {
 		return fmt.Errorf("production decision has %d gates, want exactly %d", len(d.Gates), len(requiredProductionGates))
 	}
-	allPass := true
+	allSatisfied := true
 	for index, expectedGate := range requiredProductionGates {
 		gate := d.Gates[index]
 		if gate.Gate != expectedGate {
@@ -549,15 +610,26 @@ func (d ProductionDecision) Validate() error {
 		if err := gate.Validate(); err != nil {
 			return err
 		}
-		allPass = allPass && gate.Status == GatePASS
+		if d.Schema == ProductionDecisionSchema && gate.Evidence == nil {
+			return fmt.Errorf("gate %q requires an explicit evidence array; use [] when there is no evidence", gate.Gate)
+		}
+		if d.Schema == ProductionDecisionSchemaV1 && gate.Status == GateNotRequired {
+			return fmt.Errorf("legacy production decision gate %q cannot be NOT_REQUIRED", gate.Gate)
+		}
+		allSatisfied = allSatisfied && (gate.Status == GatePASS || gate.Status == GateNotRequired)
+	}
+	if d.Schema == ProductionDecisionSchema {
+		if err := validateAssuranceDecisionGates(*d.AssurancePolicy, d); err != nil {
+			return err
+		}
 	}
 	switch d.Decision {
 	case DecisionGO:
-		if !allPass {
+		if !allSatisfied {
 			return errors.New("GO decision requires every production gate to be PASS")
 		}
 	case DecisionNOGO:
-		if allPass {
+		if allSatisfied {
 			return errors.New("NO-GO decision must enumerate at least one FAIL or PENDING gate")
 		}
 	default:
@@ -571,10 +643,13 @@ func (d ProductionDecision) Validate() error {
 
 func computeProductionDecisionID(value ProductionDecision) (string, error) {
 	value.DecisionID = ""
-	if value.Schema != ProductionDecisionSchema {
-		return "", fmt.Errorf("production decision schema %q, want %q", value.Schema, ProductionDecisionSchema)
+	domain := "proof-tool/mpc-ceremony/production-decision/v2"
+	if value.Schema == ProductionDecisionSchemaV1 {
+		domain = "proof-tool/mpc-ceremony/production-decision/v1"
+	} else if value.Schema != ProductionDecisionSchema {
+		return "", fmt.Errorf("production decision schema %q is unsupported", value.Schema)
 	}
-	return canonicalHash("proof-tool/mpc-ceremony/production-decision/v1", value)
+	return canonicalHash(domain, value)
 }
 
 type DecisionSignerRole string
@@ -784,6 +859,16 @@ func validateProductionDecisionBinding(definition CeremonyDefinition, decision P
 	if decision.CeremonyID != definition.CeremonyID {
 		return errors.New("production decision ceremony_id does not match the signed definition")
 	}
+	if definition.Schema == DefinitionSchema {
+		if decision.Schema != ProductionDecisionSchema || decision.AssurancePolicy == nil || *decision.AssurancePolicy != *definition.AssurancePolicy {
+			return errors.New("production decision assurance_policy does not exactly match signed definition")
+		}
+		if err := validateAssuranceDecisionGates(*definition.AssurancePolicy, decision); err != nil {
+			return err
+		}
+	} else if decision.Schema != ProductionDecisionSchemaV1 || decision.AssurancePolicy != nil {
+		return errors.New("legacy definition requires legacy production decision semantics")
+	}
 	if decision.SourceRelease.SourceCommit != definition.Software.SourceCommit {
 		return errors.New("production decision source release does not match ceremony build provenance")
 	}
@@ -811,6 +896,50 @@ func validateProductionDecisionBinding(definition CeremonyDefinition, decision P
 			if externalFP == auditor.PublicKeyFingerprint {
 				return errors.New("external auditor key must be distinct from enrolled ceremony auditors")
 			}
+		}
+	}
+	return nil
+}
+
+func expectedFinalTranscriptSchema(definition CeremonyDefinition) string {
+	if definition.Schema == DefinitionSchema {
+		return FinalTranscriptSchema
+	}
+	return FinalTranscriptSchemaV1
+}
+
+func validateAssuranceDecisionGates(policy AssurancePolicy, decision ProductionDecision) error {
+	if len(decision.Audits) < int(policy.PassingCeremonyAudits) {
+		return fmt.Errorf("passing ceremony audit count %d does not satisfy signed minimum %d", len(decision.Audits), policy.PassingCeremonyAudits)
+	}
+	if policy.PassingCeremonyAudits == 0 && len(decision.Audits) != 0 {
+		return errors.New("ceremony audits are forbidden when disabled by signed policy")
+	}
+	if len(decision.ExternalAudits) < int(policy.ExternalSecurityAuditSignoffs) {
+		return fmt.Errorf("external audit signoff count %d does not satisfy signed minimum %d", len(decision.ExternalAudits), policy.ExternalSecurityAuditSignoffs)
+	}
+	if policy.ExternalSecurityAuditSignoffs == 0 && len(decision.ExternalAudits) != 0 {
+		return errors.New("external audits are forbidden when disabled by signed policy")
+	}
+	statuses := make(map[ProductionGate]ProductionGateStatus, len(decision.Gates))
+	for _, gate := range decision.Gates {
+		statuses[gate.Gate] = gate.Status
+	}
+	for _, requirement := range []struct {
+		gate    ProductionGate
+		enabled bool
+	}{
+		{GateIndependentAudits, policy.PassingCeremonyAudits > 0},
+		{GateExternalAudit, policy.ExternalSecurityAuditSignoffs > 0},
+		{GatePublicWitnessing, policy.PublicWitnessesPerPhase > 0},
+		{GateImmutableMirrors, policy.MirrorsPerAcceptedHead > 0},
+	} {
+		status := statuses[requirement.gate]
+		if requirement.enabled && status == GateNotRequired {
+			return fmt.Errorf("gate %q cannot be NOT_REQUIRED because it is enabled by signed policy", requirement.gate)
+		}
+		if !requirement.enabled && status != GateNotRequired {
+			return fmt.Errorf("gate %q must be NOT_REQUIRED because it is disabled by signed policy", requirement.gate)
 		}
 	}
 	return nil
@@ -970,6 +1099,8 @@ func verifyDecisionRelease(definition CeremonyDefinition, decision ProductionDec
 		),
 	}
 	if transcript.CeremonyID != definition.CeremonyID ||
+		transcript.Schema != expectedFinalTranscriptSchema(definition) ||
+		!reflect.DeepEqual(transcript.AssurancePolicy, definition.AssurancePolicy) ||
 		transcript.Definition != candidate.Definition ||
 		!equalCircuitBinding(transcript.Circuit, candidate.Circuit) ||
 		!reflect.DeepEqual(transcript.Phase1, candidate.Phase1) ||
@@ -988,6 +1119,16 @@ func verifyDecisionRelease(definition CeremonyDefinition, decision ProductionDec
 	transcriptTime, err := time.Parse(time.RFC3339Nano, transcript.FinalizedAt)
 	if err != nil {
 		return fmt.Errorf("final transcript release time: %w", err)
+	}
+	candidateTime, err := time.Parse(time.RFC3339Nano, candidate.FinalizedAt)
+	if err != nil {
+		return fmt.Errorf("candidate finalized_at: %w", err)
+	}
+	// Full audit chronology is verified when the signed audit records are read.
+	// This check is independent so an all-zero audit policy cannot erase the
+	// candidate-to-release ordering requirement.
+	if err := validateReleaseChronology(transcriptTime, candidateTime, time.Time{}); err != nil {
+		return fmt.Errorf("final transcript: %w", err)
 	}
 	coordinatorKey, err = identityPublicKey(definition.Coordinator)
 	if err != nil {

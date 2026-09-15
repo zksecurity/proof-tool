@@ -73,9 +73,6 @@ func (p InitParticipants) Validate() error {
 	if err := p.ReleaseSigner.Validate(); err != nil {
 		return fmt.Errorf("release_signer: %w", err)
 	}
-	if len(p.Auditors) < 1 {
-		return errors.New("at least one independent auditor is required")
-	}
 	if len(p.Auditors) > MaxAuditors {
 		return fmt.Errorf("auditors exceed maximum %d recordable in the final transcript", MaxAuditors)
 	}
@@ -130,9 +127,26 @@ func (p InitParticipants) Validate() error {
 // Cross-checking policy participant IDs against InitParticipants happens when
 // the ceremony definition is assembled and validated.
 type InitPolicy struct {
+	Phase1Policy    PhasePolicy      `json:"phase1_policy"`
+	Phase2Policy    PhasePolicy      `json:"phase2_policy"`
+	BeaconPolicy    BeaconPolicy     `json:"beacon_policy"`
+	AssurancePolicy *AssurancePolicy `json:"assurance_policy"`
+	legacy          bool
+}
+
+type legacyInitPolicy struct {
 	Phase1Policy PhasePolicy  `json:"phase1_policy"`
 	Phase2Policy PhasePolicy  `json:"phase2_policy"`
 	BeaconPolicy BeaconPolicy `json:"beacon_policy"`
+}
+
+func (p legacyInitPolicy) Validate() error {
+	return InitPolicy{
+		Phase1Policy: p.Phase1Policy,
+		Phase2Policy: p.Phase2Policy,
+		BeaconPolicy: p.BeaconPolicy,
+		legacy:       true,
+	}.Validate()
 }
 
 func (p InitPolicy) Validate() error {
@@ -145,7 +159,24 @@ func (p InitPolicy) Validate() error {
 	if err := p.BeaconPolicy.Validate(); err != nil {
 		return fmt.Errorf("beacon_policy: %w", err)
 	}
+	if p.AssurancePolicy == nil && !p.legacy {
+		return errors.New("assurance_policy is required; omission does not disable controls")
+	}
 	return nil
+}
+
+// ResolvedAssurancePolicy maps a policy file created before assurance controls
+// existed to the old mandatory defaults. Only LoadInitPolicy can mark a value
+// as legacy; a newly authored omission remains an error.
+func (p InitPolicy) ResolvedAssurancePolicy(mode string) (*AssurancePolicy, error) {
+	if err := p.Validate(); err != nil {
+		return nil, err
+	}
+	if p.AssurancePolicy != nil {
+		return cloneAssurancePolicy(p.AssurancePolicy), nil
+	}
+	value := defaultAssurancePolicy(mode)
+	return &value, nil
 }
 
 // LoadInitParticipants reads exact canonical enrollment JSON from a regular
@@ -161,9 +192,26 @@ func LoadInitParticipants(path string) (InitParticipants, error) {
 
 // LoadInitPolicy reads exact canonical initialization policy JSON.
 func LoadInitPolicy(path string) (InitPolicy, error) {
-	var result InitPolicy
-	if err := loadCanonicalInput(path, &result); err != nil {
+	data, err := readRegularBounded(path, maxSignedRecordBytes)
+	if err != nil {
 		return InitPolicy{}, fmt.Errorf("load init policy: %w", err)
+	}
+	var result InitPolicy
+	if err := UnmarshalCanonical(data, &result); err == nil {
+		if err := result.Validate(); err != nil {
+			return InitPolicy{}, fmt.Errorf("load init policy: %w", err)
+		}
+		return result, nil
+	}
+	var legacy legacyInitPolicy
+	if err := UnmarshalCanonical(data, &legacy); err != nil {
+		return InitPolicy{}, fmt.Errorf("load init policy: neither current nor legacy canonical policy: %w", err)
+	}
+	result = InitPolicy{
+		Phase1Policy: legacy.Phase1Policy,
+		Phase2Policy: legacy.Phase2Policy,
+		BeaconPolicy: legacy.BeaconPolicy,
+		legacy:       true,
 	}
 	return result, nil
 }

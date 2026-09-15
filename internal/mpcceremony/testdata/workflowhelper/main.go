@@ -65,6 +65,7 @@ func main() {
 }
 
 func run(outputRoot, operationalEvidenceHelper string) error {
+	zeroAssurance := os.Getenv("PROOF_TOOL_TEST_ZERO_ASSURANCE") == "1"
 	compiled, err := frontend.Compile(
 		ecc.BLS12_381.ScalarField(),
 		r1cs.NewBuilder,
@@ -162,15 +163,18 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	if err != nil {
 		return err
 	}
-	auditor1KeyPath, err := writePrivateKey("auditor-01", auditor1Private)
-	if err != nil {
-		return err
+	auditor1KeyPath, auditor2KeyPath := "", ""
+	if !zeroAssurance {
+		auditor1KeyPath, err = writePrivateKey("auditor-01", auditor1Private)
+		if err != nil {
+			return err
+		}
+		auditor2KeyPath, err = writePrivateKey("auditor-02", auditor2Private)
+		if err != nil {
+			return err
+		}
 	}
-	auditor2KeyPath, err := writePrivateKey("auditor-02", auditor2Private)
-	if err != nil {
-		return err
-	}
-	for _, external := range []struct {
+	externalKeys := []struct {
 		name string
 		fill byte
 	}{
@@ -178,9 +182,12 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		{name: "witness-02", fill: 0xa2},
 		{name: "mirror-01", fill: 0xb1},
 		{name: "mirror-02", fill: 0xb2},
-	} {
-		if _, err := writePrivateKey(external.name, privateKey(external.fill)); err != nil {
-			return err
+	}
+	if !zeroAssurance {
+		for _, external := range externalKeys {
+			if _, err := writePrivateKey(external.name, privateKey(external.fill)); err != nil {
+				return err
+			}
 		}
 	}
 	trustedCoordinatorPath := filepath.Join(keyDir, "trusted-coordinator.ed25519.public.hex")
@@ -193,6 +200,14 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	}
 
 	ceremonyRoot := filepath.Join(outputRoot, "ceremony")
+	auditors := []mpcceremony.Identity{}
+	assurance := &mpcceremony.AssurancePolicy{}
+	if !zeroAssurance {
+		auditors = []mpcceremony.Identity{auditor1, auditor2}
+		assurance.PublicWitnessesPerPhase = 1
+		assurance.MirrorsPerAcceptedHead = 1
+		assurance.PassingCeremonyAudits = 1
+	}
 	initialized, err := mpcceremony.InitializeCeremonyFiles(mpcceremony.InitFilesOptions{
 		RootDir: ceremonyRoot,
 		Circuit: circuit,
@@ -203,7 +218,8 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 			Software:        software,
 			Coordinator:     coordinator,
 			ReleaseSigner:   releaseSigner,
-			Auditors:        []mpcceremony.Identity{auditor1, auditor2},
+			Auditors:        auditors,
+			AssurancePolicy: assurance,
 			Roster: []mpcceremony.Participant{
 				{Identity: participant1},
 				{Identity: participant2},
@@ -721,14 +737,18 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		return err
 	}
 	audits := make([]mpcceremony.AuditArtifact, 0, 2)
-	for index, input := range []struct {
+	auditInputs := []struct {
 		id      string
 		keyPath string
 		at      string
 	}{
 		{id: auditor1.ID, keyPath: auditor1KeyPath, at: "2023-08-23T15:11:36Z"},
 		{id: auditor2.ID, keyPath: auditor2KeyPath, at: "2023-08-23T15:11:37Z"},
-	} {
+	}
+	if zeroAssurance {
+		auditInputs = nil
+	}
+	for index, input := range auditInputs {
 		recordPath := filepath.Join(auditDir, fmt.Sprintf("audit-%02d.json", index+1))
 		signaturePath := filepath.Join(auditDir, fmt.Sprintf("audit-%02d.sig", index+1))
 		if _, err := mpcceremony.Audit(mpcceremony.AuditOptions{

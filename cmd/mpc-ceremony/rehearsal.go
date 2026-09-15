@@ -18,10 +18,11 @@ const (
 )
 
 func executeRehearsalInit(options RehearsalInitOptions) (result CommandResult, err error) {
-	if err := mpcrehearsal.Generate(
+	if err := mpcrehearsal.GenerateWithAssurance(
 		options.OutDir,
 		rehearsalParticipantCount,
 		uint32(options.BeaconLeadSeconds),
+		!options.DisableOptionalAssurance,
 	); err != nil {
 		return CommandResult{}, err
 	}

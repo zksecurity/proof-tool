@@ -218,6 +218,9 @@ func PrepareImmutableMirrorReceipt(
 	if err := definition.Validate(); err != nil {
 		return ImmutableMirrorReceipt{}, nil, err
 	}
+	if definition.Schema == DefinitionSchema && definition.AssurancePolicy.MirrorsPerAcceptedHead == 0 {
+		return ImmutableMirrorReceipt{}, nil, errors.New("mirrors are disabled by the signed assurance policy")
+	}
 	if err := chain.ValidateAgainstDefinition(definition); err != nil {
 		return ImmutableMirrorReceipt{}, nil, err
 	}

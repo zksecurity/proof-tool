@@ -608,7 +608,9 @@ func ValidateClose(definition CeremonyDefinition, chain Chain, close CloseRecord
 // witness receipt unsatisfiable. See ProductionWitnessObservationWindowSeconds.
 func requiredCloseLead(definition CeremonyDefinition) time.Duration {
 	lead := time.Duration(definition.BeaconPolicy.MinimumWitnessLeadSeconds) * time.Second
-	if definition.Mode == ModeProduction {
+	witnessesEnabled := definition.Schema != DefinitionSchema ||
+		(definition.AssurancePolicy != nil && definition.AssurancePolicy.PublicWitnessesPerPhase > 0)
+	if definition.Mode == ModeProduction && witnessesEnabled {
 		lead += time.Duration(ProductionWitnessObservationWindowSeconds) * time.Second
 	}
 	return lead
@@ -1146,6 +1148,7 @@ type FinalTranscript struct {
 	Schema              string             `json:"schema"`
 	TranscriptID        string             `json:"transcript_id"`
 	CeremonyID          string             `json:"ceremony_id"`
+	AssurancePolicy     *AssurancePolicy   `json:"assurance_policy,omitempty"`
 	Definition          ArtifactRef        `json:"definition"`
 	Circuit             CircuitBinding     `json:"circuit"`
 	Phase1              PhaseSummary       `json:"phase1"`
@@ -1159,7 +1162,16 @@ type FinalTranscript struct {
 }
 
 func NewFinalTranscript(record FinalTranscript) (FinalTranscript, error) {
-	record.Schema = FinalTranscriptSchema
+	if record.Schema == "" {
+		if record.AssurancePolicy == nil {
+			record.Schema = FinalTranscriptSchemaV1
+		} else {
+			record.Schema = FinalTranscriptSchema
+		}
+	}
+	if record.Schema == FinalTranscriptSchema && record.Audits == nil {
+		record.Audits = []ArtifactRef{}
+	}
 	record.TranscriptID = ""
 	id, err := ComputeFinalTranscriptID(record)
 	if err != nil {
@@ -1174,7 +1186,11 @@ func ComputeFinalTranscriptID(record FinalTranscript) (string, error) {
 	if err := record.validate(false); err != nil {
 		return "", err
 	}
-	return canonicalHash("proof-tool/mpc-ceremony/final-transcript/v1", record)
+	domain := "proof-tool/mpc-ceremony/final-transcript/v2"
+	if record.Schema == FinalTranscriptSchemaV1 {
+		domain = "proof-tool/mpc-ceremony/final-transcript/v1"
+	}
+	return canonicalHash(domain, record)
 }
 
 func (r FinalTranscript) Validate() error {
@@ -1192,8 +1208,20 @@ func (r FinalTranscript) Validate() error {
 }
 
 func (r FinalTranscript) validate(requireID bool) error {
-	if r.Schema != FinalTranscriptSchema {
-		return fmt.Errorf("transcript schema %q, want %q", r.Schema, FinalTranscriptSchema)
+	switch r.Schema {
+	case FinalTranscriptSchema:
+		if r.AssurancePolicy == nil {
+			return errors.New("final transcript v2 requires assurance_policy")
+		}
+		if r.Audits == nil {
+			return errors.New("final transcript v2 requires an explicit audits array; use [] when audits are disabled")
+		}
+	case FinalTranscriptSchemaV1:
+		if r.AssurancePolicy != nil {
+			return errors.New("final transcript v1 must not contain assurance_policy")
+		}
+	default:
+		return fmt.Errorf("transcript schema %q is unsupported", r.Schema)
 	}
 	if requireID {
 		if err := validateHashID("transcript_id", r.TranscriptID); err != nil {
@@ -1223,11 +1251,21 @@ func (r FinalTranscript) validate(requireID bool) error {
 	if r.Phase2.Phase != Phase2 {
 		return errors.New("phase2 summary has wrong phase")
 	}
-	if len(r.Audits) < 1 {
+	if r.Schema == FinalTranscriptSchemaV1 && len(r.Audits) < 1 {
 		return errors.New("final transcript requires at least one independent audit artifact")
 	}
-	if err := validateArtifactList("audits", r.Audits, MaxParticipants); err != nil {
-		return err
+	if r.Schema == FinalTranscriptSchema {
+		if len(r.Audits) < int(r.AssurancePolicy.PassingCeremonyAudits) {
+			return fmt.Errorf("final transcript has %d audits, below signed minimum %d", len(r.Audits), r.AssurancePolicy.PassingCeremonyAudits)
+		}
+		if r.AssurancePolicy.PassingCeremonyAudits == 0 && len(r.Audits) != 0 {
+			return errors.New("final transcript contains audits while ceremony audits are disabled")
+		}
+	}
+	if len(r.Audits) > 0 {
+		if err := validateArtifactList("audits", r.Audits, MaxParticipants); err != nil {
+			return err
+		}
 	}
 	if err := r.OperationalEvidence.Validate(); err != nil {
 		return fmt.Errorf("operational_evidence: %w", err)

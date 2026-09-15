@@ -396,6 +396,9 @@ func TestCloseRequiresCompleteProductionRosterButKeepsRehearsalThreshold(t *test
 	rehearsal := adversarialDefinition(t)
 	rehearsal.CeremonyID = ""
 	rehearsal.Mode = ModeRehearsal
+	assurance := *rehearsal.AssurancePolicy
+	assurance.ExternalSecurityAuditSignoffs = 0
+	rehearsal.AssurancePolicy = &assurance
 	rehearsal.Phase1Policy = clonePhasePolicy(rehearsal.Phase1Policy)
 	rehearsal.Phase1Policy.Minimum = 2
 	rehearsal.Phase2Policy = clonePhasePolicy(rehearsal.Phase2Policy)

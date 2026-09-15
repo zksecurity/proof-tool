@@ -176,6 +176,7 @@ func parseRehearsalInit(args []string) (RehearsalInitOptions, error) {
 	fs.StringVar(&options.CreatedAt, "created-at", "", "ceremony creation timestamp in RFC3339")
 	fs.StringVar(&options.OutDir, "out-dir", "", "fresh rehearsal work directory")
 	fs.Uint64Var(&options.BeaconLeadSeconds, "beacon-lead-seconds", rehearsalBeaconLeadSeconds, "non-production witness window for this rehearsal")
+	fs.BoolVar(&options.DisableOptionalAssurance, "disable-optional-assurance", false, "sign explicit zero witness, mirror, and ceremony-audit requirements (rehearsal only)")
 	fs.Var(&allowedBinaries, "allowed-binary", "additional exact mpc-ceremony binary to sign into the platform allowlist (repeatable)")
 	if err := parseFlags(fs, args); err != nil {
 		return options, err
@@ -1329,9 +1330,6 @@ func validateReplayOptions(replay ReplayOptions) error {
 }
 
 func validateAuditArtifacts(reports, signatures []string) error {
-	if len(reports) < 1 {
-		return errors.New("--audit-report must be supplied at least once")
-	}
 	if len(reports) > mpcceremony.MaxAuditors {
 		return fmt.Errorf("--audit-report supplied %d times, exceeds maximum %d recordable in the final transcript", len(reports), mpcceremony.MaxAuditors)
 	}

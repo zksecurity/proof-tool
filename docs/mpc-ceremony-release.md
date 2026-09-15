@@ -101,3 +101,20 @@ inspection, and records the tested hashes in the kit's `compatibility.json`.
 That downstream gate may reject a proposed pairing without invalidating either
 independent release. Updating Relay never requires changing proof-tool's CI,
 and releasing proof-tool never requires selecting a Relay commit.
+
+## Experimental optional controls
+
+The storage-first design introduces definition v3 with a signed
+`assurance_policy`. Witnesses, mirrors, ceremony audits, and external security
+audit signoffs each have an explicit minimum and may independently be zero.
+The policy is repeated and checked across checkpoints, operational evidence,
+the final transcript, and the production decision. Legacy schemas retain their
+previous minimums. See [Optional ceremony controls](single-observer-minimum.md).
+
+The same signed definition contains the beacon lead. Rehearsal and production
+both accept a positive configured value; 300 seconds and 24 hours respectively
+are tooling defaults, not verifier-enforced mode floors. A shorter production
+lead reduces the time available for public observation and review, so the
+coordinator-facing tool must warn before signing it. When production witnesses
+are enabled, close validation also reserves the fixed witness-observation
+window in addition to the configured lead.

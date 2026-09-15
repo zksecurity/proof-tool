@@ -44,6 +44,19 @@ func TestParseRehearsalInitIsNarrowAndExplicit(t *testing.T) {
 		t.Fatalf("custom beacon lead = %d, want 12", got)
 	}
 
+	disabled, err := parseInvocation([]string{
+		"rehearsal", "init",
+		"--created-at", "2026-08-20T06:00:00Z",
+		"--out-dir", "/secure/rehearsal",
+		"--disable-optional-assurance",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !disabled.Options.(RehearsalInitOptions).DisableOptionalAssurance {
+		t.Fatal("disable-optional-assurance flag was not preserved")
+	}
+
 	for name, args := range map[string][]string{
 		"missing creation time": {"rehearsal", "init", "--out-dir", "/secure/rehearsal"},
 		"missing output":        {"rehearsal", "init", "--created-at", "2026-08-20T06:00:00Z"},

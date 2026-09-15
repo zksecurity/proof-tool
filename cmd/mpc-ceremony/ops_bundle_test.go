@@ -37,6 +37,9 @@ func TestPrepareBundleCommandHelpAndRequiredInputs(t *testing.T) {
 	if _, err := parseInvocation([]string{"ops", "prepare-bundle", "--help"}); err == nil {
 		t.Fatal("expected help request")
 	}
+	if _, err := parseOpsPrepareBundle([]string{"--witness-quorum", "1"}); err == nil {
+		t.Fatal("operator-controlled witness quorum was accepted")
+	}
 }
 
 func TestBundleExportPreservesExistingEvidence(t *testing.T) {

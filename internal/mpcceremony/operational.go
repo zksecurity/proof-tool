@@ -812,8 +812,11 @@ func VerifyPublicWitnessQuorum(
 	receipts []SignedPublicWitness,
 	minimum int,
 ) error {
-	if minimum < 1 {
-		return errors.New("public witness quorum minimum must be at least 1")
+	if minimum < 0 {
+		return errors.New("public witness quorum minimum must not be negative")
+	}
+	if minimum == 0 && len(receipts) != 0 {
+		return errors.New("public witness receipts are forbidden when the signed quorum is zero")
 	}
 	if len(receipts) < minimum {
 		return fmt.Errorf("have %d public witness receipts, need %d", len(receipts), minimum)
@@ -863,6 +866,9 @@ func ValidatePublicWitnessReceipt(
 	closeBytes []byte,
 	receipt PublicWitnessReceipt,
 ) error {
+	if definition.Schema == DefinitionSchema && definition.AssurancePolicy != nil && definition.AssurancePolicy.PublicWitnessesPerPhase == 0 {
+		return errors.New("public witnessing is disabled by the signed assurance policy")
+	}
 	if err := validatePublicWitnessCloseBinding(definition, close); err != nil {
 		return err
 	}
@@ -1037,6 +1043,14 @@ func verifyEnrollmentBinding(definition CeremonyDefinition, definitionBytes []by
 	identity, role, index, ok := definitionRoleAt(definition, record.Identity.ID)
 	switch record.Role {
 	case EnrollmentPublicWitness, EnrollmentMirrorOperator:
+		if definition.Schema == DefinitionSchema && definition.AssurancePolicy != nil {
+			if record.Role == EnrollmentPublicWitness && definition.AssurancePolicy.PublicWitnessesPerPhase == 0 {
+				return errors.New("public-witness enrollment is disabled by the signed assurance policy")
+			}
+			if record.Role == EnrollmentMirrorOperator && definition.AssurancePolicy.MirrorsPerAcceptedHead == 0 {
+				return errors.New("mirror-operator enrollment is disabled by the signed assurance policy")
+			}
+		}
 		if ok || identityOverlapsDefinition(definition, record.Identity) {
 			return errors.New("external operational identity overlaps a ceremony actor")
 		}

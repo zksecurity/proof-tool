@@ -5,7 +5,14 @@ import (
 	"fmt"
 )
 
-const ProductionMinimumWitnessLeadSeconds uint32 = 24 * 60 * 60
+// RecommendedProductionBeaconLeadSeconds is the conservative production
+// default used by ceremony tooling. The exact value is ceremony policy: it is
+// signed into the definition and may be changed before initialization.
+const RecommendedProductionBeaconLeadSeconds uint32 = 24 * 60 * 60
+
+// ProductionMinimumWitnessLeadSeconds is retained for source compatibility.
+// It is a recommended default, not a validator-enforced floor.
+const ProductionMinimumWitnessLeadSeconds = RecommendedProductionBeaconLeadSeconds
 
 // ProductionWitnessObservationWindowSeconds is the observation time a
 // production close must reserve for public witnesses on top of the signed
@@ -23,21 +30,75 @@ const ProductionMinimumWitnessLeadSeconds uint32 = 24 * 60 * 60
 const ProductionWitnessObservationWindowSeconds uint32 = 60 * 60
 
 type CeremonyDefinition struct {
-	Schema          string          `json:"schema"`
-	CeremonyID      string          `json:"ceremony_id"`
-	Mode            string          `json:"mode"`
-	CreatedAt       string          `json:"created_at"`
-	SessionNonceHex string          `json:"session_nonce_hex"`
-	Circuit         CircuitBinding  `json:"circuit"`
-	Software        SoftwareBinding `json:"software"`
-	Coordinator     Identity        `json:"coordinator"`
-	ReleaseSigner   Identity        `json:"release_signer"`
-	Auditors        []Identity      `json:"auditors"`
-	Roster          []Participant   `json:"roster"`
-	Phase1Policy    PhasePolicy     `json:"phase1_policy"`
-	Phase2Policy    PhasePolicy     `json:"phase2_policy"`
-	BeaconPolicy    BeaconPolicy    `json:"beacon_policy"`
-	Phase1Genesis   ArtifactRef     `json:"phase1_genesis"`
+	Schema          string           `json:"schema"`
+	CeremonyID      string           `json:"ceremony_id"`
+	Mode            string           `json:"mode"`
+	CreatedAt       string           `json:"created_at"`
+	SessionNonceHex string           `json:"session_nonce_hex"`
+	Circuit         CircuitBinding   `json:"circuit"`
+	Software        SoftwareBinding  `json:"software"`
+	Coordinator     Identity         `json:"coordinator"`
+	ReleaseSigner   Identity         `json:"release_signer"`
+	Auditors        []Identity       `json:"auditors"`
+	Roster          []Participant    `json:"roster"`
+	Phase1Policy    PhasePolicy      `json:"phase1_policy"`
+	Phase2Policy    PhasePolicy      `json:"phase2_policy"`
+	BeaconPolicy    BeaconPolicy     `json:"beacon_policy"`
+	AssurancePolicy *AssurancePolicy `json:"assurance_policy,omitempty"`
+	Phase1Genesis   ArtifactRef      `json:"phase1_genesis"`
+}
+
+// AssurancePolicy is the signed, ceremony-wide authority for optional
+// operational observers and reviews. A zero explicitly disables that control;
+// omission is never interpreted as zero in definition v3.
+type AssurancePolicy struct {
+	PublicWitnessesPerPhase       uint8 `json:"public_witnesses_per_phase"`
+	MirrorsPerAcceptedHead        uint8 `json:"mirrors_per_accepted_head"`
+	PassingCeremonyAudits         uint8 `json:"passing_ceremony_audits"`
+	ExternalSecurityAuditSignoffs uint8 `json:"external_security_audit_signoffs"`
+}
+
+func (p AssurancePolicy) Validate(mode string, auditorCount int) error {
+	if p.PublicWitnessesPerPhase > MaxAuditors {
+		return fmt.Errorf("public_witnesses_per_phase exceeds maximum %d", MaxAuditors)
+	}
+	if p.MirrorsPerAcceptedHead > MaxAuditors {
+		return fmt.Errorf("mirrors_per_accepted_head exceeds maximum %d", MaxAuditors)
+	}
+	if int(p.PassingCeremonyAudits) > auditorCount {
+		return fmt.Errorf("passing_ceremony_audits %d exceeds auditor roster size %d", p.PassingCeremonyAudits, auditorCount)
+	}
+	if p.PassingCeremonyAudits == 0 && auditorCount != 0 {
+		return errors.New("auditor roster must be empty when passing_ceremony_audits is zero")
+	}
+	if p.ExternalSecurityAuditSignoffs > MaxAuditors {
+		return fmt.Errorf("external_security_audit_signoffs exceeds maximum %d", MaxAuditors)
+	}
+	if mode == ModeRehearsal && p.ExternalSecurityAuditSignoffs != 0 {
+		return errors.New("rehearsal ceremonies must set external_security_audit_signoffs to zero")
+	}
+	return nil
+}
+
+func defaultAssurancePolicy(mode string) AssurancePolicy {
+	external := uint8(1)
+	if mode == ModeRehearsal {
+		external = 0
+	}
+	return AssurancePolicy{
+		PublicWitnessesPerPhase:       1,
+		MirrorsPerAcceptedHead:        1,
+		PassingCeremonyAudits:         1,
+		ExternalSecurityAuditSignoffs: external,
+	}
+}
+
+func cloneAssurancePolicy(policy *AssurancePolicy) *AssurancePolicy {
+	if policy == nil {
+		return nil
+	}
+	value := *policy
+	return &value
 }
 
 type DefinitionOptions struct {
@@ -53,6 +114,7 @@ type DefinitionOptions struct {
 	Phase1Policy    PhasePolicy
 	Phase2Policy    PhasePolicy
 	BeaconPolicy    BeaconPolicy
+	AssurancePolicy *AssurancePolicy
 	Phase1Genesis   ArtifactRef
 }
 
@@ -60,6 +122,11 @@ func NewCeremonyDefinition(options DefinitionOptions) (CeremonyDefinition, error
 	software := options.Software
 	if len(software.Binaries) == 0 {
 		software.Binaries = []SoftwareBinary{software.primaryBinary()}
+	}
+	assurance := cloneAssurancePolicy(options.AssurancePolicy)
+	if assurance == nil {
+		value := defaultAssurancePolicy(options.Mode)
+		assurance = &value
 	}
 	definition := CeremonyDefinition{
 		Schema:          DefinitionSchema,
@@ -70,11 +137,12 @@ func NewCeremonyDefinition(options DefinitionOptions) (CeremonyDefinition, error
 		Software:        software,
 		Coordinator:     options.Coordinator,
 		ReleaseSigner:   options.ReleaseSigner,
-		Auditors:        append([]Identity(nil), options.Auditors...),
+		Auditors:        append([]Identity{}, options.Auditors...),
 		Roster:          append([]Participant(nil), options.Roster...),
 		Phase1Policy:    clonePhasePolicy(options.Phase1Policy),
 		Phase2Policy:    clonePhasePolicy(options.Phase2Policy),
 		BeaconPolicy:    options.BeaconPolicy,
+		AssurancePolicy: assurance,
 		Phase1Genesis:   options.Phase1Genesis,
 	}
 	id, err := ComputeCeremonyID(definition)
@@ -93,6 +161,15 @@ func NewCeremonyDefinition(options DefinitionOptions) (CeremonyDefinition, error
 // compilation from metadata construction.
 func FinalizeCeremonyDefinition(definition CeremonyDefinition) (CeremonyDefinition, error) {
 	definition.Schema = DefinitionSchema
+	if definition.Auditors == nil {
+		definition.Auditors = []Identity{}
+	}
+	if definition.AssurancePolicy == nil {
+		value := defaultAssurancePolicy(definition.Mode)
+		definition.AssurancePolicy = &value
+	} else {
+		definition.AssurancePolicy = cloneAssurancePolicy(definition.AssurancePolicy)
+	}
 	if len(definition.Software.Binaries) == 0 {
 		definition.Software.Binaries = []SoftwareBinary{definition.Software.primaryBinary()}
 	}
@@ -113,9 +190,11 @@ func ComputeCeremonyID(definition CeremonyDefinition) (string, error) {
 	if err := definition.validate(false); err != nil {
 		return "", err
 	}
-	domain := "proof-tool/mpc-ceremony/root/v2"
+	domain := "proof-tool/mpc-ceremony/root/v3"
 	if definition.Schema == DefinitionSchemaV1 {
 		domain = "proof-tool/mpc-ceremony/root/v1"
+	} else if definition.Schema == DefinitionSchemaV2 {
+		domain = "proof-tool/mpc-ceremony/root/v2"
 	}
 	return canonicalHash(domain, definition)
 }
@@ -137,14 +216,18 @@ func (d CeremonyDefinition) Validate() error {
 func (d CeremonyDefinition) validate(requireID bool) error {
 	switch d.Schema {
 	case DefinitionSchema:
+	case DefinitionSchemaV2:
+		if d.AssurancePolicy != nil {
+			return errors.New("definition v2 must not contain v3-only assurance_policy")
+		}
 	case DefinitionSchemaV1:
-		if len(d.Software.Binaries) != 0 || d.Software.GoARM64 != "" {
-			return errors.New("definition v1 must not contain v2-only fields")
+		if len(d.Software.Binaries) != 0 || d.Software.GoARM64 != "" || d.AssurancePolicy != nil {
+			return errors.New("definition v1 must not contain newer-schema fields")
 		}
 	default:
 		return fmt.Errorf(
-			"definition schema %q, want %q or %q",
-			d.Schema, DefinitionSchemaV1, DefinitionSchema,
+			"definition schema %q, want %q, %q or %q",
+			d.Schema, DefinitionSchemaV1, DefinitionSchemaV2, DefinitionSchema,
 		)
 	}
 	if requireID {
@@ -207,8 +290,8 @@ func (d CeremonyDefinition) validate(requireID bool) error {
 	if err := d.Software.Validate(); err != nil {
 		return fmt.Errorf("software: %w", err)
 	}
-	if d.Schema == DefinitionSchema && len(d.Software.Binaries) == 0 {
-		return errors.New("definition v2 requires at least one allowed software binary")
+	if (d.Schema == DefinitionSchema || d.Schema == DefinitionSchemaV2) && len(d.Software.Binaries) == 0 {
+		return errors.New("definition v2 or v3 requires at least one allowed software binary")
 	}
 	if d.Mode == ModeProduction {
 		for index, binary := range d.Software.AllowedBinaries() {
@@ -236,8 +319,8 @@ func (d CeremonyDefinition) validate(requireID bool) error {
 	if d.ReleaseSigner.ID == d.Coordinator.ID || d.ReleaseSigner.KeyID == d.Coordinator.KeyID {
 		return errors.New("release signer must be distinct from coordinator")
 	}
-	if len(d.Auditors) < 1 {
-		return errors.New("at least one independent auditor is required")
+	if d.Schema == DefinitionSchema && d.Auditors == nil {
+		return errors.New("definition v3 requires an explicit auditors array; use [] when audits are disabled")
 	}
 	if len(d.Auditors) > MaxAuditors {
 		return fmt.Errorf("auditors exceed maximum %d recordable in the final transcript", MaxAuditors)
@@ -274,6 +357,16 @@ func (d CeremonyDefinition) validate(requireID bool) error {
 		keyIDs[auditor.KeyID] = "auditor"
 		publicKeyFingerprints[auditor.PublicKeyFingerprint] = "auditor"
 	}
+	if d.Schema == DefinitionSchema {
+		if d.AssurancePolicy == nil {
+			return errors.New("definition v3 requires assurance_policy; omission does not disable controls")
+		}
+		if err := d.AssurancePolicy.Validate(d.Mode, len(d.Auditors)); err != nil {
+			return fmt.Errorf("assurance_policy: %w", err)
+		}
+	} else if len(d.Auditors) < 1 {
+		return errors.New("legacy definitions require at least one independent auditor")
+	}
 	if len(d.Roster) == 0 || len(d.Roster) > MaxParticipants {
 		return fmt.Errorf("roster must contain between 1 and %d participants", MaxParticipants)
 	}
@@ -308,13 +401,6 @@ func (d CeremonyDefinition) validate(requireID bool) error {
 		return fmt.Errorf("phase2_policy: %w", err)
 	}
 	if d.Mode == ModeProduction {
-		if d.BeaconPolicy.MinimumWitnessLeadSeconds < ProductionMinimumWitnessLeadSeconds {
-			return fmt.Errorf(
-				"production beacon minimum_witness_lead_seconds %d is below required %d",
-				d.BeaconPolicy.MinimumWitnessLeadSeconds,
-				ProductionMinimumWitnessLeadSeconds,
-			)
-		}
 		if len(d.Roster) < 2 {
 			return errors.New("production ceremony requires at least two distinct roster participants")
 		}

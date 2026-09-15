@@ -219,15 +219,21 @@ func build(
 	if err != nil {
 		return nil, fmt.Errorf("phase2: %w", err)
 	}
+	bundleSchema := mpcceremony.OperationalEvidenceBundleSchema
+	if definition.Schema != mpcceremony.DefinitionSchema {
+		bundleSchema = mpcceremony.OperationalEvidenceBundleSchemaV2
+	}
 	bundle := mpcceremony.OperationalEvidenceBundle{
-		Schema:           mpcceremony.OperationalEvidenceBundleSchema,
-		CeremonyID:       definition.CeremonyID,
-		Enrollments:      enrollments,
-		Phase1:           phase1.evidence,
-		Phase2:           phase2.evidence,
-		CoordinatorID:    definition.Coordinator.ID,
-		CoordinatorKeyID: definition.Coordinator.KeyID,
-		AssembledAt:      assembledAt,
+		Schema:            bundleSchema,
+		CeremonyID:        definition.CeremonyID,
+		AssurancePolicy:   cloneRehearsalAssurance(definition),
+		Enrollments:       enrollments,
+		GovernanceRecords: []mpcceremony.SignedArtifactRefs{},
+		Phase1:            phase1.evidence,
+		Phase2:            phase2.evidence,
+		CoordinatorID:     definition.Coordinator.ID,
+		CoordinatorKeyID:  definition.Coordinator.KeyID,
+		AssembledAt:       assembledAt,
 	}
 	bundleBytes, bundleSignature, err := mpcceremony.SignRecord(
 		bundle,
@@ -548,8 +554,11 @@ func buildPhase(
 		slices.SortFunc(mirrorFiles, func(a, b mpcceremony.ArtifactRef) int {
 			return strings.Compare(a.Name, b.Name)
 		})
-		mirrorPairs := make([]mpcceremony.SignedArtifactRefs, 0, 2)
-		for _, mirrorID := range []string{"mirror-01", "mirror-02"} {
+		assurance := rehearsalAssurance(definition)
+		mirrorCount := int(assurance.MirrorsPerAcceptedHead)
+		mirrorPairs := make([]mpcceremony.SignedArtifactRefs, 0, mirrorCount)
+		for mirrorIndex := 1; mirrorIndex <= mirrorCount; mirrorIndex++ {
+			mirrorID := fmt.Sprintf("mirror-%02d", mirrorIndex)
 			mirror := signers[mirrorID]
 			record, err := mpcceremony.NewImmutableMirrorReceipt(
 				definition.CeremonyID,
@@ -591,12 +600,15 @@ func buildPhase(
 		}
 	}
 
-	witnessPairs := make([]mpcceremony.SignedArtifactRefs, 0, 2)
+	assurance := rehearsalAssurance(definition)
+	witnessCount := int(assurance.PublicWitnessesPerPhase)
+	witnessPairs := make([]mpcceremony.SignedArtifactRefs, 0, witnessCount)
 	closedAt, err := parseTimestamp("closed_at", closeRecord.ClosedAt)
 	if err != nil {
 		return phaseResult{}, err
 	}
-	for _, witnessID := range []string{"witness-01", "witness-02"} {
+	for witnessIndex := 1; witnessIndex <= witnessCount; witnessIndex++ {
+		witnessID := fmt.Sprintf("witness-%02d", witnessIndex)
 		witness := signers[witnessID]
 		record, err := mpcceremony.NewPublicWitnessReceipt(
 			definition,
@@ -693,7 +705,7 @@ func buildPhase(
 				Signature: mpcceremony.ArtifactRef{Name: closeSignatureName, Digest: mpcceremony.NewDigest(closeSignatureBytes)},
 			},
 			AcceptedHeads:            heads,
-			PublicWitnessQuorum:      2,
+			PublicWitnessQuorum:      assurance.PublicWitnessesPerPhase,
 			PublicWitnessReceipts:    witnessPairs,
 			MultiRelayBeaconEvidence: beaconPair,
 			RawBeaconResponses:       rawRefs,
@@ -740,7 +752,7 @@ func loadSigners(
 			return nil, err
 		}
 	}
-	for index, external := range []struct {
+	externals := []struct {
 		id, display string
 		role        mpcceremony.EnrollmentRole
 	}{
@@ -748,7 +760,17 @@ func loadSigners(
 		{"witness-02", "Local Rehearsal Public Witness 02", mpcceremony.EnrollmentPublicWitness},
 		{"mirror-01", "Local Rehearsal Mirror Operator 01", mpcceremony.EnrollmentMirrorOperator},
 		{"mirror-02", "Local Rehearsal Mirror Operator 02", mpcceremony.EnrollmentMirrorOperator},
-	} {
+	}
+	assurance := rehearsalAssurance(definition)
+	witnessCount := int(assurance.PublicWitnessesPerPhase)
+	mirrorCount := int(assurance.MirrorsPerAcceptedHead)
+	for index, external := range externals {
+		if external.role == mpcceremony.EnrollmentPublicWitness && index >= witnessCount {
+			continue
+		}
+		if external.role == mpcceremony.EnrollmentMirrorOperator && index-2 >= mirrorCount {
+			continue
+		}
 		key, publicKey, err := keybundle.LoadExistingPrivateKey(
 			filepath.Join(keysDir, external.id+".ed25519.private.hex"),
 		)
@@ -773,6 +795,28 @@ func loadSigners(
 		}
 	}
 	return result, nil
+}
+
+func rehearsalAssurance(definition mpcceremony.CeremonyDefinition) mpcceremony.AssurancePolicy {
+	if definition.Schema == mpcceremony.DefinitionSchema && definition.AssurancePolicy != nil {
+		return *definition.AssurancePolicy
+	}
+	// This helper historically produced two witness and two mirror records for
+	// legacy rehearsals. Preserve that stronger old behavior rather than
+	// interpreting an absent new field as zero.
+	return mpcceremony.AssurancePolicy{
+		PublicWitnessesPerPhase: 2,
+		MirrorsPerAcceptedHead:  2,
+		PassingCeremonyAudits:   1,
+	}
+}
+
+func cloneRehearsalAssurance(definition mpcceremony.CeremonyDefinition) *mpcceremony.AssurancePolicy {
+	if definition.Schema != mpcceremony.DefinitionSchema || definition.AssurancePolicy == nil {
+		return nil
+	}
+	value := *definition.AssurancePolicy
+	return &value
 }
 
 func loadRelayInputs(directory string) ([]relayInput, error) {

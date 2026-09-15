@@ -151,21 +151,28 @@ never generated automatically. Private key bytes are never printed.
 `,
 	"rehearsal": `Usage:
   mpc-ceremony rehearsal init --created-at RFC3339 --out-dir FRESH_DIR \
-    [--beacon-lead-seconds N] [--allowed-binary FILE ...]
+    [--beacon-lead-seconds N] [--allowed-binary FILE ...] \
+    [--disable-optional-assurance]
 
 Rehearsal commands create same-host test identities and must never be used as
 production enrollment evidence.
 `,
 	"rehearsal init": `Usage:
   mpc-ceremony rehearsal init --created-at RFC3339 --out-dir FRESH_DIR \
-    [--beacon-lead-seconds N] [--allowed-binary FILE ...]
+    [--beacon-lead-seconds N] [--allowed-binary FILE ...] \
+    [--disable-optional-assurance]
 
 Creates fresh same-host identities and canonical configuration for exactly
 three participants, then initializes a signed rehearsal-tiny-v1 ceremony. The
 output is a functional test fixture, not production or independence evidence.
-The witness window defaults to 300 seconds. --beacon-lead-seconds may shorten
-it to at least 12 seconds for automated tests; the chosen non-production value
-is signed into the rehearsal definition and cannot change production policy.
+The beacon lead defaults to 300 seconds. --beacon-lead-seconds may shorten it
+to at least 12 seconds for automated tests. The chosen value is signed into
+the rehearsal definition. Production ceremonies configure the same field in
+their policy JSON; production tooling should recommend 24 hours and clearly
+warn before signing a shorter policy. With production witnesses enabled, the
+close also reserves the fixed witness-observation window.
+--disable-optional-assurance creates an explicit zero-witness, zero-mirror,
+zero-ceremony-audit rehearsal while retaining future drand verification.
 `,
 	"inspect": inspectHelp + `
 Authenticated record projections are also available as subcommands:
@@ -515,16 +522,17 @@ Release authenticity is separate from MPC contribution identity.
 	"release sign": `Usage:
   mpc-ceremony release sign --ceremony FILE --ceremony-signature FILE \
     --coordinator-public-key-file KEY --candidate-bundle DIR \
-	    --audit-report FILE --audit-signature FILE \
+	    [--audit-report FILE --audit-signature FILE]... \
 	    --operational-evidence-root DIR \
 	    --operational-bundle DIR/operational/evidence-bundle.json \
 	    --operational-bundle-signature DIR/operational/evidence-bundle.sig \
 	    --release-signing-key KEY --signature-key-id ID \
     --released-at RFC3339_UTC --release-dir FRESH_DIR
 
-	Requires at least one enrolled auditor plus the coordinator-signed
-	Phase 1 and Phase 2 operational bundle. Each phase must contain a valid public
-	witness quorum and matching multi-relay beacon responses. The candidate is
+	Requires at least the signed minimum number of passing ceremony audits
+	assurance policy, plus the coordinator-signed Phase 1 and Phase 2 operational
+	bundle. Witness and mirror evidence likewise follows that signed policy;
+	multi-relay beacon evidence remains required. The candidate is
 	never mutated; all verified evidence is atomically published into a fresh
 	release directory.
 `,
@@ -548,7 +556,8 @@ entropy quality, erasure, public witnessing, mirrors, or attendance.
   mpc-ceremony decision prepare --ceremony FILE --ceremony-signature FILE \
     --coordinator-public-key-file KEY --draft FILE --out FRESH_FILE
 
-Strictly parses a proof-tool-mpc-production-decision-draft-v1 record, derives
+Strictly parses a production decision draft matching the authenticated
+ceremony schema, derives
 the release_id and decision_id, and checks ceremony, source, exact K=21
 circuit, and signer-role bindings. The fresh output is the only byte string
 the accountable roles should sign.
@@ -670,8 +679,8 @@ Run ops verify afterwards; receipts require --related-record and bundles require
 `,
 	"ops prepare-bundle": `Usage:
   mpc-ceremony ops prepare-bundle --ceremony FILE --ceremony-signature FILE \
-    --coordinator-public-key-file KEY --evidence-root PUBLIC_DIR --out-dir PUBLIC_DIR/operational \
-    [--witness-quorum 1]
+    --coordinator-public-key-file KEY --evidence-root PUBLIC_DIR \
+    --out-dir PUBLIC_DIR/operational
 
 Discovers bounded public JSON and signatures; never point it at private keys or
 credentials. Reports missing or conflicting evidence by phase and turn. Keep
@@ -679,8 +688,8 @@ original relative paths when collecting public records from their owners.
 The operational directory may exist; existing evidence is preserved. Bundle,
 signature and signing-request files must not already exist. Interrupted output
 is retained for inspection, never automatically overwritten.
-Set witness-quorum to your agreed minimum per phase (1-32), not a lower value
-chosen to fit the available receipts.
+Witness and mirror requirements come from the authenticated ceremony
+definition; the operator cannot weaken them to fit the available evidence.
 If complete, independently verifies all referenced evidence and exports an
 UNSIGNED canonical bundle and signing request. It does not invent records,
 backdate observations, or sign for other roles. Release still requires the
