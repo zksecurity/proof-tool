@@ -206,9 +206,13 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 
 	ceremonyRoot := filepath.Join(outputRoot, "ceremony")
 	phaseMinimum := uint8(2)
+	phase2Minimum := uint8(2)
 	checkpointPhase2One := os.Getenv("MPC_WORKFLOW_PHASE2_ONE") == "1"
 	if os.Getenv("MPC_WORKFLOW_PHASE1_ONE") == "1" || checkpointPhase2One {
 		phaseMinimum = 1
+	}
+	if checkpointPhase2One {
+		phase2Minimum = 1
 	}
 	auditors := []mpcceremony.Identity{}
 	assurance := &mpcceremony.AssurancePolicy{}
@@ -240,7 +244,7 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 			},
 			Phase2Policy: mpcceremony.PhasePolicy{
 				Participants: []string{"participant-01", "participant-02"},
-				Minimum:      2,
+				Minimum:      phase2Minimum,
 			},
 			BeaconPolicy: mpcceremony.BeaconPolicy{
 				Provider:                  mpcceremony.BeaconProviderDrand,
@@ -699,21 +703,55 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	if err != nil {
 		return fmt.Errorf("Phase 2 participant 1: %w", err)
 	}
-	if checkpointPhase2One {
-		return nil
+	if !checkpointPhase2One {
+		phase2Paths, err = contributeAndAccept(
+			mpcceremony.Phase2,
+			2,
+			phase2Paths,
+			phase1Seal.SealPath,
+			phase1Seal.SignaturePath,
+			"2023-08-23T15:11:30.4Z",
+			"2023-08-23T15:11:30.5Z",
+			"2023-08-23T15:11:30.6Z",
+		)
+		if err != nil {
+			return fmt.Errorf("Phase 2 participant 2: %w", err)
+		}
 	}
-	phase2Paths, err = contributeAndAccept(
-		mpcceremony.Phase2,
-		2,
-		phase2Paths,
-		phase1Seal.SealPath,
-		phase1Seal.SignaturePath,
-		"2023-08-23T15:11:30.4Z",
-		"2023-08-23T15:11:30.5Z",
-		"2023-08-23T15:11:30.6Z",
-	)
-	if err != nil {
-		return fmt.Errorf("Phase 2 participant 2: %w", err)
+	if checkpointPhase2One {
+		commons, _, err := mpcceremony.ReadCommonsFile(
+			phase1Seal.CommonsPath,
+			mpcceremony.CommonsShape{DomainN: circuit.Binding.DomainSize},
+		)
+		if err != nil {
+			return fmt.Errorf("read sealed commons for checkpoint Phase 2 closure: %w", err)
+		}
+		phase2Chain, err := mpcceremony.LoadReplayPhase2Files(trusted, circuit, commons, phase1Seal.Seal, phase2Paths)
+		if err != nil {
+			return fmt.Errorf("replay checkpoint Phase 2 before closure: %w", err)
+		}
+		phase2Close, err := writeHistoricalClose(mpcceremony.Phase2, phase2Chain, 43, "2023-08-23T15:11:30.7Z")
+		if err != nil {
+			return fmt.Errorf("close checkpoint Phase 2: %w", err)
+		}
+		round43Path := filepath.Join(outputRoot, "quicknet-round-43.json")
+		if err := os.WriteFile(round43Path, []byte(quicknetRound43), 0o600); err != nil {
+			return err
+		}
+		if err := runTestCommand("phase2", "beacon",
+			"--ceremony", trust.DefinitionPath,
+			"--ceremony-signature", trust.DefinitionSignaturePath,
+			"--coordinator-public-key-file", trust.CoordinatorPublicKeyPath,
+			"--closure", phase2Close.ClosePath,
+			"--closure-signature", phase2Close.SignaturePath,
+			"--raw-response", round43Path,
+			"--published-at", "2023-08-23T15:11:33Z",
+			"--coordinator-signing-key", coordinatorKeyPath,
+			"--transcript-dir", ceremonyRoot,
+		); err != nil {
+			return fmt.Errorf("record checkpoint Phase 2 beacon: %w", err)
+		}
+		return nil
 	}
 	_, err = mpcceremony.ClosePhaseFiles(mpcceremony.ClosePhaseFilesOptions{
 		Trust:                     trust,

@@ -139,3 +139,7 @@ the deterministic zero-contribution Phase 2 tree at
 Phase 2 participant checkpoints then use the same ordered
 outbound-handoff, signed-receipt, and accepted-candidate transitions as Phase 1.
 Each accepted candidate is fully replayed against the sealed Phase 1 commons.
+After the configured minimum is met, the graph accepts the canonical signed
+Phase 2 closure and then the canonical signed beacon record plus its raw drand
+response. Both edges preserve the exact Phase 1 seal, Phase 2 head, and all
+submission results; stored verification replays that complete ancestry.

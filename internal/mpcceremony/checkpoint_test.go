@@ -621,6 +621,67 @@ func TestCheckpointPhase2ParticipantTurnSequence(t *testing.T) {
 			}
 		}
 	}
+
+	closureRefs := checkpointSigned("phase2/closure/record")
+	closed := cloneCheckpoint(t, candidate)
+	closed.Sequence++
+	closedParent := checkpointReference(t, candidate, "p2-candidate")
+	closed.PreviousCheckpoint = &closedParent
+	closed.Transition = CheckpointTransition{Kind: CheckpointPhase2Closed, Phase: Phase2, Record: &closureRefs}
+	closed.Phase2Closure = &closureRefs
+	closed.AcceptedArtifacts = appendCheckpointArtifacts(closed.AcceptedArtifacts, closureRefs.Record, closureRefs.Signature)
+	if err := ValidateCheckpointTransition(candidate, closed); err != nil {
+		t.Fatalf("valid phase2 closure: %v", err)
+	}
+
+	phase2BeaconRefs := checkpointSigned("phase2/beacon/record")
+	phase2Raw := checkpointArtifact("phase2/beacon/raw-response.bin", "phase2 raw")
+	beaconed := cloneCheckpoint(t, closed)
+	beaconed.Sequence++
+	beaconParent := checkpointReference(t, closed, "p2-closed")
+	beaconed.PreviousCheckpoint = &beaconParent
+	beaconed.Transition = CheckpointTransition{Kind: CheckpointPhase2BeaconRecorded, Phase: Phase2, Record: &phase2BeaconRefs, Evidence: []ArtifactRef{phase2Raw}}
+	beaconed.Phase2Beacon = &phase2BeaconRefs
+	beaconed.AcceptedArtifacts = appendCheckpointArtifacts(beaconed.AcceptedArtifacts, phase2BeaconRefs.Record, phase2BeaconRefs.Signature, phase2Raw)
+	if err := ValidateCheckpointTransition(closed, beaconed); err != nil {
+		t.Fatalf("valid phase2 beacon: %v", err)
+	}
+
+	allocated := cloneCheckpoint(t, candidate)
+	allocated.Submissions[phase2CandidateIndex].Status = CheckpointSubmissionAllocated
+	if err := ValidateCheckpointTransition(allocated, closed); err == nil {
+		t.Fatal("phase2 closed with an allocated submission")
+	}
+	repeatedClose := cloneCheckpoint(t, closed)
+	repeatedClose.Sequence++
+	repeatedCloseParent := checkpointReference(t, closed, "p2-closed-again")
+	repeatedClose.PreviousCheckpoint = &repeatedCloseParent
+	if err := ValidateCheckpointTransition(closed, repeatedClose); err == nil {
+		t.Fatal("phase2 closed twice")
+	}
+	withoutClosure := cloneCheckpoint(t, beaconed)
+	withoutClosure.Phase2Closure = nil
+	if err := ValidateCheckpointTransition(candidate, withoutClosure); err == nil {
+		t.Fatal("phase2 beacon accepted without closure")
+	}
+	repeatedBeacon := cloneCheckpoint(t, beaconed)
+	repeatedBeacon.Sequence++
+	repeatedBeaconParent := checkpointReference(t, beaconed, "p2-beacon-again")
+	repeatedBeacon.PreviousCheckpoint = &repeatedBeaconParent
+	if err := ValidateCheckpointTransition(beaconed, repeatedBeacon); err == nil {
+		t.Fatal("phase2 beacon accepted twice")
+	}
+	changedPhase1 := cloneCheckpoint(t, closed)
+	replacement := closed.Definition
+	changedPhase1.Phase1Seal = &replacement
+	if err := ValidateCheckpointTransition(candidate, changedPhase1); err == nil {
+		t.Fatal("phase2 closure accepted changed phase1 lifecycle")
+	}
+	unexpected := cloneCheckpoint(t, beaconed)
+	unexpected.AcceptedArtifacts = appendCheckpointArtifacts(unexpected.AcceptedArtifacts, checkpointArtifact("phase2/unexpected.bin", "unexpected"))
+	if err := ValidateCheckpointTransition(closed, unexpected); err == nil {
+		t.Fatal("phase2 beacon accepted an unexpected artifact")
+	}
 }
 
 func TestCheckpointOldSchemasRejectPhase2TurnTransition(t *testing.T) {

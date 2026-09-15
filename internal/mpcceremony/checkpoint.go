@@ -76,6 +76,8 @@ const (
 	CheckpointPhase2OutboundPublished CheckpointTransitionKind = "phase2-outbound-published"
 	CheckpointPhase2ReceiptAccepted   CheckpointTransitionKind = "phase2-receipt-accepted"
 	CheckpointPhase2CandidateAccepted CheckpointTransitionKind = "phase2-candidate-accepted"
+	CheckpointPhase2Closed            CheckpointTransitionKind = "phase2-closed"
+	CheckpointPhase2BeaconRecorded    CheckpointTransitionKind = "phase2-beacon-recorded"
 )
 
 type CheckpointSubmissionKind string
@@ -219,20 +221,28 @@ func (t CheckpointTransition) Validate() error {
 		}
 		return nil
 	}
-	if t.Kind == CheckpointPhase1Closed {
-		if t.Phase != Phase1 || t.Index != 0 || t.ParticipantID != "" || t.AttemptID != "" ||
+	if t.Kind == CheckpointPhase1Closed || t.Kind == CheckpointPhase2Closed {
+		expectedPhase := Phase1
+		if t.Kind == CheckpointPhase2Closed {
+			expectedPhase = Phase2
+		}
+		if t.Phase != expectedPhase || t.Index != 0 || t.ParticipantID != "" || t.AttemptID != "" ||
 			t.NextAttemptID != "" || t.Record == nil || t.Acknowledgement != nil || len(t.Evidence) != 0 {
-			return errors.New("phase1 closure transition must contain only the signed closure record")
+			return fmt.Errorf("%s closure transition must contain only the signed closure record", expectedPhase)
 		}
 		if err := t.Record.Validate(); err != nil {
 			return fmt.Errorf("transition record: %w", err)
 		}
 		return nil
 	}
-	if t.Kind == CheckpointPhase1BeaconRecorded {
-		if t.Phase != Phase1 || t.Index != 0 || t.ParticipantID != "" || t.AttemptID != "" ||
+	if t.Kind == CheckpointPhase1BeaconRecorded || t.Kind == CheckpointPhase2BeaconRecorded {
+		expectedPhase := Phase1
+		if t.Kind == CheckpointPhase2BeaconRecorded {
+			expectedPhase = Phase2
+		}
+		if t.Phase != expectedPhase || t.Index != 0 || t.ParticipantID != "" || t.AttemptID != "" ||
 			t.NextAttemptID != "" || t.Record == nil || t.Acknowledgement != nil || len(t.Evidence) != 1 {
-			return errors.New("phase1 beacon transition requires only the signed beacon record and one raw response")
+			return fmt.Errorf("%s beacon transition requires only the signed beacon record and one raw response", expectedPhase)
 		}
 		if err := t.Record.Validate(); err != nil {
 			return fmt.Errorf("transition record: %w", err)
@@ -360,6 +370,8 @@ type Checkpoint struct {
 	Phase1Beacon       *SignedArtifactRefs        `json:"phase1_beacon,omitempty"`
 	Phase1Seal         *SignedArtifactRefs        `json:"phase1_seal,omitempty"`
 	Phase2             *CheckpointPhaseState      `json:"phase2,omitempty"`
+	Phase2Closure      *SignedArtifactRefs        `json:"phase2_closure,omitempty"`
+	Phase2Beacon       *SignedArtifactRefs        `json:"phase2_beacon,omitempty"`
 	AcceptedArtifacts  []ArtifactRef              `json:"accepted_artifacts"`
 	Submissions        []CheckpointSubmissionSlot `json:"submissions"`
 }
@@ -463,10 +475,32 @@ func (c Checkpoint) Validate() error {
 			}
 		}
 	}
+	if c.Phase2Closure != nil {
+		if c.Phase2 == nil {
+			return errors.New("phase2 closure requires phase2 state")
+		}
+		if err := c.Phase2Closure.Validate(); err != nil {
+			return fmt.Errorf("phase2_closure: %w", err)
+		}
+		if !slices.Contains(c.AcceptedArtifacts, c.Phase2Closure.Record) || !slices.Contains(c.AcceptedArtifacts, c.Phase2Closure.Signature) {
+			return errors.New("phase2 closure must be present in accepted_artifacts")
+		}
+	}
+	if c.Phase2Beacon != nil {
+		if c.Phase2Closure == nil {
+			return errors.New("phase2 beacon requires a committed closure")
+		}
+		if err := c.Phase2Beacon.Validate(); err != nil {
+			return fmt.Errorf("phase2_beacon: %w", err)
+		}
+		if !slices.Contains(c.AcceptedArtifacts, c.Phase2Beacon.Record) || !slices.Contains(c.AcceptedArtifacts, c.Phase2Beacon.Signature) {
+			return errors.New("phase2 beacon must be present in accepted_artifacts")
+		}
+	}
 	if c.Transition.Phase == Phase2 && c.Phase2 == nil {
 		return errors.New("phase2 transition requires phase2 state")
 	}
-	if c.Sequence == 0 && (c.Phase1Closure != nil || c.Phase1Beacon != nil || c.Phase1Seal != nil || c.Phase2 != nil) {
+	if c.Sequence == 0 && (c.Phase1Closure != nil || c.Phase1Beacon != nil || c.Phase1Seal != nil || c.Phase2 != nil || c.Phase2Closure != nil || c.Phase2Beacon != nil) {
 		return errors.New("initial checkpoint must not contain later lifecycle state")
 	}
 	if c.Sequence == 0 && (c.Phase1.AcceptedCount != 0 || len(c.Submissions) != 0) {
@@ -534,7 +568,7 @@ func (c Checkpoint) Validate() error {
 }
 
 func (c Checkpoint) hasPhase2Semantics() bool {
-	if c.Phase2 != nil || c.Transition.Phase == Phase2 {
+	if c.Phase2 != nil || c.Phase2Closure != nil || c.Phase2Beacon != nil || c.Transition.Phase == Phase2 {
 		return true
 	}
 	return slices.ContainsFunc(c.Submissions, func(slot CheckpointSubmissionSlot) bool { return slot.Phase == Phase2 })
@@ -666,6 +700,10 @@ func ValidateCheckpointTransition(previous, next Checkpoint) error {
 		return validateReceiptTransition(previous, next, Phase2)
 	case CheckpointPhase2CandidateAccepted:
 		return validateCandidateTransition(previous, next, Phase2)
+	case CheckpointPhase2Closed:
+		return validatePhase2ClosedTransition(previous, next)
+	case CheckpointPhase2BeaconRecorded:
+		return validatePhase2BeaconTransition(previous, next)
 	case CheckpointPhase1Closed:
 		return validatePhase1ClosedTransition(previous, next)
 	case CheckpointPhase1BeaconRecorded:
@@ -677,6 +715,52 @@ func ValidateCheckpointTransition(previous, next Checkpoint) error {
 	default:
 		return fmt.Errorf("transition %q cannot follow another checkpoint", next.Transition.Kind)
 	}
+}
+
+func phase1LifecyclePreserved(previous, next Checkpoint) bool {
+	return samePhaseState(previous.Phase1, next.Phase1) &&
+		reflect.DeepEqual(previous.Phase1Closure, next.Phase1Closure) &&
+		reflect.DeepEqual(previous.Phase1Beacon, next.Phase1Beacon) &&
+		reflect.DeepEqual(previous.Phase1Seal, next.Phase1Seal)
+}
+
+func validatePhase2ClosedTransition(previous, next Checkpoint) error {
+	if previous.Phase2 == nil || next.Phase2 == nil || previous.Phase2Closure != nil || next.Phase2Closure == nil {
+		return errors.New("phase2 closure must be added exactly once after phase2 initialization")
+	}
+	if !phase1LifecyclePreserved(previous, next) || !samePhaseState(*previous.Phase2, *next.Phase2) || !slotsEqual(previous.Submissions, next.Submissions) {
+		return errors.New("phase2 closure must preserve both phase heads and submission slots")
+	}
+	if hasAllocatedSubmission(previous.Submissions) {
+		return errors.New("phase2 cannot close while a submission attempt is still allocated")
+	}
+	if next.Transition.Record == nil || *next.Transition.Record != *next.Phase2Closure {
+		return errors.New("phase2 closure transition must name the committed closure")
+	}
+	if !exactArtifactDelta(previous.AcceptedArtifacts, next.AcceptedArtifacts, signedArtifacts(next.Phase2Closure)...) {
+		return errors.New("phase2 closure accepted an unexpected artifact set")
+	}
+	return nil
+}
+
+func validatePhase2BeaconTransition(previous, next Checkpoint) error {
+	if previous.Phase2 == nil || next.Phase2 == nil || previous.Phase2Closure == nil || next.Phase2Closure == nil || *previous.Phase2Closure != *next.Phase2Closure {
+		return errors.New("phase2 beacon must preserve an existing exact closure")
+	}
+	if previous.Phase2Beacon != nil || next.Phase2Beacon == nil {
+		return errors.New("phase2 beacon must be added exactly once")
+	}
+	if !phase1LifecyclePreserved(previous, next) || !samePhaseState(*previous.Phase2, *next.Phase2) || !slotsEqual(previous.Submissions, next.Submissions) {
+		return errors.New("phase2 beacon must preserve both phase heads and submission slots")
+	}
+	if next.Transition.Record == nil || *next.Transition.Record != *next.Phase2Beacon {
+		return errors.New("phase2 beacon transition must name the committed beacon")
+	}
+	expected := append(signedArtifacts(next.Phase2Beacon), next.Transition.Evidence...)
+	if !exactArtifactDelta(previous.AcceptedArtifacts, next.AcceptedArtifacts, expected...) {
+		return errors.New("phase2 beacon accepted an unexpected artifact set")
+	}
+	return nil
 }
 
 func validatePhase2InitializedTransition(previous, next Checkpoint) error {
@@ -820,10 +904,7 @@ func otherPhaseStatePreserved(previous, next Checkpoint, phase Phase) bool {
 	if phase == Phase1 {
 		return reflect.DeepEqual(previous.Phase2, next.Phase2)
 	}
-	return samePhaseState(previous.Phase1, next.Phase1) &&
-		reflect.DeepEqual(previous.Phase1Closure, next.Phase1Closure) &&
-		reflect.DeepEqual(previous.Phase1Beacon, next.Phase1Beacon) &&
-		reflect.DeepEqual(previous.Phase1Seal, next.Phase1Seal)
+	return phase1LifecyclePreserved(previous, next)
 }
 
 func validateOutboundTransition(previous, next Checkpoint, phase Phase) error {
@@ -838,6 +919,9 @@ func validateOutboundTransition(previous, next Checkpoint, phase Phase) error {
 	}
 	if phase == Phase1 && (previous.Phase1Closure != nil || next.Phase1Closure != nil) {
 		return errors.New("phase1 turn cannot advance after closure")
+	}
+	if phase == Phase2 && (previous.Phase2Closure != nil || next.Phase2Closure != nil) {
+		return errors.New("phase2 turn cannot advance after closure")
 	}
 	if hasAllocatedSubmission(previous.Submissions) {
 		return errors.New("a new phase1 turn cannot open while another submission attempt is allocated")
@@ -871,6 +955,9 @@ func validateReceiptTransition(previous, next Checkpoint, phase Phase) error {
 	}
 	if phase == Phase1 && (previous.Phase1Closure != nil || next.Phase1Closure != nil) {
 		return errors.New("phase1 receipt cannot be accepted after closure")
+	}
+	if phase == Phase2 && (previous.Phase2Closure != nil || next.Phase2Closure != nil) {
+		return errors.New("phase2 receipt cannot be accepted after closure")
 	}
 	if !samePhaseState(*previousState, *nextState) || !otherPhaseStatePreserved(previous, next, phase) || len(next.Submissions) != len(previous.Submissions)+1 {
 		return errors.New("receipt acceptance must preserve the head and append one candidate slot")
@@ -922,6 +1009,9 @@ func validateCandidateTransition(previous, next Checkpoint, phase Phase) error {
 	}
 	if phase == Phase1 && (previous.Phase1Closure != nil || next.Phase1Closure != nil) {
 		return errors.New("phase1 candidate cannot be accepted after closure")
+	}
+	if phase == Phase2 && (previous.Phase2Closure != nil || next.Phase2Closure != nil) {
+		return errors.New("phase2 candidate cannot be accepted after closure")
 	}
 	if nextState.AcceptedCount != previousState.AcceptedCount+1 || nextState.AcceptedCount != t.Index ||
 		nextState.HeadRecordID == previousState.HeadRecordID || nextState.HeadPayload == previousState.HeadPayload ||

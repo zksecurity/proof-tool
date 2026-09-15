@@ -520,6 +520,60 @@ func TestCheckpointCommandFullLifecycleThroughPhase2Turn(t *testing.T) {
 	if verified.CheckpointEvidenceInspection == nil || !verified.CheckpointEvidenceInspection.FullyVerified || verified.CheckpointEvidenceInspection.Sequence != 10 {
 		t.Fatalf("cp10 stored verification = %#v", verified.CheckpointEvidenceInspection)
 	}
+	phase2Chain, _, err := mpcceremony.LoadSignedChainExact(trusted, mpcceremony.PhaseTranscriptPaths{
+		RootDir: fixture.root, ChainPath: phase2Chain1, ChainSignaturePath: phase2Chain1Signature,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	phase2Accepted := phase2Chain.Records[len(phase2Chain.Records)-1]
+	phase2ActiveArgs := checkpointActivePhaseArgs(
+		mpcceremony.Phase2,
+		phase2Chain1,
+		phase2Chain1Signature,
+		filepath.Join(fixture.root, filepath.FromSlash(phase2Accepted.OutputPayload.Name)),
+	)
+	phase2ClosureArgs := append(append([]string{}, fixture.trustArgs...),
+		"--artifact-root", fixture.root, "--relay-release-id", "role-images-test",
+		"--transition", string(mpcceremony.CheckpointPhase2Closed),
+		"--previous-checkpoint", cp10Path, "--previous-checkpoint-signature", cp10SignaturePath,
+		"--chain", chainPath, "--chain-signature", chainSignaturePath,
+		"--head-payload", filepath.Join(fixture.root, filepath.FromSlash(accepted.OutputPayload.Name)),
+		"--transition-record", filepath.Join(fixture.root, "phase2", "closure", "record.json"),
+		"--transition-record-signature", filepath.Join(fixture.root, "phase2", "closure", "record.sig"),
+	)
+	phase2ClosureArgs = append(phase2ClosureArgs, phase2ActiveArgs...)
+	cp11 := runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "prepare"}, phase2ClosureArgs...), "--out-dir", filepath.Join(fixture.root, "prepared", "cp11")))
+	cp11SignaturePath := filepath.Join(fixture.root, "state", "signed-cp11.sig")
+	runCheckpointFixtureCommand(t, fixture, append(append([]string{"--format", "json", "checkpoint", "sign"}, phase2ClosureArgs...),
+		"--checkpoint", cp11.Outputs["checkpoint"], "--signing-request", cp11.Outputs["signing_request"],
+		"--coordinator-signing-key", keyPath, "--out", cp11SignaturePath))
+	verified = runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "verify-stored"}, fixture.trustArgs...),
+		"--checkpoint", cp11.Outputs["checkpoint"], "--checkpoint-signature", cp11SignaturePath, "--artifact-root", fixture.root))
+	if verified.CheckpointEvidenceInspection == nil || !verified.CheckpointEvidenceInspection.FullyVerified || verified.CheckpointEvidenceInspection.Sequence != 11 {
+		t.Fatalf("cp11 stored verification = %#v", verified.CheckpointEvidenceInspection)
+	}
+
+	phase2BeaconArgs := append(append([]string{}, fixture.trustArgs...),
+		"--artifact-root", fixture.root, "--relay-release-id", "role-images-test",
+		"--transition", string(mpcceremony.CheckpointPhase2BeaconRecorded),
+		"--previous-checkpoint", cp11.Outputs["checkpoint"], "--previous-checkpoint-signature", cp11SignaturePath,
+		"--chain", chainPath, "--chain-signature", chainSignaturePath,
+		"--head-payload", filepath.Join(fixture.root, filepath.FromSlash(accepted.OutputPayload.Name)),
+		"--transition-record", filepath.Join(fixture.root, "phase2", "beacon", "record.json"),
+		"--transition-record-signature", filepath.Join(fixture.root, "phase2", "beacon", "record.sig"),
+	)
+	phase2BeaconArgs = append(phase2BeaconArgs, phase2ActiveArgs...)
+	cp12 := runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "prepare"}, phase2BeaconArgs...), "--out-dir", filepath.Join(fixture.root, "prepared", "cp12")))
+	cp12SignaturePath := filepath.Join(fixture.root, "state", "signed-cp12.sig")
+	runCheckpointFixtureCommand(t, fixture, append(append([]string{"--format", "json", "checkpoint", "sign"}, phase2BeaconArgs...),
+		"--checkpoint", cp12.Outputs["checkpoint"], "--signing-request", cp12.Outputs["signing_request"],
+		"--coordinator-signing-key", keyPath, "--out", cp12SignaturePath))
+	verified = runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "verify-stored"}, fixture.trustArgs...),
+		"--checkpoint", cp12.Outputs["checkpoint"], "--checkpoint-signature", cp12SignaturePath, "--artifact-root", fixture.root))
+	if verified.CheckpointEvidenceInspection == nil || !verified.CheckpointEvidenceInspection.FullyVerified || verified.CheckpointEvidenceInspection.Sequence != 12 {
+		t.Fatalf("cp12 stored verification = %#v", verified.CheckpointEvidenceInspection)
+	}
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, phase2Args, "phase2/genesis.bin", "phase2-genesis")
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, phase2Args, "phase2/chain-0000.json", "phase2-chain")
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, phase2Args, "phase2/chain-0000.sig", "phase2-chain-signature")
@@ -530,6 +584,8 @@ func TestCheckpointCommandFullLifecycleThroughPhase2Turn(t *testing.T) {
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, args, filepath.ToSlash(mustRelativeTestPath(t, fixture.root, manifestPath)), "manifest")
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, args, filepath.ToSlash(mustRelativeTestPath(t, fixture.root, ackSignaturePath)), "acknowledgement")
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, args, filepath.ToSlash(mustRelativeTestPath(t, fixture.root, chainPath)), "accepted-chain")
+	assertChangedCheckpointEvidenceFails(t, fixture.executable, phase2ClosureArgs, "phase2/closure/record.sig", "phase2-closure-signature")
+	assertChangedCheckpointEvidenceFails(t, fixture.executable, phase2BeaconArgs, "phase2/beacon/raw-response.bin", "phase2-beacon-response")
 }
 
 func prepareAndSignCandidateCheckpoint(t *testing.T, fixture checkpointCLIFixture, participantKey ed25519.PrivateKey, previousPath, previousSignaturePath string, phase mpcceremony.Phase, chainPath, chainSignaturePath string) (string, string) {
@@ -692,6 +748,33 @@ func TestNextCheckpointParticipantRejectsCompleteMaximumSchedule(t *testing.T) {
 	state := mpcceremony.CheckpointPhaseState{Phase: mpcceremony.Phase2, AcceptedCount: mpcceremony.MaxParticipants}
 	if _, _, err := nextCheckpointParticipant(state, mpcceremony.PhasePolicy{Participants: participants, Minimum: 1}, mpcceremony.Phase2); err == nil {
 		t.Fatal("complete 255-participant schedule returned another participant")
+	}
+}
+
+func TestCheckpointPhase2BeaconMustDifferFromPhase1(t *testing.T) {
+	phase1Close := mpcceremony.CloseRecord{BeaconProvider: "drand", BeaconNetwork: "quicknet", BeaconRound: 42}
+	phase2Close := mpcceremony.CloseRecord{BeaconProvider: "drand", BeaconNetwork: "quicknet", BeaconRound: 42}
+	if err := validateDistinctPhaseCloseRounds(phase1Close, phase2Close); err == nil {
+		t.Fatal("phase2 closure reused phase1 beacon round")
+	}
+	phase2Close.BeaconRound = 43
+	if err := validateDistinctPhaseCloseRounds(phase1Close, phase2Close); err != nil {
+		t.Fatalf("distinct phase closure rounds: %v", err)
+	}
+
+	phase1Beacon := mpcceremony.BeaconRecord{Provider: "drand", Network: "quicknet", Round: 42, ChallengeSHA256: "sha256:" + strings.Repeat("1", 64)}
+	phase2Beacon := mpcceremony.BeaconRecord{Provider: "drand", Network: "quicknet", Round: 43, ChallengeSHA256: phase1Beacon.ChallengeSHA256}
+	if err := validateDistinctPhaseBeaconRecords(phase1Beacon, phase2Beacon); err == nil {
+		t.Fatal("phase2 beacon reused phase1 challenge")
+	}
+	phase2Beacon.ChallengeSHA256 = "sha256:" + strings.Repeat("2", 64)
+	phase2Beacon.Round = phase1Beacon.Round
+	if err := validateDistinctPhaseBeaconRecords(phase1Beacon, phase2Beacon); err == nil {
+		t.Fatal("phase2 beacon reused phase1 provider, network, and round")
+	}
+	phase2Beacon.Round = 43
+	if err := validateDistinctPhaseBeaconRecords(phase1Beacon, phase2Beacon); err != nil {
+		t.Fatalf("distinct phase beacon records: %v", err)
 	}
 }
 

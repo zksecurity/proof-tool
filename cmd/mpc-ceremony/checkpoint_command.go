@@ -187,6 +187,13 @@ func validateCheckpointEvidenceOptions(options CheckpointEvidenceOptions) error 
 			pathValue("--transition-record", options.TransitionRecordPath), pathValue("--transition-record-signature", options.TransitionRecordSignaturePath),
 			pathValue("--acknowledgement", options.AcknowledgementPath), pathValue("--acknowledgement-signature", options.AcknowledgementSignaturePath),
 			pathValue("--manifest", options.ManifestPath))
+	case mpcceremony.CheckpointPhase2Closed, mpcceremony.CheckpointPhase2BeaconRecorded:
+		if options.AcknowledgementPath != "" || options.AcknowledgementSignaturePath != "" || options.ManifestPath != "" ||
+			options.AttemptID != "" || options.ManifestKey != "" || options.NextAttemptID != "" || options.NextManifestKey != "" || options.Phase2GenesisPath != "" {
+			return errors.New("phase2 closure/beacon checkpoint must not supply submission, attempt, or genesis inputs")
+		}
+		return requireCheckpointPhase2TurnValues(options,
+			pathValue("--transition-record", options.TransitionRecordPath), pathValue("--transition-record-signature", options.TransitionRecordSignaturePath))
 	default:
 		return fmt.Errorf("unsupported guarded checkpoint transition %q", kind)
 	}
@@ -495,6 +502,7 @@ func inferStoredCheckpointEvidence(options CheckpointVerifyStoredOptions, checkp
 			return CheckpointEvidenceOptions{}, errors.New("stored phase2 initialization checkpoint has no phase2 state")
 		}
 		evidence.Phase2GenesisPath = filepath.Join(options.ArtifactRoot, filepath.FromSlash(checkpoint.Phase2.HeadPayload.Name))
+	case mpcceremony.CheckpointPhase2Closed, mpcceremony.CheckpointPhase2BeaconRecorded:
 	default:
 		return CheckpointEvidenceOptions{}, fmt.Errorf("stored checkpoint transition %q is outside the supported authenticated lifecycle boundary", checkpoint.Transition.Kind)
 	}
@@ -571,7 +579,7 @@ func buildCheckpointEvidenceWithParent(options CheckpointEvidenceOptions, verify
 
 	kind := mpcceremony.CheckpointTransitionKind(options.TransitionKind)
 	var circuit *mpcceremony.CompiledCircuit
-	if kind == mpcceremony.CheckpointPhase1CandidateAccepted || kind == mpcceremony.CheckpointPhase1Sealed || kind == mpcceremony.CheckpointPhase2Initialized || kind == mpcceremony.CheckpointPhase2CandidateAccepted {
+	if kind == mpcceremony.CheckpointPhase1CandidateAccepted || kind == mpcceremony.CheckpointPhase1Sealed || kind == mpcceremony.CheckpointPhase2Initialized || kind == mpcceremony.CheckpointPhase2CandidateAccepted || kind == mpcceremony.CheckpointPhase2Closed {
 		r1csPath := filepath.Join(options.ArtifactRoot, filepath.FromSlash(trusted.Definition.Circuit.R1CS.Name))
 		rootAbs, rootErr := filepath.Abs(options.ArtifactRoot)
 		if rootErr != nil {
@@ -665,14 +673,14 @@ func buildCheckpointEvidenceWithParent(options CheckpointEvidenceOptions, verify
 	activePhase := mpcceremony.Phase1
 	activeState := phaseState
 	activeChain := chain
-	if kind == mpcceremony.CheckpointPhase2OutboundPublished || kind == mpcceremony.CheckpointPhase2ReceiptAccepted || kind == mpcceremony.CheckpointPhase2CandidateAccepted {
+	if kind == mpcceremony.CheckpointPhase2OutboundPublished || kind == mpcceremony.CheckpointPhase2ReceiptAccepted || kind == mpcceremony.CheckpointPhase2CandidateAccepted || kind == mpcceremony.CheckpointPhase2Closed || kind == mpcceremony.CheckpointPhase2BeaconRecorded {
 		if previous.Phase2 == nil || previous.Phase1Seal == nil {
 			return builtCheckpointEvidence{}, errors.New("phase2 turn requires an initialized phase2 checkpoint")
 		}
 		activePhase = mpcceremony.Phase2
 		phase2Paths := mpcceremony.PhaseTranscriptPaths{RootDir: options.ArtifactRoot, ChainPath: options.Phase2ChainPath, ChainSignaturePath: options.Phase2ChainSignaturePath}
 		var phase2Refs mpcceremony.SignedArtifactRefs
-		if kind == mpcceremony.CheckpointPhase2CandidateAccepted {
+		if kind == mpcceremony.CheckpointPhase2CandidateAccepted || kind == mpcceremony.CheckpointPhase2Closed {
 			activeChain, phase2Refs, err = mpcceremony.VerifyAcceptedPhase2Chain(
 				trustPaths(options.CeremonyPath, options.CeremonySignaturePath, options.CoordinatorPublicKeyFile), circuit, options.ArtifactRoot,
 				filepath.Join(options.ArtifactRoot, filepath.FromSlash(previous.Phase1Seal.Record.Name)),
@@ -732,6 +740,10 @@ func buildCheckpointEvidenceWithParent(options CheckpointEvidenceOptions, verify
 		return buildReceiptCheckpoint(options, trusted, previous, previousRefs, activeState, activePhase)
 	case mpcceremony.CheckpointPhase2CandidateAccepted:
 		return buildCandidateCheckpoint(options, trusted, previous, previousRefs, activeState, activeChain, activePhase)
+	case mpcceremony.CheckpointPhase2Closed:
+		return buildPhaseClosedCheckpoint(options, trusted, previous, previousRefs, activeState, activeChain, mpcceremony.Phase2)
+	case mpcceremony.CheckpointPhase2BeaconRecorded:
+		return buildPhaseBeaconCheckpoint(options, trusted, previous, previousRefs, activeState, mpcceremony.Phase2)
 	default:
 		return builtCheckpointEvidence{}, fmt.Errorf("unsupported guarded checkpoint transition %q", kind)
 	}
@@ -783,6 +795,160 @@ func buildPhase2InitializedCheckpoint(options CheckpointEvidenceOptions, trusted
 	checkpoint.Phase2 = &phase2State
 	checkpoint.AcceptedArtifacts = checkpointSortedArtifacts(append(append([]mpcceremony.ArtifactRef(nil), previous.AcceptedArtifacts...), verified.ChainRefs.Record, verified.ChainRefs.Signature, verified.Genesis)...)
 	return finishTransitionCheckpoint(trusted, previous, checkpoint)
+}
+
+func buildPhaseClosedCheckpoint(options CheckpointEvidenceOptions, trusted *mpcceremony.TrustedCeremony, previous mpcceremony.Checkpoint, previousRefs mpcceremony.SignedArtifactRefs, phaseState mpcceremony.CheckpointPhaseState, chain mpcceremony.Chain, phase mpcceremony.Phase) (builtCheckpointEvidence, error) {
+	if phase != mpcceremony.Phase2 || previous.Phase2 == nil || previous.Phase1Closure == nil {
+		return builtCheckpointEvidence{}, errors.New("phase2 closure requires initialized phase2 state")
+	}
+	if previous.Phase2Closure != nil {
+		return builtCheckpointEvidence{}, errors.New("phase2 is already closed in the previous checkpoint")
+	}
+	closeBytes, closeSignature, closeRefs, err := checkpointSignedBytes(options.ArtifactRoot, options.TransitionRecordPath, options.TransitionRecordSignaturePath)
+	if err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("phase2 closure: %w", err)
+	}
+	if err := requireCheckpointArtifactName(closeRefs.Record, "phase2/closure/record.json", "phase2 closure"); err != nil {
+		return builtCheckpointEvidence{}, err
+	}
+	if err := requireCheckpointArtifactName(closeRefs.Signature, "phase2/closure/record.sig", "phase2 closure signature"); err != nil {
+		return builtCheckpointEvidence{}, err
+	}
+	publicKey, err := keybundle.DecodePublicKeyHex(trusted.Definition.Coordinator.Ed25519PublicKeyHex)
+	if err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("coordinator public key: %w", err)
+	}
+	var closeRecord mpcceremony.CloseRecord
+	if err := mpcceremony.VerifySignedRecord(closeBytes, closeSignature, &closeRecord, trusted.Definition.Coordinator.KeyID, publicKey); err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("phase2 closure signature: %w", err)
+	}
+	if closeRecord.Phase != phase {
+		return builtCheckpointEvidence{}, errors.New("phase2-closed checkpoint received a non-phase2 closure")
+	}
+	if err := mpcceremony.ValidateClose(trusted.Definition, chain, closeRecord); err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("phase2 closure: %w", err)
+	}
+	phase1CloseBytes, err := checkpointBytesForRef(options.ArtifactRoot, previous.Phase1Closure.Record, maxOperationalRecordBytes)
+	if err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("phase1 closure: %w", err)
+	}
+	phase1CloseSignature, err := checkpointBytesForRef(options.ArtifactRoot, previous.Phase1Closure.Signature, 4096)
+	if err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("phase1 closure signature: %w", err)
+	}
+	var phase1Close mpcceremony.CloseRecord
+	if err := mpcceremony.VerifySignedRecord(phase1CloseBytes, phase1CloseSignature, &phase1Close, trusted.Definition.Coordinator.KeyID, publicKey); err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("phase1 closure signature: %w", err)
+	}
+	if err := validateDistinctPhaseCloseRounds(phase1Close, closeRecord); err != nil {
+		return builtCheckpointEvidence{}, err
+	}
+	checkpoint := previous
+	checkpoint.Sequence++
+	checkpoint.PreviousCheckpoint = &previousRefs
+	checkpoint.Transition = mpcceremony.CheckpointTransition{Kind: mpcceremony.CheckpointPhase2Closed, Phase: phase, Record: &closeRefs}
+	state := phaseState
+	checkpoint.Phase2 = &state
+	checkpoint.Phase2Closure = &closeRefs
+	checkpoint.AcceptedArtifacts = checkpointSortedArtifacts(append(append([]mpcceremony.ArtifactRef(nil), previous.AcceptedArtifacts...), closeRefs.Record, closeRefs.Signature)...)
+	return finishTransitionCheckpoint(trusted, previous, checkpoint)
+}
+
+func buildPhaseBeaconCheckpoint(options CheckpointEvidenceOptions, trusted *mpcceremony.TrustedCeremony, previous mpcceremony.Checkpoint, previousRefs mpcceremony.SignedArtifactRefs, phaseState mpcceremony.CheckpointPhaseState, phase mpcceremony.Phase) (builtCheckpointEvidence, error) {
+	if phase != mpcceremony.Phase2 || previous.Phase2Closure == nil || previous.Phase1Beacon == nil {
+		return builtCheckpointEvidence{}, errors.New("phase2 beacon requires a closure in the previous checkpoint")
+	}
+	if previous.Phase2Beacon != nil {
+		return builtCheckpointEvidence{}, errors.New("phase2 beacon is already recorded in the previous checkpoint")
+	}
+	publicKey, err := keybundle.DecodePublicKeyHex(trusted.Definition.Coordinator.Ed25519PublicKeyHex)
+	if err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("coordinator public key: %w", err)
+	}
+	closureBytes, err := checkpointBytesForRef(options.ArtifactRoot, previous.Phase2Closure.Record, maxOperationalRecordBytes)
+	if err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("phase2 closure: %w", err)
+	}
+	closureSignature, err := checkpointBytesForRef(options.ArtifactRoot, previous.Phase2Closure.Signature, 4096)
+	if err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("phase2 closure signature: %w", err)
+	}
+	var closure mpcceremony.CloseRecord
+	if err := mpcceremony.VerifySignedRecord(closureBytes, closureSignature, &closure, trusted.Definition.Coordinator.KeyID, publicKey); err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("phase2 closure signature: %w", err)
+	}
+	beaconBytes, beaconSignature, beaconRefs, err := checkpointSignedBytes(options.ArtifactRoot, options.TransitionRecordPath, options.TransitionRecordSignaturePath)
+	if err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("phase2 beacon: %w", err)
+	}
+	if err := requireCheckpointArtifactName(beaconRefs.Record, "phase2/beacon/record.json", "phase2 beacon"); err != nil {
+		return builtCheckpointEvidence{}, err
+	}
+	if err := requireCheckpointArtifactName(beaconRefs.Signature, "phase2/beacon/record.sig", "phase2 beacon signature"); err != nil {
+		return builtCheckpointEvidence{}, err
+	}
+	var beacon mpcceremony.BeaconRecord
+	if err := mpcceremony.VerifySignedRecord(beaconBytes, beaconSignature, &beacon, trusted.Definition.Coordinator.KeyID, publicKey); err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("phase2 beacon signature: %w", err)
+	}
+	if beacon.Phase != phase {
+		return builtCheckpointEvidence{}, errors.New("phase2-beacon-recorded checkpoint received a non-phase2 beacon")
+	}
+	if err := mpcceremony.ValidateBeacon(trusted.Definition, closure, beacon); err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("phase2 beacon: %w", err)
+	}
+	if err := mpcceremony.VerifyBeaconRecordFiles(trusted, options.ArtifactRoot, closure, beacon); err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("phase2 beacon evidence: %w", err)
+	}
+	phase1BeaconBytes, err := checkpointBytesForRef(options.ArtifactRoot, previous.Phase1Beacon.Record, maxOperationalRecordBytes)
+	if err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("phase1 beacon: %w", err)
+	}
+	phase1BeaconSignature, err := checkpointBytesForRef(options.ArtifactRoot, previous.Phase1Beacon.Signature, 4096)
+	if err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("phase1 beacon signature: %w", err)
+	}
+	var phase1Beacon mpcceremony.BeaconRecord
+	if err := mpcceremony.VerifySignedRecord(phase1BeaconBytes, phase1BeaconSignature, &phase1Beacon, trusted.Definition.Coordinator.KeyID, publicKey); err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("phase1 beacon signature: %w", err)
+	}
+	if err := validateDistinctPhaseBeaconRecords(phase1Beacon, beacon); err != nil {
+		return builtCheckpointEvidence{}, err
+	}
+	rawResponse, err := checkpointArtifactRef(options.ArtifactRoot, filepath.Join(options.ArtifactRoot, filepath.FromSlash(beacon.RawResponse.Name)))
+	if err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("phase2 raw beacon response: %w", err)
+	}
+	if rawResponse != beacon.RawResponse {
+		return builtCheckpointEvidence{}, errors.New("phase2 raw beacon response changed during validation")
+	}
+	if err := requireCheckpointArtifactName(rawResponse, "phase2/beacon/raw-response.bin", "phase2 raw beacon response"); err != nil {
+		return builtCheckpointEvidence{}, err
+	}
+	checkpoint := previous
+	checkpoint.Sequence++
+	checkpoint.PreviousCheckpoint = &previousRefs
+	checkpoint.Transition = mpcceremony.CheckpointTransition{Kind: mpcceremony.CheckpointPhase2BeaconRecorded, Phase: phase, Record: &beaconRefs, Evidence: []mpcceremony.ArtifactRef{rawResponse}}
+	state := phaseState
+	checkpoint.Phase2 = &state
+	checkpoint.Phase2Beacon = &beaconRefs
+	checkpoint.AcceptedArtifacts = checkpointSortedArtifacts(append(append([]mpcceremony.ArtifactRef(nil), previous.AcceptedArtifacts...), beaconRefs.Record, beaconRefs.Signature, rawResponse)...)
+	return finishTransitionCheckpoint(trusted, previous, checkpoint)
+}
+
+func validateDistinctPhaseCloseRounds(phase1, phase2 mpcceremony.CloseRecord) error {
+	if phase1.BeaconProvider == phase2.BeaconProvider && phase1.BeaconNetwork == phase2.BeaconNetwork && phase1.BeaconRound == phase2.BeaconRound {
+		return errors.New("phase1 and phase2 must use distinct beacon rounds")
+	}
+	return nil
+}
+
+func validateDistinctPhaseBeaconRecords(phase1, phase2 mpcceremony.BeaconRecord) error {
+	if phase1.ChallengeSHA256 == phase2.ChallengeSHA256 ||
+		(phase1.Provider == phase2.Provider && phase1.Network == phase2.Network && phase1.Round == phase2.Round) {
+		return errors.New("phase1 and phase2 must use distinct beacon challenges and rounds")
+	}
+	return nil
 }
 
 func buildPhase1BeaconCheckpoint(options CheckpointEvidenceOptions, trusted *mpcceremony.TrustedCeremony, previous mpcceremony.Checkpoint, previousRefs mpcceremony.SignedArtifactRefs, phaseState mpcceremony.CheckpointPhaseState) (builtCheckpointEvidence, error) {
