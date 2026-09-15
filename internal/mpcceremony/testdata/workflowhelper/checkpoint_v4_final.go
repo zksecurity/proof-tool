@@ -384,5 +384,68 @@ func runCheckpointV4Final(output, root string, trust m.TrustPaths, circuit *m.Co
 		return fmt.Errorf("final candidate accepted an extra file")
 	}
 	fmt.Println("V4 phase2 and final candidate passed: real contribution, custody, optional observers, second drand round, coordinator full replay, exact final inventory")
+	if d.AssurancePolicy.PassingCeremonyAudits > 0 {
+		db, err := os.ReadFile(trust.DefinitionPath)
+		if err != nil {
+			return err
+		}
+		for i, identity := range d.Auditors {
+			beforeEnrollment := *c
+			key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{byte(0x83 + i)}, 32))
+			keyPath := filepath.Join(output, "identity-keys", identity.ID+".ed25519.private.hex")
+			name := "enrollments/" + identity.ID + "/disclosure.txt"
+			if err = os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0700); err != nil {
+				return err
+			}
+			if err = os.WriteFile(filepath.Join(root, name), []byte("Single-process audit fixture, not independent operators.\n"), 0600); err != nil {
+				return err
+			}
+			disclosure, err := ref(name)
+			if err != nil {
+				return err
+			}
+			enrollment, err := m.NewEnrollmentRecord(d, db, identity, m.EnrollmentAuditor, uint16(i+1), disclosure, "2023-08-23T15:11:36Z")
+			if err != nil {
+				return err
+			}
+			er, err := writePair("enrollments/"+identity.ID+"/record", enrollment, identity.KeyID, key)
+			if err != nil {
+				return err
+			}
+			next(m.CheckpointTransitionV4{Kind: m.CheckpointEnrollmentRecorded, Record: &er, Evidence: []m.ArtifactRef{disclosure}})
+			beforeEnrollmentRef := *c.PreviousCheckpoint
+			if err = commit(); err != nil {
+				return err
+			}
+			name = "audits/" + identity.ID
+			if err = os.MkdirAll(filepath.Join(root, "audits"), 0700); err != nil {
+				return err
+			}
+			if _, err = m.Audit(m.AuditOptions{Replay: replay, Circuit: circuit, CandidateDir: final, AuditorID: identity.ID, AuditorSigningKey: keyPath, OutPath: filepath.Join(root, name+".json"), SignatureOutPath: filepath.Join(root, name+".sig"), AuditedAt: mustUTC("2023-08-23T15:11:37Z")}); err != nil {
+				return err
+			}
+			r, err := ref(name + ".json")
+			if err != nil {
+				return err
+			}
+			s, err := ref(name + ".sig")
+			if err != nil {
+				return err
+			}
+			ar := m.SignedArtifactRefs{Record: r, Signature: s}
+			next(m.CheckpointTransitionV4{Kind: m.CheckpointAuditRecorded, Record: &ar, Evidence: []m.ArtifactRef{}})
+			missing := *c
+			missing.Sequence = beforeEnrollment.Sequence + 1
+			missing.PreviousCheckpoint = &beforeEnrollmentRef
+			missing.AcceptedArtifacts = sorted(append(append([]m.ArtifactRef{}, beforeEnrollment.AcceptedArtifacts...), ar.Record, ar.Signature))
+			if _, err := m.PrepareCheckpointV4(m.CheckpointPreparationV4{Trust: trust, ArtifactRoot: root, Proposal: missing, Circuit: circuit}); err == nil || !strings.Contains(err.Error(), "committed auditor enrollment") {
+				return fmt.Errorf("audit without enrollment: %v", err)
+			}
+			if err = commit(); err != nil {
+				return err
+			}
+		}
+		fmt.Println("V4 audits passed: two real replays, committed enrollment, partial collection then full minimum")
+	}
 	return nil
 }

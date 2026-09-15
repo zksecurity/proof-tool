@@ -18,6 +18,7 @@ const (
 	CheckpointMirrorRecorded         CheckpointTransitionKind = "mirror-recorded"
 	CheckpointWitnessRecorded        CheckpointTransitionKind = "witness-recorded"
 	CheckpointBeaconEvidenceRecorded CheckpointTransitionKind = "beacon-evidence-recorded"
+	CheckpointAuditRecorded          CheckpointTransitionKind = "audit-recorded"
 )
 
 // CheckpointProgressV4 is the protocol projection used for guidance. It is not
@@ -266,9 +267,9 @@ func (t CheckpointTransitionV4) Validate() error {
 			if len(t.Evidence) != 1 {
 				return errors.New("enrollment transition requires its disclosure artifact")
 			}
-		case CheckpointMirrorRecorded, CheckpointWitnessRecorded:
+		case CheckpointMirrorRecorded, CheckpointWitnessRecorded, CheckpointAuditRecorded:
 			if len(t.Evidence) != 0 {
-				return errors.New("observer evidence edge adds only its signed receipt")
+				return errors.New("assurance evidence edge adds only its signed record")
 			}
 		case CheckpointBeaconEvidenceRecorded:
 			if len(t.Evidence) < 2 || len(t.Evidence) > 16 {
@@ -409,9 +410,12 @@ func ValidateCheckpointTransitionV4(previous, next CheckpointV4) error {
 		return errors.New("accepted artifact inventory must remain append-only")
 	}
 	t := next.Transition
-	if t.Kind == CheckpointEnrollmentRecorded || t.Kind == CheckpointMirrorRecorded || t.Kind == CheckpointWitnessRecorded || t.Kind == CheckpointBeaconEvidenceRecorded {
+	if t.Kind == CheckpointEnrollmentRecorded || t.Kind == CheckpointMirrorRecorded || t.Kind == CheckpointWitnessRecorded || t.Kind == CheckpointBeaconEvidenceRecorded || t.Kind == CheckpointAuditRecorded {
 		if previous.Progress.FinalRelease != nil {
 			return errors.New("cannot add assurance evidence after final release")
+		}
+		if t.Kind == CheckpointAuditRecorded && (previous.Progress.FinalCandidate == nil || previous.AssurancePolicy.PassingCeremonyAudits == 0) {
+			return errors.New("audit evidence requires a frozen final candidate and enabled ceremony audits")
 		}
 		if !reflect.DeepEqual(previous.Progress, next.Progress) || !reflect.DeepEqual(previous.Deliveries, next.Deliveries) {
 			return errors.New("evidence edge changed protocol progress or deliveries")

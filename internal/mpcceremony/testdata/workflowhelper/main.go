@@ -178,7 +178,7 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		return err
 	}
 	auditor1KeyPath, auditor2KeyPath := "", ""
-	if !zeroAssurance {
+	if !zeroAssurance || os.Getenv("MPC_WORKFLOW_V4_AUDITS") == "1" {
 		auditor1KeyPath, err = writePrivateKey("auditor-01", auditor1Private)
 		if err != nil {
 			return err
@@ -233,6 +233,10 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	releaseVerification := ""
 	if checkpointV4 {
 		releaseVerification = mpcceremony.CoordinatorReplayReleaseV1
+		if os.Getenv("MPC_WORKFLOW_V4_AUDITS") == "1" {
+			auditors = []mpcceremony.Identity{auditor1, auditor2}
+			assurance.PassingCeremonyAudits = 2
+		}
 		if os.Getenv("MPC_WORKFLOW_V4_MIRROR") == "1" {
 			assurance.MirrorsPerAcceptedHead = 1
 			assurance.PublicWitnessesPerPhase = 1

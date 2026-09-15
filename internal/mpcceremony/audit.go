@@ -1090,16 +1090,57 @@ func verifyPassingAudits(
 	candidate CandidateMetadata,
 	inputs []AuditArtifact,
 ) ([]ArtifactRef, time.Time, error) {
+	if err := validateAuditCollectionCount(definition, len(inputs), true); err != nil {
+		return nil, time.Time{}, err
+	}
+	raw := make([]signedAuditInput, 0, len(inputs))
+	for index, input := range inputs {
+		record, err := readRegularFile(input.RecordPath)
+		if err != nil {
+			return nil, time.Time{}, fmt.Errorf("audit %d: %w", index, err)
+		}
+		signature, err := readRegularFile(input.SignaturePath)
+		if err != nil {
+			return nil, time.Time{}, fmt.Errorf("audit %d signature: %w", index, err)
+		}
+		name := input.LogicalName
+		if name == "" {
+			name = filepath.Base(input.RecordPath)
+		}
+		raw = append(raw, signedAuditInput{record: record, signature: signature, name: name})
+	}
+	return verifyAuditCollection(definition, candidate, raw, true)
+}
+
+type signedAuditInput struct {
+	record, signature []byte
+	name              string
+}
+
+// Collection mode postpones only the count gate. It does not weaken the
+// signed disabled-policy rule, signatures, candidate binding or uniqueness.
+func verifyAuditCollection(definition CeremonyDefinition, candidate CandidateMetadata, inputs []signedAuditInput, requireMinimum bool) ([]ArtifactRef, time.Time, error) {
+	if err := validateAuditCollectionCount(definition, len(inputs), requireMinimum); err != nil {
+		return nil, time.Time{}, err
+	}
+	return verifyAuditCollectionRecords(definition, candidate, inputs)
+}
+
+func validateAuditCollectionCount(definition CeremonyDefinition, count int, requireMinimum bool) error {
 	minimum := 1
 	if definition.UsesSignedAssurancePolicy() {
 		minimum = int(definition.AssurancePolicy.PassingCeremonyAudits)
 	}
-	if len(inputs) < minimum {
-		return nil, time.Time{}, fmt.Errorf("have %d passing ceremony audits, need %d", len(inputs), minimum)
+	if requireMinimum && count < minimum {
+		return fmt.Errorf("have %d passing ceremony audits, need %d", count, minimum)
 	}
-	if minimum == 0 && len(inputs) != 0 {
-		return nil, time.Time{}, errors.New("ceremony audit artifacts are forbidden when audits are disabled")
+	if minimum == 0 && count != 0 {
+		return errors.New("ceremony audit artifacts are forbidden when audits are disabled")
 	}
+	return nil
+}
+
+func verifyAuditCollectionRecords(definition CeremonyDefinition, candidate CandidateMetadata, inputs []signedAuditInput) ([]ArtifactRef, time.Time, error) {
 	replayRoot, err := replayRootSHA256(candidate)
 	if err != nil {
 		return nil, time.Time{}, err
@@ -1121,14 +1162,7 @@ func verifyPassingAudits(
 		Digest: NewDigest(candidateBytes),
 	})
 	for index, input := range inputs {
-		recordBytes, err := readRegularFile(input.RecordPath)
-		if err != nil {
-			return nil, time.Time{}, fmt.Errorf("audit %d: %w", index, err)
-		}
-		signatureBytes, err := readRegularFile(input.SignaturePath)
-		if err != nil {
-			return nil, time.Time{}, fmt.Errorf("audit %d signature: %w", index, err)
-		}
+		recordBytes, signatureBytes := input.record, input.signature
 		var unsigned AuditRecord
 		if err := UnmarshalCanonical(recordBytes, &unsigned); err != nil {
 			return nil, time.Time{}, fmt.Errorf("audit %d: %w", index, err)
@@ -1175,11 +1209,7 @@ func verifyPassingAudits(
 		}
 		seenAuditor[record.AuditorID] = struct{}{}
 		seenKey[record.AuditorKeyID] = struct{}{}
-		name := input.LogicalName
-		if name == "" {
-			name = filepath.Base(input.RecordPath)
-		}
-		ref := ArtifactRef{Name: name, Digest: NewDigest(recordBytes)}
+		ref := ArtifactRef{Name: input.name, Digest: NewDigest(recordBytes)}
 		if err := ref.Validate(); err != nil {
 			return nil, time.Time{}, err
 		}

@@ -35,6 +35,7 @@ func TestCheckpointV4RealContributionTurn(t *testing.T) {
 	for _, scenario := range []struct{ name, mirrorMode, extra, rejection string }{
 		{name: "observers-disabled", mirrorMode: "0"},
 		{name: "observers-enabled", mirrorMode: "1"},
+		{name: "audits-enabled", mirrorMode: "1", extra: "MPC_WORKFLOW_V4_AUDITS=1"},
 		{name: "missing-witness", mirrorMode: "1", extra: "MPC_WORKFLOW_SKIP_WITNESS=1", rejection: "signed witness minimum"},
 		{name: "missing-beacon-evidence", mirrorMode: "0", extra: "MPC_WORKFLOW_SKIP_BEACON_EVIDENCE=1", rejection: "multi-relay beacon evidence is required"},
 	} {
@@ -63,6 +64,9 @@ func TestCheckpointV4RealContributionTurn(t *testing.T) {
 			}
 			if !strings.Contains(string(output), "V4 real phase1 turn passed") || !strings.Contains(string(output), "V4 phase2 and final candidate passed") {
 				t.Fatalf("missing completion: %s", output)
+			}
+			if scenario.extra == "MPC_WORKFLOW_V4_AUDITS=1" && !strings.Contains(string(output), "V4 audits passed: two real replays") {
+				t.Fatalf("missing audited completion: %s", output)
 			}
 		})
 	}

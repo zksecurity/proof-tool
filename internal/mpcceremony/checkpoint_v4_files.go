@@ -133,6 +133,7 @@ type checkpointAncestryV4 struct {
 	mirrors        []SignedArtifactRefs
 	witnesses      []SignedArtifactRefs
 	beaconEvidence []SignedArtifactRefs
+	audits         []SignedArtifactRefs
 	accepted       map[ContributionScope]SignedArtifactRefs
 	count          uint64
 }
@@ -161,6 +162,9 @@ func loadCheckpointAncestryV4(reader *checkpointReaderV4, d CeremonyDefinition, 
 			}
 		}
 		result.count++
+		if current.Transition.Kind == CheckpointAuditRecorded {
+			result.audits = append(result.audits, *current.Transition.Record)
+		}
 		if current.Transition.Kind == CheckpointWitnessRecorded {
 			result.witnesses = append(result.witnesses, *current.Transition.Record)
 		}
@@ -301,6 +305,18 @@ func PrepareCheckpointV4(options CheckpointPreparationV4) ([]byte, error) {
 			return nil, err
 		}
 		return MarshalCanonical(c)
+	}
+	if c.Transition.Kind == CheckpointAuditRecorded || c.Transition.Kind == CheckpointFinalReleaseRecorded {
+		refs := append([]SignedArtifactRefs{}, evidenceAncestry.audits...)
+		if c.Transition.Kind == CheckpointAuditRecorded {
+			refs = append(refs, *c.Transition.Record)
+		}
+		if _, err := verifyCheckpointAuditsV4(reader, d, previous.Progress, verifiedEnrollments, refs, c.Transition.Kind == CheckpointFinalReleaseRecorded); err != nil {
+			return nil, err
+		}
+		if c.Transition.Kind == CheckpointAuditRecorded {
+			return MarshalCanonical(c)
+		}
 	}
 	if c.Transition.Kind == CheckpointMirrorRecorded || c.Transition.Kind == CheckpointPhase1Closed || c.Transition.Kind == CheckpointPhase2Closed {
 		mirrorRefs := append([]SignedArtifactRefs{}, evidenceAncestry.mirrors...)
