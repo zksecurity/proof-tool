@@ -101,6 +101,13 @@ func parseInvocation(args []string) (Invocation, error) {
 		return parseDecision(invocation, rest[1:])
 	case "checkpoint":
 		return parseCheckpoint(invocation, rest[1:])
+	case "submission":
+		parsed, err := parseSubmission(invocation, rest[1:])
+		topic := []string{"submission"}
+		if len(rest) > 1 {
+			topic = append(topic, rest[1])
+		}
+		return parsed, wrapCommandError(err, topic...)
 	default:
 		return Invocation{}, &usageError{
 			message: fmt.Sprintf("unknown command %q", rest[0]),

@@ -248,6 +248,35 @@ through both phases, the fully replayed final candidate, and the exact signed
 release tree. Candidate acceptance and finalization replay the contribution
 mathematics and cleanup evidence.
 `,
+	"submission": `Usage:
+  mpc-ceremony submission <sign|accept> [flags]
+
+Participant-authored storage-first submission envelopes. The exact slot is
+selected only by its coordinator-preallocated attempt ID.
+`,
+	"submission accept": `Usage:
+  mpc-ceremony submission accept [checkpoint evidence flags except acknowledgement] \
+    --coordinator-signing-key KEY --out-dir FRESH_DIR
+
+Replays the complete stored ancestry and the receipt or candidate evidence,
+then creates the accepted acknowledgement and its descendant checkpoint as one
+atomic four-file result. The coordinator key is loaded only after all untrusted
+evidence passes verification. The acknowledgement is not acceptance by itself;
+Relay must publish it only with the signed descendant checkpoint.
+`,
+	"submission sign": `Usage:
+  mpc-ceremony submission sign --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE --attempt-id ID \
+    --participant-signing-key KEY \
+    (--receipt FILE --receipt-signature FILE | --candidate-dir DIR) \
+    --out-dir FRESH_DIR
+
+Authenticates the complete stored checkpoint ancestry, derives the exact
+allocated slot, hashes only its fixed receipt or candidate payload inventory,
+and atomically writes the participant-signed envelope pair. It does not create
+or upload the transport manifest and never accepts a submission.
+`,
 	"checkpoint prepare": `Usage:
   mpc-ceremony checkpoint prepare --ceremony FILE --ceremony-signature FILE \
     --coordinator-public-key-file KEY --artifact-root DIR \

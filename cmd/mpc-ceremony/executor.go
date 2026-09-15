@@ -115,6 +115,10 @@ func (workflowExecutor) Execute(ctx context.Context, invocation Invocation) (Com
 		return executeInspectSubmission(invocation.Options.(InspectSubmissionOptions))
 	case CommandInspectSubmissionAcknowledgement:
 		return executeInspectSubmissionAcknowledgement(invocation.Options.(InspectSubmissionAcknowledgementOptions))
+	case CommandSubmissionSign:
+		return executeSubmissionSign(invocation.Options.(SubmissionSignOptions))
+	case CommandSubmissionAccept:
+		return executeSubmissionAccept(invocation.Options.(SubmissionAcceptOptions))
 	case CommandCheckpointPrepare:
 		return executeCheckpointPrepare(invocation.Options.(CheckpointPrepareOptions))
 	case CommandCheckpointSign:

@@ -58,11 +58,34 @@ const (
 	CommandInspectCheckpointTransition      Command = "inspect checkpoint-transition"
 	CommandInspectSubmission                Command = "inspect submission"
 	CommandInspectSubmissionAcknowledgement Command = "inspect submission-acknowledgement"
+	CommandSubmissionSign                   Command = "submission sign"
+	CommandSubmissionAccept                 Command = "submission accept"
 	CommandCheckpointPrepare                Command = "checkpoint prepare"
 	CommandCheckpointSign                   Command = "checkpoint sign"
 	CommandCheckpointVerify                 Command = "checkpoint verify"
 	CommandCheckpointVerifyStored           Command = "checkpoint verify-stored"
 )
+
+type SubmissionSignOptions struct {
+	CeremonyPath             string
+	CeremonySignaturePath    string
+	CoordinatorPublicKeyFile string
+	ArtifactRoot             string
+	CheckpointPath           string
+	CheckpointSignaturePath  string
+	AttemptID                string
+	ParticipantSigningKey    string
+	ReceiptPath              string
+	ReceiptSignaturePath     string
+	CandidateDir             string
+	OutDir                   string
+}
+
+type SubmissionAcceptOptions struct {
+	CheckpointEvidenceOptions
+	CoordinatorSigningKey string
+	OutDir                string
+}
 
 type GlobalOptions struct {
 	Format string
@@ -393,6 +416,9 @@ type CheckpointEvidenceOptions struct {
 	NextManifestKey                 string
 	CandidateDir                    string
 	ReleaseDir                      string
+	AcknowledgementRecordName       string
+	AcknowledgementSignatureName    string
+	AcceptanceSigner                checkpointAcceptanceSigner
 }
 
 type CheckpointPrepareOptions struct {
