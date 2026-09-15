@@ -11,6 +11,10 @@ import (
 	"proof-tool/internal/keybundle"
 )
 
+// One SHA-256, two spaces, a maximum-length logical name and a newline per
+// dependency/generated file. This V4 bound does not widen legacy checksums.
+const maxReleaseChecksumsV4Bytes = (maxReleaseReviewArtifactsV4 + 5) * (64 + 2 + 512 + 1)
+
 func releasePhysicalNameV4(logical string) (string, error) {
 	if err := validateArtifactName(logical); err != nil {
 		return "", err

@@ -1294,7 +1294,11 @@ func streamingDigest(write func(io.Writer) (int64, error)) (Digest, error) {
 }
 
 func verifyChecksumsExact(dir, checksumPath string, expectedNames []string) error {
-	data, err := readRegularFile(checksumPath)
+	return verifyChecksumsExactWithLimit(dir, checksumPath, expectedNames, maxSignedRecordBytes)
+}
+
+func verifyChecksumsExactWithLimit(dir, checksumPath string, expectedNames []string, limit int64) error {
+	data, err := readRegularBounded(checksumPath, limit)
 	if err != nil {
 		return err
 	}
@@ -1302,47 +1306,61 @@ func verifyChecksumsExact(dir, checksumPath string, expectedNames []string) erro
 	if err != nil {
 		return fmt.Errorf("checksum file path: %w", err)
 	}
+	entries, err := parseChecksumsExact(data, checksumName, expectedNames)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		path, err := resolveArtifactPath(dir, entry.name)
+		if err != nil {
+			return err
+		}
+		ref, err := artifactRefForFile(entry.name, path)
+		if err != nil {
+			return err
+		}
+		if strings.TrimPrefix(ref.Digest.SHA256, "sha256:") != entry.sha256 {
+			return fmt.Errorf("checksum mismatch for %q", entry.name)
+		}
+	}
+	return nil
+}
+
+type checksumEntry struct{ name, sha256 string }
+
+func parseChecksumsExact(data []byte, checksumName string, expectedNames []string) ([]checksumEntry, error) {
 	lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
 	if len(lines) == 0 || (len(lines) == 1 && lines[0] == "") {
-		return errors.New("checksum file is empty")
+		return nil, errors.New("checksum file is empty")
 	}
 	expected := append([]string(nil), expectedNames...)
 	slices.Sort(expected)
 	if len(lines) != len(expected) {
-		return fmt.Errorf("checksum file has %d entries, want exactly %d", len(lines), len(expected))
+		return nil, fmt.Errorf("checksum file has %d entries, want exactly %d", len(lines), len(expected))
 	}
 	seen := make(map[string]struct{}, len(lines))
+	entries := make([]checksumEntry, 0, len(lines))
 	for index, line := range lines {
 		if len(line) < 67 || line[64:66] != "  " {
-			return errors.New("invalid checksum line")
+			return nil, errors.New("invalid checksum line")
 		}
 		hashHex, name := line[:64], line[66:]
 		if _, err := hex.DecodeString(hashHex); err != nil {
-			return errors.New("invalid checksum hash")
+			return nil, errors.New("invalid checksum hash")
 		}
 		if err := validateArtifactName(name); err != nil || name == checksumName {
-			return errors.New("invalid checksum artifact name")
+			return nil, errors.New("invalid checksum artifact name")
 		}
 		if name != expected[index] {
-			return fmt.Errorf("checksum entry %d is %q, want %q", index, name, expected[index])
+			return nil, fmt.Errorf("checksum entry %d is %q, want %q", index, name, expected[index])
 		}
 		if _, duplicate := seen[name]; duplicate {
-			return fmt.Errorf("duplicate checksum for %q", name)
+			return nil, fmt.Errorf("duplicate checksum for %q", name)
 		}
 		seen[name] = struct{}{}
-		path, err := resolveArtifactPath(dir, name)
-		if err != nil {
-			return err
-		}
-		ref, err := artifactRefForFile(name, path)
-		if err != nil {
-			return err
-		}
-		if strings.TrimPrefix(ref.Digest.SHA256, "sha256:") != hashHex {
-			return fmt.Errorf("checksum mismatch for %q", name)
-		}
+		entries = append(entries, checksumEntry{name, hashHex})
 	}
-	return nil
+	return entries, nil
 }
 
 func candidateChecksumNames() []string {

@@ -279,7 +279,7 @@ func VerifyReleaseV4(o VerifyReleaseV4Options) (*VerifyReleaseResult, error) {
 		return nil, err
 	}
 	names = append(names, FinalTranscriptFile, keybundle.ManifestFile, keybundle.ManifestSignatureFile, keybundle.ManifestPublicKeyFile)
-	if err := verifyChecksumsExact(o.KeysDir, filepath.Join(o.KeysDir, ReleaseChecksumsFile), names); err != nil {
+	if err := verifyChecksumsExactWithLimit(o.KeysDir, filepath.Join(o.KeysDir, ReleaseChecksumsFile), names, maxReleaseChecksumsV4Bytes); err != nil {
 		return nil, err
 	}
 	if err := verifyExactReleaseFiles(o.KeysDir, append(names, ReleaseChecksumsFile), true); err != nil {
