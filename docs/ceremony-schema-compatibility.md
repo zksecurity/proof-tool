@@ -74,9 +74,22 @@ inspection; `VerifyFinalReleaseCheckpointV4` additionally verifies package bytes
 Recording this edge means a signed private package, not public publication or GO.
 Only this edge has five reserved artifact slots and the exact transcript and
 checksum size exceptions. Released checkpoint formats keep their limits.
+The Decision V3 library now binds that compact release checkpoint, derives the
+exact auditor signer set from its package, and preserves all production gates.
+It requires a production-mode Definition V4 and the exact K21 circuit; tiny or
+rehearsal-mode definitions cannot receive production approval. Source evidence
+is a bounded report under `decision/evidence/`, not an obsolete GPG tag or a
+private URL. Proof-tool binds the source commit/report and decision signatures;
+the delivery tool must verify and display CI provenance before approval.
+Package-derived gates are checked facts; external gates remain reviewed claims.
+An independently reloaded package must match the initially authenticated
+definition exactly. Legacy decision structs, gates and hash domains are unchanged.
+Current tests cover the new record/binding/signature/evidence rules and reject a
+missing package. A full public-API positive with a real K21 package is pending;
+these tests do not establish an actual production GO or operational assurances.
 Normal initialization still emits V3. Do not release this slice alone: remaining
-production decision integration and normal CLI guidance are incomplete. These
-tests are not a complete user ceremony.
+production decision CLI/integration and normal CLI guidance are incomplete.
+These tests are not a complete user ceremony.
 
 - Reserve Definition V4, Checkpoint V4 and `storage-first-v2` for the changed
   trust and submission rules; do not emit them until the whole verifier path
@@ -87,9 +100,9 @@ tests are not a complete user ceremony.
   without changing ordinary application key-bundle verification or adding a
   second authorization signature. Include the checkpoint pair in the closed
   ceremony release inventory.
-- Explicitly dispatch Definition V4 to final transcript V3. Decision V2 may
-  retain its structure if exact definition/release binding and V4 verification
-  are enforced; it must not fall through to legacy policy. Reuse component
+- Explicitly dispatch Definition V4 to final transcript V3 and Decision V3.
+  Decision V2's enumerated tree and bounds cannot represent every V4 package;
+  do not widen its released limits or fall through to legacy policy. Reuse component
   evidence/candidate formats only where their
   exact signed meaning stays unchanged.
 - Keep old signing and verification dispatch intact. Unknown versions fail
