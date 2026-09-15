@@ -126,20 +126,23 @@ func (r *checkpointReaderV4) pair(refs SignedArtifactRefs) ([]byte, []byte, erro
 }
 
 type checkpointAncestryV4 struct {
-	head           CheckpointV4
-	outbound       map[string]SignedArtifactRefs
-	receipts       map[ContributionScope]SignedArtifactRefs
-	enrollments    []SignedArtifactRefs
-	mirrors        []SignedArtifactRefs
-	witnesses      []SignedArtifactRefs
-	beaconEvidence []SignedArtifactRefs
-	audits         []SignedArtifactRefs
-	accepted       map[ContributionScope]SignedArtifactRefs
-	count          uint64
+	head                     CheckpointV4
+	outbound                 map[string]SignedArtifactRefs
+	receipts                 map[ContributionScope]SignedArtifactRefs
+	enrollments              []SignedArtifactRefs
+	mirrors                  []SignedArtifactRefs
+	witnesses                []SignedArtifactRefs
+	beaconEvidence           []SignedArtifactRefs
+	audits                   []SignedArtifactRefs
+	accepted                 map[ContributionScope]SignedArtifactRefs
+	acceptedTransitions      map[ContributionScope]CheckpointTransitionV4
+	checkpoints              []SignedArtifactRefs // newest to oldest, including head
+	finalCandidateCheckpoint *SignedArtifactRefs
+	count                    uint64
 }
 
 func loadCheckpointAncestryV4(reader *checkpointReaderV4, d CeremonyDefinition, definitionBytes, definitionSignature []byte, refs SignedArtifactRefs) (checkpointAncestryV4, error) {
-	result := checkpointAncestryV4{outbound: map[string]SignedArtifactRefs{}, receipts: map[ContributionScope]SignedArtifactRefs{}, accepted: map[ContributionScope]SignedArtifactRefs{}}
+	result := checkpointAncestryV4{outbound: map[string]SignedArtifactRefs{}, receipts: map[ContributionScope]SignedArtifactRefs{}, accepted: map[ContributionScope]SignedArtifactRefs{}, acceptedTransitions: map[ContributionScope]CheckpointTransitionV4{}}
 	var child *CheckpointV4
 	for {
 		if result.count > MaxCheckpointSequenceV4 {
@@ -162,6 +165,11 @@ func loadCheckpointAncestryV4(reader *checkpointReaderV4, d CeremonyDefinition, 
 			}
 		}
 		result.count++
+		result.checkpoints = append(result.checkpoints, refs)
+		if current.Transition.Kind == CheckpointFinalCandidateRecorded {
+			pair := refs
+			result.finalCandidateCheckpoint = &pair
+		}
 		if current.Transition.Kind == CheckpointAuditRecorded {
 			result.audits = append(result.audits, *current.Transition.Record)
 		}
@@ -175,7 +183,11 @@ func loadCheckpointAncestryV4(reader *checkpointReaderV4, d CeremonyDefinition, 
 			result.mirrors = append(result.mirrors, *current.Transition.Record)
 		}
 		if current.Transition.Kind == CheckpointPhase1CandidateAccepted || current.Transition.Kind == CheckpointPhase2CandidateAccepted {
+			if _, exists := result.acceptedTransitions[*current.Transition.Scope]; exists {
+				return checkpointAncestryV4{}, errors.New("duplicate accepted transition for the same contribution scope")
+			}
 			result.accepted[*current.Transition.Scope] = *current.Transition.Record
+			result.acceptedTransitions[*current.Transition.Scope] = current.Transition
 		}
 		if current.Transition.Kind == CheckpointEnrollmentRecorded {
 			result.enrollments = append(result.enrollments, *current.Transition.Record)

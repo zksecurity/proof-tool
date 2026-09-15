@@ -447,5 +447,132 @@ func runCheckpointV4Final(output, root string, trust m.TrustPaths, circuit *m.Co
 		}
 		fmt.Println("V4 audits passed: two real replays, committed enrollment, partial collection then full minimum")
 	}
+	headRefs := func() (m.SignedArtifactRefs, error) {
+		name := fmt.Sprintf("checkpoints/%04d", c.Sequence)
+		r, err := ref(name + ".json")
+		if err != nil {
+			return m.SignedArtifactRefs{}, err
+		}
+		s, err := ref(name + ".sig")
+		return m.SignedArtifactRefs{Record: r, Signature: s}, err
+	}
+	db, err := os.ReadFile(trust.DefinitionPath)
+	if err != nil {
+		return err
+	}
+	for _, owner := range []struct {
+		identity m.Identity
+		role     m.EnrollmentRole
+		index    uint16
+		seed     byte
+	}{
+		{d.Coordinator, m.EnrollmentCoordinator, 1, 0x81},
+		{d.ReleaseSigner, m.EnrollmentReleaseSigner, 1, 0x82},
+		{d.Roster[1].Identity, m.EnrollmentParticipant, 2, 0x92},
+	} {
+		head, err := headRefs()
+		if err != nil {
+			return err
+		}
+		missing, err := m.PrepareOperationalBundleV4(trust, root, head, mustUTC("2023-08-23T15:11:38Z"))
+		if err == nil || !strings.Contains(err.Error(), "required proof-of-possession enrollment") || missing.Bundle.Schema != "" {
+			return fmt.Errorf("missing required %s enrollment did not block bundle: %v", owner.identity.ID, err)
+		}
+		key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{owner.seed}, 32))
+		name := "enrollments/" + owner.identity.ID + "/disclosure.txt"
+		if err = os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0700); err != nil {
+			return err
+		}
+		if err = os.WriteFile(filepath.Join(root, name), []byte("One process controls every fixture role; no independence claim.\n"), 0600); err != nil {
+			return err
+		}
+		disclosure, err := ref(name)
+		if err != nil {
+			return err
+		}
+		record, err := m.NewEnrollmentRecord(d, db, owner.identity, owner.role, owner.index, disclosure, "2023-08-23T15:11:37.5Z")
+		if err != nil {
+			return err
+		}
+		pair, err := writePair("enrollments/"+owner.identity.ID+"/record", record, owner.identity.KeyID, key)
+		if err != nil {
+			return err
+		}
+		// Even a valid signed enrollment already on disk is not committed until
+		// the coordinator adds it to the authenticated checkpoint history.
+		loose, looseErr := m.PrepareOperationalBundleV4(trust, root, head, mustUTC("2023-08-23T15:11:38Z"))
+		if looseErr == nil || !strings.Contains(looseErr.Error(), "required proof-of-possession enrollment") || loose.Bundle.Schema != "" {
+			return fmt.Errorf("loose uncommitted enrollment was used: %v", looseErr)
+		}
+		next(m.CheckpointTransitionV4{Kind: m.CheckpointEnrollmentRecorded, Record: &pair, Evidence: []m.ArtifactRef{disclosure}})
+		if err = commit(); err != nil {
+			return err
+		}
+	}
+	checkpoint, err := headRefs()
+	if err != nil {
+		return err
+	}
+	prepared, err := m.PrepareOperationalBundleV4(trust, root, checkpoint, mustUTC("2023-08-23T15:11:38Z"))
+	if err != nil {
+		return err
+	}
+	again, err := m.PrepareOperationalBundleV4(trust, root, checkpoint, mustUTC("2023-08-23T15:11:38Z"))
+	if err != nil {
+		return err
+	}
+	preparedBytes, err := m.MarshalCanonical(prepared)
+	if err != nil {
+		return err
+	}
+	againBytes, err := m.MarshalCanonical(again)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(preparedBytes, againBytes) || prepared.SourceCheckpoint != checkpoint {
+		return fmt.Errorf("bundle derivation was not byte-identical for the same checkpoint and time")
+	}
+	for _, target := range []string{prepared.Bundle.Phase1.AcceptedHeads[0].ReturnReceipt.Record.Name, prepared.Bundle.Phase2.AcceptedHeads[0].AcceptedChainPrefix.Record.Name, prepared.Bundle.Phase2.RawBeaconResponses[0].Name} {
+		original, err := os.ReadFile(filepath.Join(root, target))
+		if err != nil {
+			return err
+		}
+		corrupted := bytes.Clone(original)
+		corrupted[len(corrupted)-1] ^= 1
+		if err = os.WriteFile(filepath.Join(root, target), corrupted, 0600); err != nil {
+			return err
+		}
+		bad, reject := m.PrepareOperationalBundleV4(trust, root, checkpoint, mustUTC("2023-08-23T15:11:38Z"))
+		if err = os.WriteFile(filepath.Join(root, target), original, 0600); err != nil {
+			return err
+		}
+		if reject == nil || bad.Bundle.Schema != "" {
+			return fmt.Errorf("corrupted bundle input %s was not rejected", target)
+		}
+	}
+	brs, err := writePair("operational/evidence-bundle", prepared.Bundle, d.Coordinator.KeyID, coordinator)
+	if err != nil {
+		return err
+	}
+	bb, err := os.ReadFile(path(brs.Record))
+	if err != nil {
+		return err
+	}
+	sig, err := os.ReadFile(path(brs.Signature))
+	if err != nil {
+		return err
+	}
+	first, err := m.LoadAuthenticatedCloseEvidence(root, prepared.Bundle.Phase1.Close)
+	if err != nil {
+		return err
+	}
+	second, err := m.LoadAuthenticatedCloseEvidence(root, prepared.Bundle.Phase2.Close)
+	if err != nil {
+		return err
+	}
+	if _, err = m.VerifyOperationalEvidenceBundle(m.VerifyOperationalEvidenceOptions{Definition: d, CoordinatorPublicKey: coordinator.Public().(ed25519.PublicKey), EvidenceRoot: root, BundleBytes: bb, BundleSignatureBytes: sig, Phase1Close: first, Phase2Close: second}); err != nil {
+		return err
+	}
+	fmt.Println("V4 operational bundle passed: deterministic checkpoint-only assembly, all roster enrollments, original bundle verifier, corruption rejected")
 	return nil
 }

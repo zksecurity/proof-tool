@@ -68,6 +68,9 @@ func TestCheckpointV4RealContributionTurn(t *testing.T) {
 			if scenario.extra == "MPC_WORKFLOW_V4_AUDITS=1" && !strings.Contains(string(output), "V4 audits passed: two real replays") {
 				t.Fatalf("missing audited completion: %s", output)
 			}
+			if !strings.Contains(string(output), "V4 operational bundle passed: deterministic checkpoint-only assembly") {
+				t.Fatalf("missing bundle completion: %s", output)
+			}
 		})
 	}
 }

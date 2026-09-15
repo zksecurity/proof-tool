@@ -32,8 +32,15 @@ integration test uses real tiny contributions in both phases, signed custody
 records, genuine historical drand responses and complete coordinator replay.
 Final-candidate authoring binds the exact executable and closed file inventory. Its
 environment and cleanup claims are test fixtures, not physical assurance.
+Audit collection verifies each signed record and keeps the full release quorum.
+Operational bundle preparation derives the unchanged v3 bundle only from exact
+checkpointed records, including all required enrollments and per-turn custody.
+It runs the existing bundle verifier without signing or repeating mathematics.
+Its source-checkpoint metadata must be rebound at final release; it is not an
+extra field in the signed legacy bundle. Linux tests reject missing enrollments,
+loose uncommitted records and corrupted retained evidence.
 Normal initialization still emits V3. Do not release this slice alone: remaining
-audit/governance evidence, final-release authoring and the new release/decision verification path
+governance evidence, final-release authoring and the new release/decision verification path
 are incomplete. These tests are not the normal CLI journey or a full ceremony.
 
 - Reserve Definition V4, Checkpoint V4 and `storage-first-v2` for the changed
