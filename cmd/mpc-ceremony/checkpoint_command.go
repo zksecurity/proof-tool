@@ -1455,12 +1455,18 @@ func buildReceiptCheckpoint(options CheckpointEvidenceOptions, trusted *mpccerem
 	if err != nil {
 		return builtCheckpointEvidence{}, err
 	}
+	if err := requireSubmissionEnvelopeNames(slot, envelopeRefs); err != nil {
+		return builtCheckpointEvidence{}, err
+	}
 	envelope, err := mpcceremony.VerifySignedSubmissionEnvelope(trusted.Definition, previous, slot, envelopeBytes, envelopeSignatureBytes)
 	if err != nil {
 		return builtCheckpointEvidence{}, err
 	}
 	if envelope.Kind != mpcceremony.CheckpointSubmissionReceipt {
 		return builtCheckpointEvidence{}, errors.New("receipt-accepted checkpoint requires a receipt submission envelope")
+	}
+	if err := requireReceiptPayloadNames(slot, envelope.Payloads); err != nil {
+		return builtCheckpointEvidence{}, err
 	}
 	if err := verifyReceiptEnvelopePayloads(options.ArtifactRoot, trusted, previous, envelope); err != nil {
 		return builtCheckpointEvidence{}, err
@@ -1552,6 +1558,9 @@ func buildCandidateCheckpoint(options CheckpointEvidenceOptions, trusted *mpccer
 	}
 	slot, err := findAllocatedSubmission(previous, untrustedEnvelope)
 	if err != nil {
+		return builtCheckpointEvidence{}, err
+	}
+	if err := requireSubmissionEnvelopeNames(slot, envelopeRefs); err != nil {
 		return builtCheckpointEvidence{}, err
 	}
 	if slot.Kind != mpcceremony.CheckpointSubmissionCandidate {
@@ -1806,6 +1815,29 @@ func findAllocatedSubmission(checkpoint mpcceremony.Checkpoint, envelope mpccere
 		}
 	}
 	return mpcceremony.CheckpointSubmissionSlot{}, errors.New("submission envelope does not match an allocated checkpoint slot")
+}
+
+func requireSubmissionEnvelopeNames(slot mpcceremony.CheckpointSubmissionSlot, refs mpcceremony.SignedArtifactRefs) error {
+	base := strings.TrimSuffix(slot.ManifestKey, "/manifest.json")
+	if refs.Record.Name != base+"/envelope.json" || refs.Signature.Name != base+"/envelope.sig" {
+		return errors.New("submission envelope does not use the preallocated storage path")
+	}
+	return nil
+}
+
+func requireReceiptPayloadNames(slot mpcceremony.CheckpointSubmissionSlot, refs []mpcceremony.ArtifactRef) error {
+	base := fmt.Sprintf("%s/custody/%04d", slot.Phase, slot.Index)
+	want := []string{base + "/outbound-receipt.json", base + "/outbound-receipt.sig"}
+	got := make([]string, len(refs))
+	for i := range refs {
+		got[i] = refs[i].Name
+	}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		return errors.New("receipt submission does not use the deterministic ceremony evidence paths")
+	}
+	return nil
 }
 
 func checkpointSignedBytes(root, recordPath, signaturePath string) ([]byte, []byte, mpcceremony.SignedArtifactRefs, error) {

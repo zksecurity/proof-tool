@@ -31,11 +31,11 @@ func TestSubmissionSignAuthenticatesReceiptSlotAndAncestry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := filepath.Join(fixture.root, "submissions", "receipt", slot.AttemptID)
-	if err := os.MkdirAll(base, 0o700); err != nil {
+	receiptDir := filepath.Join(fixture.root, "phase1", "custody", "0001")
+	if err := os.MkdirAll(receiptDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	receiptPath, signaturePath := filepath.Join(base, "receipt.json"), filepath.Join(base, "receipt.sig")
+	receiptPath, signaturePath := filepath.Join(receiptDir, "outbound-receipt.json"), filepath.Join(receiptDir, "outbound-receipt.sig")
 	receiptBytes, signatureBytes, err := mpcceremony.SignRecord(receipt, fixture.definition.Roster[0].Identity.KeyID, participantKey)
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +44,7 @@ func TestSubmissionSignAuthenticatesReceiptSlotAndAncestry(t *testing.T) {
 	writeDecisionTestFile(t, signaturePath, signatureBytes, 0o600)
 	keyPath := filepath.Join(fixture.root, "participant.hex")
 	writeDecisionTestFile(t, keyPath, []byte(hex.EncodeToString(participantKey.Seed())+"\n"), 0o600)
-	out := filepath.Join(fixture.root, "participant-envelope")
+	out := filepath.Join(fixture.root, filepath.FromSlash(strings.TrimSuffix(slot.ManifestKey, "/manifest.json")))
 	args := append(append([]string{"--format", "json", "submission", "sign"}, fixture.trustArgs...),
 		"--artifact-root", fixture.root, "--checkpoint", cp1Path, "--checkpoint-signature", cp1SignaturePath,
 		"--attempt-id", slot.AttemptID, "--participant-signing-key", keyPath,
@@ -100,11 +100,11 @@ func TestSubmissionAcceptCreatesAtomicReceiptAcknowledgementAndCheckpoint(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := filepath.Join(fixture.root, "submissions", "receipt", slot.AttemptID)
-	if err := os.MkdirAll(base, 0o700); err != nil {
+	receiptDir := filepath.Join(fixture.root, "phase1", "custody", "0001")
+	if err := os.MkdirAll(receiptDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	receiptPath, receiptSignaturePath := filepath.Join(base, "receipt.json"), filepath.Join(base, "receipt.sig")
+	receiptPath, receiptSignaturePath := filepath.Join(receiptDir, "outbound-receipt.json"), filepath.Join(receiptDir, "outbound-receipt.sig")
 	receiptBytes, receiptSignature, err := mpcceremony.SignRecord(receipt, fixture.definition.Roster[0].Identity.KeyID, participantKey)
 	if err != nil {
 		t.Fatal(err)
@@ -113,7 +113,7 @@ func TestSubmissionAcceptCreatesAtomicReceiptAcknowledgementAndCheckpoint(t *tes
 	writeDecisionTestFile(t, receiptSignaturePath, receiptSignature, 0o600)
 	participantKeyPath := filepath.Join(fixture.root, "participant.hex")
 	writeDecisionTestFile(t, participantKeyPath, []byte(hex.EncodeToString(participantKey.Seed())+"\n"), 0o600)
-	envelopeDir := filepath.Join(base, "signed-envelope")
+	envelopeDir := filepath.Join(fixture.root, filepath.FromSlash(strings.TrimSuffix(slot.ManifestKey, "/manifest.json")))
 	signArgs := append(append([]string{"--format", "json", "submission", "sign"}, fixture.trustArgs...), "--artifact-root", fixture.root, "--checkpoint", cp1Path, "--checkpoint-signature", cp1SignaturePath, "--attempt-id", slot.AttemptID, "--participant-signing-key", participantKeyPath, "--receipt", receiptPath, "--receipt-signature", receiptSignaturePath, "--out-dir", envelopeDir)
 	runCheckpointCommandCLI(t, signArgs)
 	manifestPath := filepath.Join(fixture.root, filepath.FromSlash(slot.ManifestKey))
@@ -148,6 +148,16 @@ func TestSubmissionAcceptCreatesAtomicReceiptAcknowledgementAndCheckpoint(t *tes
 	}
 	if checkpoint.Transition.Kind != mpcceremony.CheckpointPhase1ReceiptAccepted || checkpoint.Transition.Acknowledgement == nil {
 		t.Fatalf("checkpoint transition = %#v", checkpoint.Transition)
+	}
+	ackDir := filepath.Join(fixture.root, "acknowledgements", slot.AttemptID)
+	if err := os.MkdirAll(ackDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeDecisionTestFile(t, filepath.Join(ackDir, "record.json"), mustReadTestFile(t, result.Outputs["acknowledgement"]), 0o600)
+	writeDecisionTestFile(t, filepath.Join(ackDir, "record.sig"), mustReadTestFile(t, result.Outputs["acknowledgement_signature"]), 0o600)
+	stored := runCheckpointCommandCLI(t, append(append([]string{"--format", "json", "checkpoint", "verify-stored"}, fixture.trustArgs...), "--artifact-root", fixture.root, "--checkpoint", result.Outputs["checkpoint"], "--checkpoint-signature", result.Outputs["checkpoint_signature"]))
+	if stored.CheckpointEvidenceInspection == nil || !stored.CheckpointEvidenceInspection.FullyVerified {
+		t.Fatalf("stored acceptance = %#v", stored.CheckpointEvidenceInspection)
 	}
 	runCheckpointCommandCLI(t, args) // byte-identical retry
 }
@@ -195,7 +205,7 @@ func TestSubmissionCandidateSignAndAcceptReplaysMathematics(t *testing.T) {
 		writeDecisionTestFile(t, filepath.Join(candidateDir, item.name), mustReadTestFile(t, filepath.Join(fixture.root, filepath.FromSlash(item.ref.Name))), 0o600)
 	}
 	participantKeyPath := filepath.Join(filepath.Dir(fixture.root), "identity-keys", "participant-01.ed25519.private.hex")
-	envelopeDir := filepath.Join(fixture.root, "candidate-envelope")
+	envelopeDir := filepath.Join(fixture.root, filepath.FromSlash(strings.TrimSuffix(slot.ManifestKey, "/manifest.json")))
 	signArgs := append(append([]string{"--format", "json", "submission", "sign"}, fixture.trustArgs...), "--artifact-root", fixture.root, "--checkpoint", cp2Path, "--checkpoint-signature", cp2SignaturePath, "--attempt-id", slot.AttemptID, "--participant-signing-key", participantKeyPath, "--candidate-dir", candidateDir, "--out-dir", envelopeDir)
 	runCheckpointFixtureCommand(t, fixture, signArgs)
 	manifestPath := filepath.Join(fixture.root, filepath.FromSlash(slot.ManifestKey))
@@ -221,5 +231,15 @@ func TestSubmissionCandidateSignAndAcceptReplaysMathematics(t *testing.T) {
 	}
 	if checkpoint.Transition.Kind != mpcceremony.CheckpointPhase1CandidateAccepted || checkpoint.Phase1.AcceptedCount != 1 {
 		t.Fatalf("checkpoint = %#v", checkpoint)
+	}
+	ackDir := filepath.Join(fixture.root, "acknowledgements", slot.AttemptID)
+	if err := os.MkdirAll(ackDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeDecisionTestFile(t, filepath.Join(ackDir, "record.json"), mustReadTestFile(t, result.Outputs["acknowledgement"]), 0o600)
+	writeDecisionTestFile(t, filepath.Join(ackDir, "record.sig"), mustReadTestFile(t, result.Outputs["acknowledgement_signature"]), 0o600)
+	stored := runCheckpointFixtureCommand(t, fixture, append(append([]string{"--format", "json", "checkpoint", "verify-stored"}, fixture.trustArgs...), "--artifact-root", fixture.root, "--checkpoint", result.Outputs["checkpoint"], "--checkpoint-signature", result.Outputs["checkpoint_signature"]))
+	if stored.CheckpointEvidenceInspection == nil || !stored.CheckpointEvidenceInspection.FullyVerified {
+		t.Fatalf("stored candidate acceptance = %#v", stored.CheckpointEvidenceInspection)
 	}
 }

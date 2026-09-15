@@ -187,8 +187,8 @@ func TestCheckpointPrepareReceiptAcceptedAuthenticatesInnerEvidence(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	receiptPath := filepath.Join(fixture.root, "submissions", "receipt", slot.AttemptID, "receipt.json")
-	receiptSignaturePath := filepath.Join(fixture.root, "submissions", "receipt", slot.AttemptID, "receipt.sig")
+	receiptPath := filepath.Join(fixture.root, "phase1", "custody", "0001", "outbound-receipt.json")
+	receiptSignaturePath := filepath.Join(fixture.root, "phase1", "custody", "0001", "outbound-receipt.sig")
 	if err := os.MkdirAll(filepath.Dir(receiptPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -221,6 +221,9 @@ func TestCheckpointPrepareReceiptAcceptedAuthenticatesInnerEvidence(t *testing.T
 	}
 	envelopePath := filepath.Join(fixture.root, "submissions", "receipt", slot.AttemptID, "envelope.json")
 	envelopeSignaturePath := filepath.Join(fixture.root, "submissions", "receipt", slot.AttemptID, "envelope.sig")
+	if err := os.MkdirAll(filepath.Dir(envelopePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	envelopeBytes, envelopeSignatureBytes, err := mpcceremony.SignSubmissionEnvelope(fixture.definition, cp1, slot, envelope, participantKey)
 	if err != nil {
 		t.Fatal(err)
@@ -785,7 +788,7 @@ func prepareAndSignCandidateCheckpoint(t *testing.T, fixture checkpointCLIFixtur
 		ParentCheckpointSHA256: slot.BasisCheckpointSHA256, AllocationCheckpointSHA256: mpcceremony.NewDigest(previousBytes).SHA256,
 		ParentHeadID: slot.ParentHeadID, AttemptID: slot.AttemptID, ManifestKey: slot.ManifestKey, Payloads: payloads,
 	}
-	envelopeDir := filepath.Join(fixture.root, "submissions", string(phase)+"-candidate", slot.AttemptID)
+	envelopeDir := filepath.Join(fixture.root, filepath.FromSlash(strings.TrimSuffix(slot.ManifestKey, "/manifest.json")))
 	if err := os.MkdirAll(envelopeDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -1037,11 +1040,11 @@ func prepareAndSignReceiptCheckpoint(t *testing.T, fixture checkpointCLIFixture,
 	if err != nil {
 		t.Fatal(err)
 	}
-	receiptDir := filepath.Join(fixture.root, "submissions", "receipt", slot.AttemptID)
+	receiptDir := filepath.Join(fixture.root, string(phase), "custody", fmt.Sprintf("%04d", slot.Index))
 	if err := os.MkdirAll(receiptDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	receiptPath, receiptSignaturePath := filepath.Join(receiptDir, "receipt.json"), filepath.Join(receiptDir, "receipt.sig")
+	receiptPath, receiptSignaturePath := filepath.Join(receiptDir, "outbound-receipt.json"), filepath.Join(receiptDir, "outbound-receipt.sig")
 	receiptBytes, receiptSignatureBytes, err := mpcceremony.SignRecord(receipt, fixture.definition.Roster[0].Identity.KeyID, participantKey)
 	if err != nil {
 		t.Fatal(err)

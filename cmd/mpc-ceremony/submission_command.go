@@ -132,7 +132,7 @@ func executeSubmissionSign(options SubmissionSignOptions) (CommandResult, error)
 		if err := verifyReceiptEnvelopePayloads(options.ArtifactRoot, trusted, checkpoint, envelope); err != nil {
 			return CommandResult{}, err
 		}
-	} else if err := verifyCandidateSubmissionFiles(options.CandidateDir, trusted.Definition, slot, payloads); err != nil {
+	} else if err := verifyCandidateSubmissionFiles(options.CandidateDir, trusted.Definition, checkpoint, slot, payloads); err != nil {
 		return CommandResult{}, err
 	}
 	key, _, err := keybundle.LoadExistingPrivateKey(options.ParticipantSigningKey)
@@ -197,7 +197,7 @@ func executeSubmissionAccept(options SubmissionAcceptOptions) (CommandResult, er
 	if err := writeAtomicSubmissionDir(options.OutDir, files); err != nil {
 		return CommandResult{}, err
 	}
-	return CommandResult{CeremonyID: built.checkpoint.CeremonyID, Sequence: int(built.checkpoint.Sequence), Summary: fmt.Sprintf("accepted authenticated submission and signed checkpoint %d as one atomic result", built.checkpoint.Sequence), Outputs: map[string]string{
+	return CommandResult{CeremonyID: built.checkpoint.CeremonyID, Sequence: int(built.checkpoint.Sequence), Summary: fmt.Sprintf("prepared signed acceptance checkpoint %d; not published", built.checkpoint.Sequence), Outputs: map[string]string{
 		"acknowledgement": filepath.Join(options.OutDir, "acknowledgement.json"), "acknowledgement_signature": filepath.Join(options.OutDir, "acknowledgement.sig"),
 		"checkpoint": filepath.Join(options.OutDir, "checkpoint.json"), "checkpoint_signature": filepath.Join(options.OutDir, "checkpoint.sig"),
 	}}, nil
@@ -232,10 +232,13 @@ func submissionPayloadRefs(options SubmissionSignOptions, slot mpcceremony.Check
 		if options.CandidateDir != "" {
 			return nil, errors.New("receipt slot requires receipt payloads")
 		}
-		base := strings.TrimSuffix(slot.ManifestKey, "/manifest.json")
+		base := fmt.Sprintf("%s/custody/%04d", slot.Phase, slot.Index)
 		refs := make([]mpcceremony.ArtifactRef, 0, 2)
-		for _, item := range []struct{ path, name string }{{options.ReceiptPath, base + "/receipt.json"}, {options.ReceiptSignaturePath, base + "/receipt.sig"}} {
-			ref, err := submissionFileRef(item.path, item.name)
+		for _, item := range []struct {
+			path, name string
+			limit      int64
+		}{{options.ReceiptPath, base + "/outbound-receipt.json", maxOperationalRecordBytes}, {options.ReceiptSignaturePath, base + "/outbound-receipt.sig", 4096}} {
+			ref, err := submissionFileRef(item.path, item.name, item.limit, 0)
 			if err != nil {
 				return nil, err
 			}
@@ -248,10 +251,30 @@ func submissionPayloadRefs(options SubmissionSignOptions, slot mpcceremony.Check
 		return nil, errors.New("candidate slot requires only --candidate-dir")
 	}
 	base := fmt.Sprintf("%s/contributions/%04d", slot.Phase, slot.Index)
-	files := []struct{ file, name string }{{"contribution.bin", base + "/contribution.bin"}, {"attestation.json", base + "/attestation.json"}, {"attestation.sig", base + "/attestation.sig"}, {"erasure.json", base + "/erasure.json"}, {"erasure.sig", base + "/erasure.sig"}}
+	attestationBytes, err := readRegularOperationalFile(filepath.Join(options.CandidateDir, "attestation.json"), maxOperationalRecordBytes)
+	if err != nil {
+		return nil, err
+	}
+	var claimed mpcceremony.ContributionAttestation
+	if err := mpcceremony.UnmarshalCanonical(attestationBytes, &claimed); err != nil {
+		return nil, fmt.Errorf("candidate attestation: %w", err)
+	}
+	if claimed.OutputPayload.Digest.Size <= 0 || claimed.OutputPayload.Digest.Size > mpcceremony.MaxArtifactSize {
+		return nil, errors.New("candidate attestation has an invalid contribution size")
+	}
+	files := []struct {
+		file, name   string
+		limit, exact int64
+	}{
+		{"attestation.json", base + "/attestation.json", maxOperationalRecordBytes, 0},
+		{"attestation.sig", base + "/attestation.sig", 4096, 0},
+		{"erasure.json", base + "/erasure.json", maxOperationalRecordBytes, 0},
+		{"erasure.sig", base + "/erasure.sig", 4096, 0},
+		{"contribution.bin", base + "/contribution.bin", claimed.OutputPayload.Digest.Size, claimed.OutputPayload.Digest.Size},
+	}
 	refs := make([]mpcceremony.ArtifactRef, 0, len(files))
 	for _, item := range files {
-		ref, err := submissionFileRef(filepath.Join(options.CandidateDir, item.file), item.name)
+		ref, err := submissionFileRef(filepath.Join(options.CandidateDir, item.file), item.name, item.limit, item.exact)
 		if err != nil {
 			return nil, err
 		}
@@ -261,13 +284,16 @@ func submissionPayloadRefs(options SubmissionSignOptions, slot mpcceremony.Check
 	return refs, nil
 }
 
-func submissionFileRef(path, name string) (mpcceremony.ArtifactRef, error) {
+func submissionFileRef(path, name string, maximum, exact int64) (mpcceremony.ArtifactRef, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return mpcceremony.ArtifactRef{}, err
 	}
 	if !info.Mode().IsRegular() {
 		return mpcceremony.ArtifactRef{}, errors.New("submission payload must be a regular file, not a symlink")
+	}
+	if info.Size() <= 0 || info.Size() > maximum || (exact > 0 && info.Size() != exact) {
+		return mpcceremony.ArtifactRef{}, errors.New("submission payload size is outside its authenticated bound")
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -284,13 +310,13 @@ func submissionFileRef(path, name string) (mpcceremony.ArtifactRef, error) {
 	if err != nil {
 		return mpcceremony.ArtifactRef{}, err
 	}
-	if size <= 0 || size != info.Size() {
+	if size != info.Size() {
 		return mpcceremony.ArtifactRef{}, errors.New("submission payload is empty or changed while hashing")
 	}
 	return mpcceremony.ArtifactRef{Name: name, Digest: mpcceremony.Digest{SHA256: fmt.Sprintf("sha256:%x", sha.Sum(nil)), Blake2b256: fmt.Sprintf("blake2b256:%x", blake.Sum(nil)), Size: size}}, nil
 }
 
-func verifyCandidateSubmissionFiles(candidateDir string, definition mpcceremony.CeremonyDefinition, slot mpcceremony.CheckpointSubmissionSlot, refs []mpcceremony.ArtifactRef) error {
+func verifyCandidateSubmissionFiles(candidateDir string, definition mpcceremony.CeremonyDefinition, checkpoint mpcceremony.Checkpoint, slot mpcceremony.CheckpointSubmissionSlot, refs []mpcceremony.ArtifactRef) error {
 	participant, ok := definition.ParticipantByID(slot.IdentityID)
 	if !ok {
 		return errors.New("candidate submitter is not an assigned participant")
@@ -329,15 +355,46 @@ func verifyCandidateSubmissionFiles(candidateDir string, definition mpcceremony.
 	if err := mpcceremony.ValidateErasureForContribution(attestation, erasure); err != nil {
 		return err
 	}
-	if attestation.CeremonyID != definition.CeremonyID || attestation.Phase != slot.Phase || attestation.Index != slot.Index || attestation.ParticipantID != slot.IdentityID || attestation.PreviousAcceptanceID != slot.ParentHeadID {
+	phaseState := checkpoint.Phase1
+	if slot.Phase == mpcceremony.Phase2 {
+		if checkpoint.Phase2 == nil {
+			return errors.New("candidate slot has no authenticated Phase 2 state")
+		}
+		phaseState = *checkpoint.Phase2
+	}
+	if attestation.CeremonyID != definition.CeremonyID || attestation.Phase != slot.Phase || attestation.Index != slot.Index || attestation.ParticipantID != slot.IdentityID || attestation.PreviousAcceptanceID != slot.ParentHeadID || attestation.PreviousPayload != phaseState.HeadPayload {
 		return errors.New("candidate attestation does not match the exact allocated slot")
 	}
+	var outputRef mpcceremony.ArtifactRef
 	for _, ref := range refs {
-		if strings.HasSuffix(ref.Name, "/contribution.bin") && ref.Digest != attestation.OutputPayload.Digest {
-			return errors.New("candidate contribution bytes do not match the signed attestation")
+		if strings.HasSuffix(ref.Name, "/contribution.bin") {
+			outputRef = ref
+		}
+	}
+	if outputRef != attestation.OutputPayload {
+		return errors.New("candidate contribution name or bytes do not match the signed attestation")
+	}
+	wantSmall := map[string]mpcceremony.Digest{
+		baseNameForSubmissionRef(refs, "/attestation.json"): mpcceremony.NewDigest(attestationBytes),
+		baseNameForSubmissionRef(refs, "/attestation.sig"):  mpcceremony.NewDigest(attestationSignature),
+		baseNameForSubmissionRef(refs, "/erasure.json"):     mpcceremony.NewDigest(erasureBytes),
+		baseNameForSubmissionRef(refs, "/erasure.sig"):      mpcceremony.NewDigest(erasureSignature),
+	}
+	for _, ref := range refs {
+		if want, ok := wantSmall[ref.Name]; ok && ref.Digest != want {
+			return errors.New("candidate signed record changed while being validated")
 		}
 	}
 	return nil
+}
+
+func baseNameForSubmissionRef(refs []mpcceremony.ArtifactRef, suffix string) string {
+	for _, ref := range refs {
+		if strings.HasSuffix(ref.Name, suffix) {
+			return ref.Name
+		}
+	}
+	return ""
 }
 
 func writeAtomicSubmissionDir(outDir string, files map[string][]byte) (err error) {
@@ -346,6 +403,10 @@ func writeAtomicSubmissionDir(outDir string, files map[string][]byte) (err error
 		return err
 	}
 	if _, err := os.Lstat(outDir); err == nil {
+		info, statErr := os.Lstat(outDir)
+		if statErr != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return errors.New("submission output path exists but is not a regular directory")
+		}
 		for name, expected := range files {
 			actual, readErr := readRegularOperationalFile(filepath.Join(outDir, name), maxOperationalRecordBytes)
 			if readErr != nil || !slices.Equal(actual, expected) {
