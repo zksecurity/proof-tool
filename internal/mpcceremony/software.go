@@ -82,39 +82,9 @@ func SoftwareBindingWithAllowedBinaryFiles(
 ) (SoftwareBinding, error) {
 	bindings := make([]SoftwareBinding, 0, len(paths))
 	for index, path := range paths {
-		file, err := os.Open(path)
+		binding, err := SoftwareBindingFromExecutableFileForMode(path, proofToolVersion, mode)
 		if err != nil {
-			return SoftwareBinding{}, fmt.Errorf("open allowed binary %d %q: %w", index, path, err)
-		}
-		info, err := buildinfo.Read(file)
-		if err != nil {
-			file.Close()
-			return SoftwareBinding{}, fmt.Errorf("read allowed binary %d %q build info: %w", index, path, err)
-		}
-		if info.Path != "proof-tool/cmd/mpc-ceremony" {
-			file.Close()
-			return SoftwareBinding{}, fmt.Errorf(
-				"allowed binary %d %q main package %q, want %q",
-				index, path, info.Path, "proof-tool/cmd/mpc-ceremony",
-			)
-		}
-		fdPath, err := openFileDescriptorPath(file)
-		if err != nil {
-			file.Close()
-			return SoftwareBinding{}, fmt.Errorf("allowed binary %d %q: %w", index, path, err)
-		}
-		source := runningSoftwareSource{
-			executable:     func() (string, error) { return fdPath, nil },
-			readBuildInfo:  func() (*debug.BuildInfo, bool) { return info, true },
-			runtimeVersion: func() string { return info.GoVersion },
-		}
-		binding, bindingErr := runningSoftwareBinding(proofToolVersion, mode, source)
-		closeErr := file.Close()
-		if bindingErr != nil {
-			return SoftwareBinding{}, fmt.Errorf("authenticate allowed binary %d %q: %w", index, path, bindingErr)
-		}
-		if closeErr != nil {
-			return SoftwareBinding{}, fmt.Errorf("close allowed binary %d %q: %w", index, path, closeErr)
+			return SoftwareBinding{}, fmt.Errorf("authenticate allowed binary %d %q: %w", index, path, err)
 		}
 		if err := requireCommonSoftwareIdentity(primary, binding); err != nil {
 			return SoftwareBinding{}, fmt.Errorf("allowed binary %d %q: %w", index, path, err)
@@ -122,6 +92,44 @@ func SoftwareBindingWithAllowedBinaryFiles(
 		bindings = append(bindings, binding)
 	}
 	return softwareBindingWithAllowedBindings(primary, bindings)
+}
+
+// SoftwareBindingFromExecutableFileForMode authenticates one mpc-ceremony
+// executable without running it. Callers must supply the expected release
+// version and ceremony mode; both remain part of the validated binding.
+func SoftwareBindingFromExecutableFileForMode(path, proofToolVersion, mode string) (SoftwareBinding, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return SoftwareBinding{}, fmt.Errorf("open executable %q: %w", path, err)
+	}
+	info, err := buildinfo.Read(file)
+	if err != nil {
+		file.Close()
+		return SoftwareBinding{}, fmt.Errorf("read executable %q build info: %w", path, err)
+	}
+	if info.Path != "proof-tool/cmd/mpc-ceremony" {
+		file.Close()
+		return SoftwareBinding{}, fmt.Errorf("executable %q main package %q, want %q", path, info.Path, "proof-tool/cmd/mpc-ceremony")
+	}
+	fdPath, err := openFileDescriptorPath(file)
+	if err != nil {
+		file.Close()
+		return SoftwareBinding{}, err
+	}
+	source := runningSoftwareSource{
+		executable:     func() (string, error) { return fdPath, nil },
+		readBuildInfo:  func() (*debug.BuildInfo, bool) { return info, true },
+		runtimeVersion: func() string { return info.GoVersion },
+	}
+	binding, bindingErr := runningSoftwareBinding(proofToolVersion, mode, source)
+	closeErr := file.Close()
+	if bindingErr != nil {
+		return SoftwareBinding{}, bindingErr
+	}
+	if closeErr != nil {
+		return SoftwareBinding{}, fmt.Errorf("close executable %q: %w", path, closeErr)
+	}
+	return binding, nil
 }
 
 func softwareBindingWithAllowedBindings(

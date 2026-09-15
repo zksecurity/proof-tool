@@ -464,7 +464,10 @@ func writeWorkflowCheckpointCLIFixture(t *testing.T) (checkpointCLIFixture, ed25
 	workflowRoot := filepath.Join(t.TempDir(), "workflow")
 	run := exec.Command(helperPath, workflowRoot)
 	run.Dir = filepath.Clean(filepath.Join(repoRoot, "..", ".."))
-	run.Env = append(os.Environ(), "MPC_CEREMONY_TEST_BINARY="+commandPath)
+	run.Env = append(os.Environ(),
+		"MPC_CEREMONY_TEST_BINARY="+commandPath,
+		"MPC_WORKFLOW_PHASE1_ONE=1",
+	)
 	if output, runErr := run.CombinedOutput(); runErr != nil {
 		t.Fatalf("run workflow helper: %v\n%s", runErr, output)
 	}

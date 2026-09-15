@@ -82,27 +82,16 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	if err != nil {
 		return fmt.Errorf("bind tiny circuit: %w", err)
 	}
-	software, err := mpcceremony.RunningSoftwareBindingForMode(
-		prover.ProofToolVersion,
-		mpcceremony.ModeRehearsal,
-	)
-	if err != nil {
-		return fmt.Errorf("bind helper executable: %w", err)
-	}
+	var software mpcceremony.SoftwareBinding
 	if binary := os.Getenv("MPC_CEREMONY_TEST_BINARY"); binary != "" {
-		// The workflow helper and command binary target the same platform, so an
-		// allowlist append would correctly reject them as ambiguous duplicates.
-		// This rehearsal-only helper instead replaces the primary executable
-		// digest with the separately built command exercised by the outer test.
-		var commandBytes []byte
-		commandBytes, err = os.ReadFile(binary)
+		software, err = mpcceremony.SoftwareBindingFromExecutableFileForMode(binary, prover.ProofToolVersion, mpcceremony.ModeRehearsal)
 		if err != nil {
-			return fmt.Errorf("read test command executable: %w", err)
-		}
-		software.ToolBinary = mpcceremony.NewDigest(commandBytes)
-		software.Binaries = nil
-		if err = software.Validate(); err != nil {
 			return fmt.Errorf("bind test command executable: %w", err)
+		}
+	} else {
+		software, err = mpcceremony.RunningSoftwareBindingForMode(prover.ProofToolVersion, mpcceremony.ModeRehearsal)
+		if err != nil {
+			return fmt.Errorf("bind helper executable: %w", err)
 		}
 	}
 
@@ -348,6 +337,22 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		EphemeralCleanupRequired:      true,
 		HostRemnantsNotExcluded:       true,
 	}
+	environmentPath := filepath.Join(outputRoot, "environment.json")
+	environmentBytes, err := mpcceremony.MarshalCanonical(environment)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(environmentPath, environmentBytes, 0o600); err != nil {
+		return err
+	}
+	testCommand := os.Getenv("MPC_CEREMONY_TEST_BINARY")
+	runTestCommand := func(args ...string) error {
+		output, commandErr := exec.Command(testCommand, args...).CombinedOutput()
+		if commandErr != nil {
+			return fmt.Errorf("run test mpc-ceremony %s: %w\n%s", strings.Join(args[:2], " "), commandErr, output)
+		}
+		return nil
+	}
 	participantKeyPaths := []string{participant1KeyPath, participant2KeyPath}
 	contributeAndAccept := func(
 		phase mpcceremony.Phase,
@@ -364,6 +369,67 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 			candidateRoot,
 			fmt.Sprintf("%s-%s", phase, participantID),
 		)
+		if testCommand != "" {
+			command := []string{string(phase), "contribute",
+				"--ceremony", trust.DefinitionPath,
+				"--ceremony-signature", trust.DefinitionSignaturePath,
+				"--coordinator-public-key-file", trust.CoordinatorPublicKeyPath,
+				"--transcript-dir", ceremonyRoot,
+				"--chain", chainPaths.ChainPath,
+				"--chain-signature", chainPaths.ChainSignaturePath,
+				"--participant-id", participantID,
+				"--participant-signing-key", participantKeyPaths[index-1],
+				"--environment", environmentPath,
+				"--contributed-at", contributedAt,
+				"--out-dir", candidateDir,
+			}
+			if phase == mpcceremony.Phase2 {
+				command = append(command,
+					"--phase1-seal", phase1SealPath,
+					"--phase1-seal-signature", phase1SealSignaturePath,
+				)
+			}
+			if err := runTestCommand(command...); err != nil {
+				return mpcceremony.PhaseTranscriptPaths{}, err
+			}
+			if err := runTestCommand(
+				string(phase), "attest-erasure",
+				"--ceremony", trust.DefinitionPath,
+				"--ceremony-signature", trust.DefinitionSignaturePath,
+				"--coordinator-public-key-file", trust.CoordinatorPublicKeyPath,
+				"--participant-id", participantID,
+				"--participant-signing-key", participantKeyPaths[index-1],
+				"--candidate-dir", candidateDir,
+				"--destroyed-at", destroyedAt,
+			); err != nil {
+				return mpcceremony.PhaseTranscriptPaths{}, err
+			}
+			command = []string{string(phase), "verify",
+				"--ceremony", trust.DefinitionPath,
+				"--ceremony-signature", trust.DefinitionSignaturePath,
+				"--coordinator-public-key-file", trust.CoordinatorPublicKeyPath,
+				"--transcript-dir", ceremonyRoot,
+				"--chain", chainPaths.ChainPath,
+				"--chain-signature", chainPaths.ChainSignaturePath,
+				"--candidate-dir", candidateDir,
+				"--coordinator-signing-key", coordinatorKeyPath,
+				"--accepted-at", acceptedAt,
+			}
+			if phase == mpcceremony.Phase2 {
+				command = append(command,
+					"--phase1-seal", phase1SealPath,
+					"--phase1-seal-signature", phase1SealSignaturePath,
+				)
+			}
+			if err := runTestCommand(command...); err != nil {
+				return mpcceremony.PhaseTranscriptPaths{}, err
+			}
+			return mpcceremony.PhaseTranscriptPaths{
+				RootDir:            ceremonyRoot,
+				ChainPath:          filepath.Join(ceremonyRoot, string(phase), fmt.Sprintf("chain-%04d.json", index)),
+				ChainSignaturePath: filepath.Join(ceremonyRoot, string(phase), fmt.Sprintf("chain-%04d.sig", index)),
+			}, nil
+		}
 		if _, err := mpcceremony.CreateContributionCandidate(
 			mpcceremony.ContributionFilesOptions{
 				Trust:                     trust,
@@ -432,6 +498,12 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	)
 	if err != nil {
 		return fmt.Errorf("Phase 1 participant 1: %w", err)
+	}
+	// Checkpoint command tests need one authentic contribution produced by the
+	// separately built mpc-ceremony executable, but not the later beacon,
+	// Phase 2, audit, and release fixtures owned by this general helper.
+	if os.Getenv("MPC_WORKFLOW_PHASE1_ONE") == "1" {
+		return nil
 	}
 	phase1Paths, err = contributeAndAccept(
 		mpcceremony.Phase1,
