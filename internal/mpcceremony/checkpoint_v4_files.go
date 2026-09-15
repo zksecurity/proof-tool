@@ -389,6 +389,8 @@ func verifyCheckpointEvidenceV4(options CheckpointPreparationV4, trusted *Truste
 		return nil // No protocol claim or accepted artifact is added.
 	case CheckpointPhase1Closed, CheckpointPhase2Closed, CheckpointPhase1BeaconRecorded, CheckpointPhase2BeaconRecorded, CheckpointPhase1Sealed, CheckpointPhase2Initialized:
 		return verifyCheckpointLifecycleV4(options, trusted, reader, *previous)
+	case CheckpointFinalCandidateRecorded:
+		return verifyFinalCandidateV4(options, trusted, reader, *previous)
 	default:
 		return errors.New("real-artifact authoring for this v4 transition is not implemented yet")
 	}

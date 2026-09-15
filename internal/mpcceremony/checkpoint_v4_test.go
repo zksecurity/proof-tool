@@ -159,6 +159,22 @@ func TestCheckpointV4FullStructuralLifecycle(t *testing.T) {
 			next.Progress.Phase2Beacon = &record
 		case CheckpointFinalCandidateRecorded:
 			next.Progress.FinalCandidate = &record
+			next.Transition.ReplayVerification = &CheckpointReplayVerificationV4{Method: CoordinatorReplayReleaseV1, ToolBinary: d.Software.ToolBinary}
+			for _, mutate := range []func(*CheckpointReplayVerificationV4){
+				func(claim *CheckpointReplayVerificationV4) { claim.Method = "signature-only" },
+				func(claim *CheckpointReplayVerificationV4) { claim.ToolBinary = Digest{} },
+			} {
+				bad := cloneCheckpointV4(t, next)
+				mutate(bad.Transition.ReplayVerification)
+				if err := ValidateCheckpointTransitionV4(c, bad); err == nil {
+					t.Fatal("invalid final replay claim accepted")
+				}
+			}
+			bad := cloneCheckpointV4(t, next)
+			bad.Transition.ReplayVerification = nil
+			if err := ValidateCheckpointTransitionV4(c, bad); err == nil {
+				t.Fatal("missing final replay claim accepted")
+			}
 		case CheckpointFinalReleaseRecorded:
 			next.Progress.FinalRelease = &record
 		}

@@ -35,13 +35,21 @@ type CheckpointProgressV4 struct {
 }
 
 type CheckpointTransitionV4 struct {
-	Kind          CheckpointTransitionKind `json:"kind"`
-	Scope         *ContributionScope       `json:"scope,omitempty"`
-	AttemptID     string                   `json:"attempt_id,omitempty"`
-	NextAttemptID string                   `json:"next_attempt_id,omitempty"`
-	Record        *SignedArtifactRefs      `json:"record,omitempty"`
-	Evidence      []ArtifactRef            `json:"evidence"`
-	Contribution  *CandidateInventory      `json:"contribution,omitempty"`
+	Kind               CheckpointTransitionKind        `json:"kind"`
+	Scope              *ContributionScope              `json:"scope,omitempty"`
+	AttemptID          string                          `json:"attempt_id,omitempty"`
+	NextAttemptID      string                          `json:"next_attempt_id,omitempty"`
+	Record             *SignedArtifactRefs             `json:"record,omitempty"`
+	Evidence           []ArtifactRef                   `json:"evidence"`
+	Contribution       *CandidateInventory             `json:"contribution,omitempty"`
+	ReplayVerification *CheckpointReplayVerificationV4 `json:"replay_verification,omitempty"`
+}
+
+// This is the coordinator's authenticated replay claim, not a proof that an
+// untrusted coordinator actually ran the computation.
+type CheckpointReplayVerificationV4 struct {
+	Method     string `json:"method"`
+	ToolBinary Digest `json:"tool_binary"`
 }
 
 // CheckpointV4 deliberately has no backend object key, release-image ID,
@@ -183,6 +191,16 @@ func (c CheckpointV4) Validate() error {
 }
 
 func (t CheckpointTransitionV4) Validate() error {
+	if t.Kind == CheckpointFinalCandidateRecorded {
+		if t.ReplayVerification == nil || t.ReplayVerification.Method != CoordinatorReplayReleaseV1 {
+			return errors.New("final candidate requires the explicit coordinator full replay claim")
+		}
+		if err := t.ReplayVerification.ToolBinary.Validate(); err != nil {
+			return err
+		}
+	} else if t.ReplayVerification != nil {
+		return errors.New("only final candidate preparation records full replay verification")
+	}
 	if err := validateV4ArtifactSet(t.Evidence, MaxCheckpointArtifacts); err != nil {
 		return err
 	}
@@ -321,6 +339,9 @@ func validateCheckpointDefinitionBindingV4(d CeremonyDefinition, definitionBytes
 	}
 	if c.CeremonyID != d.CeremonyID || c.Definition.Record.Digest != NewDigest(definitionBytes) || c.Definition.Signature.Digest != NewDigest(definitionSignature) || !reflect.DeepEqual(c.AssurancePolicy, d.AssurancePolicy) || c.ReleaseVerification != d.ReleaseVerification {
 		return errors.New("checkpoint changed its exact definition or signed policy")
+	}
+	if claim := c.Transition.ReplayVerification; claim != nil && !d.Software.AllowsToolBinary(claim.ToolBinary) {
+		return errors.New("checkpoint replay claim names an unapproved executable")
 	}
 	for _, slot := range c.Deliveries {
 		if err := slot.Scope.ValidateAssignment(d); err != nil {

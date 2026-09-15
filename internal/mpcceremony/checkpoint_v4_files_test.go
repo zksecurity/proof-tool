@@ -61,7 +61,7 @@ func TestCheckpointV4RealContributionTurn(t *testing.T) {
 			if err != nil {
 				t.Fatalf("real checkpoint turn: %v\n%s", err, output)
 			}
-			if !strings.Contains(string(output), "V4 real phase1 turn passed") || !strings.Contains(string(output), "closure, drand, seal, phase2 genesis") {
+			if !strings.Contains(string(output), "V4 real phase1 turn passed") || !strings.Contains(string(output), "V4 phase2 and final candidate passed") {
 				t.Fatalf("missing completion: %s", output)
 			}
 		})

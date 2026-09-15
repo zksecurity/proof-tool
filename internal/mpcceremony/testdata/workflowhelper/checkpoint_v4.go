@@ -561,5 +561,5 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 		return err
 	}
 	fmt.Println("V4 real phase1 turn passed: initial, outbound, retirement, reallocation, receipt, contribution, cleanup, full replay, exact acceptance, corruption rejected, closure, drand, seal, phase2 genesis")
-	return nil
+	return runCheckpointV4Final(output, root, trust, circuit, d, coordinator, coordinatorPath, participant, participantPath, &c, next, commit, writePair, ref, sorted)
 }

@@ -27,12 +27,13 @@ check by changing the meaning of V3 or a generic "current schema" constant.
 ## New-version implementation gate
 
 Current draft: opt-in V4 construction, structural checkpoints and real-artifact
-verification through Phase 2 initialization exist in the library. The Linux
-integration test uses a real tiny contribution, signed custody records, genuine
-historical drand response, Phase 1 replay/sealing and Phase 2 genesis. Its
+verification through final-candidate recording exist in the library. The Linux
+integration test uses real tiny contributions in both phases, signed custody
+records, genuine historical drand responses and complete coordinator replay.
+Final-candidate authoring binds the exact executable and closed file inventory. Its
 environment and cleanup claims are test fixtures, not physical assurance.
 Normal initialization still emits V3. Do not release this slice alone: remaining
-evidence gates, final authoring and the new release/decision verification path
+audit/governance evidence, final-release authoring and the new release/decision verification path
 are incomplete. These tests are not the normal CLI journey or a full ceremony.
 
 - Reserve Definition V4, Checkpoint V4 and `storage-first-v2` for the changed

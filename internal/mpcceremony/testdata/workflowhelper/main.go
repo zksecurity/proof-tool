@@ -21,6 +21,7 @@ import (
 	"github.com/consensys/gnark/frontend/cs/r1cs"
 	"golang.org/x/crypto/blake2b"
 
+	"proof-tool/internal/circuit/rehearsal"
 	"proof-tool/internal/mpcceremony"
 	"proof-tool/internal/prover"
 )
@@ -218,7 +219,7 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	if os.Getenv("MPC_WORKFLOW_PHASE1_ONE") == "1" || checkpointPhase2One || checkpointV4 {
 		phaseMinimum = 1
 	}
-	if checkpointPhase2One {
+	if checkpointPhase2One || checkpointV4 {
 		phase2Minimum = 1
 	}
 	auditors := []mpcceremony.Identity{}
@@ -1179,7 +1180,21 @@ func writeTinyPublicEvidence(
 	}
 	scalar := new(big.Int).SetBytes(reversed)
 	scalar.Mod(scalar, ecc.BLS12_381.ScalarField())
-	assignment := &tinyCommittedCircuit{Public: scalar, Secret: scalar}
+	var assignment frontend.Circuit = &tinyCommittedCircuit{Public: scalar, Secret: scalar}
+	if circuit.Binding.KeyVersion == mpcceremony.KeyVersionRehearsal {
+		field := ecc.BLS12_381.ScalarField()
+		q := new(big.Int).Sub(field, big.NewInt(1))
+		q.Div(q, big.NewInt(3))
+		exponent := new(big.Int).ModInverse(big.NewInt(3), q)
+		if exponent == nil {
+			return errors.New("unexpected rehearsal cube subgroup")
+		}
+		cubeRoot := new(big.Int).Exp(scalar, exponent, field)
+		if new(big.Int).Exp(cubeRoot, big.NewInt(3), field).Cmp(scalar) != 0 {
+			return errors.New("rehearsal golden scalar is not a cube")
+		}
+		assignment = &rehearsal.Circuit{X: cubeRoot, Pub: scalar}
+	}
 	fullWitness, err := frontend.NewWitness(assignment, ecc.BLS12_381.ScalarField())
 	if err != nil {
 		return err
