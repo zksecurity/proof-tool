@@ -18,6 +18,7 @@ type DefinitionJourneyInspection struct {
 	MinimumMirrorsPerAcceptedHead int                            `json:"minimum_mirrors_per_accepted_head"`
 	MinimumPassingCeremonyAudits  int                            `json:"minimum_passing_ceremony_audits"`
 	MinimumExternalAuditSignoffs  int                            `json:"minimum_external_audit_signoffs"`
+	BeaconRoundLeadSeconds        uint32                         `json:"beacon_round_lead_seconds"`
 	ObserverRequirementSource     string                         `json:"observer_requirement_source"`
 }
 
@@ -46,7 +47,7 @@ type JourneyInspection struct {
 }
 
 func inspectDefinitionJourney(d mpcceremony.CeremonyDefinition) *DefinitionJourneyInspection {
-	r := &DefinitionJourneyInspection{Schema: "proof-tool-mpc-definition-journey-v2", MinimumPublicWitnesses: 1, MinimumMirrorsPerAcceptedHead: 1, MinimumPassingCeremonyAudits: 1, MinimumExternalAuditSignoffs: 1, ObserverRequirementSource: "legacy verifier minimums"}
+	r := &DefinitionJourneyInspection{Schema: "proof-tool-mpc-definition-journey-v2", MinimumPublicWitnesses: 1, MinimumMirrorsPerAcceptedHead: 1, MinimumPassingCeremonyAudits: 1, MinimumExternalAuditSignoffs: 1, BeaconRoundLeadSeconds: d.BeaconPolicy.MinimumWitnessLeadSeconds, ObserverRequirementSource: "legacy verifier minimums"}
 	if d.Schema == mpcceremony.DefinitionSchema && d.AssurancePolicy != nil {
 		r.MinimumPublicWitnesses = int(d.AssurancePolicy.PublicWitnessesPerPhase)
 		r.MinimumMirrorsPerAcceptedHead = int(d.AssurancePolicy.MirrorsPerAcceptedHead)

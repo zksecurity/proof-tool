@@ -30,6 +30,9 @@ func TestDefinitionJourneyProjectsEveryRequiredEnrollment(t *testing.T) {
 	if j.MinimumPublicWitnesses != 1 || j.MinimumMirrorsPerAcceptedHead != 1 || j.MinimumPassingCeremonyAudits != 1 || j.MinimumExternalAuditSignoffs != 1 || j.ObserverRequirementSource != "signed ceremony assurance_policy" {
 		t.Fatal("operational verifier minimums omitted")
 	}
+	if j.BeaconRoundLeadSeconds != d.BeaconPolicy.MinimumWitnessLeadSeconds {
+		t.Fatal("signed beacon lead omitted")
+	}
 	d.Auditors[0].DisplayName = "changed"
 	if j.RequiredEnrollments[2].Identity.DisplayName == "changed" {
 		t.Fatal("projection aliases mutable roster")
