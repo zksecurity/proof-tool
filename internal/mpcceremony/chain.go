@@ -1159,6 +1159,7 @@ type FinalTranscript struct {
 	VerifyingKey        ArtifactRef        `json:"verifying_key"`
 	CardanoVerifyingKey ArtifactRef        `json:"cardano_verifying_key"`
 	FinalizedAt         string             `json:"finalized_at"`
+	ReleaseReview       *ReleaseReviewV4   `json:"release_review,omitempty"`
 }
 
 func NewFinalTranscript(record FinalTranscript) (FinalTranscript, error) {
@@ -1169,7 +1170,7 @@ func NewFinalTranscript(record FinalTranscript) (FinalTranscript, error) {
 			record.Schema = FinalTranscriptSchema
 		}
 	}
-	if record.Schema == FinalTranscriptSchema && record.Audits == nil {
+	if (record.Schema == FinalTranscriptSchema || record.Schema == FinalTranscriptSchemaV3) && record.Audits == nil {
 		record.Audits = []ArtifactRef{}
 	}
 	record.TranscriptID = ""
@@ -1189,6 +1190,8 @@ func ComputeFinalTranscriptID(record FinalTranscript) (string, error) {
 	domain := "proof-tool/mpc-ceremony/final-transcript/v2"
 	if record.Schema == FinalTranscriptSchemaV1 {
 		domain = "proof-tool/mpc-ceremony/final-transcript/v1"
+	} else if record.Schema == FinalTranscriptSchemaV3 {
+		domain = "proof-tool/mpc-ceremony/final-transcript/v3"
 	}
 	return canonicalHash(domain, record)
 }
@@ -1208,8 +1211,11 @@ func (r FinalTranscript) Validate() error {
 }
 
 func (r FinalTranscript) validate(requireID bool) error {
+	if r.Schema != FinalTranscriptSchemaV3 && r.ReleaseReview != nil {
+		return errors.New("legacy final transcripts must not contain release_review")
+	}
 	switch r.Schema {
-	case FinalTranscriptSchema:
+	case FinalTranscriptSchema, FinalTranscriptSchemaV3:
 		if r.AssurancePolicy == nil {
 			return errors.New("final transcript v2 requires assurance_policy")
 		}
@@ -1222,6 +1228,11 @@ func (r FinalTranscript) validate(requireID bool) error {
 		}
 	default:
 		return fmt.Errorf("transcript schema %q is unsupported", r.Schema)
+	}
+	if r.Schema == FinalTranscriptSchemaV3 {
+		if err := validateFinalTranscriptReviewV3(r); err != nil {
+			return err
+		}
 	}
 	if requireID {
 		if err := validateHashID("transcript_id", r.TranscriptID); err != nil {
@@ -1254,7 +1265,7 @@ func (r FinalTranscript) validate(requireID bool) error {
 	if r.Schema == FinalTranscriptSchemaV1 && len(r.Audits) < 1 {
 		return errors.New("final transcript requires at least one independent audit artifact")
 	}
-	if r.Schema == FinalTranscriptSchema {
+	if r.Schema == FinalTranscriptSchema || r.Schema == FinalTranscriptSchemaV3 {
 		if len(r.Audits) < int(r.AssurancePolicy.PassingCeremonyAudits) {
 			return fmt.Errorf("final transcript has %d audits, below signed minimum %d", len(r.Audits), r.AssurancePolicy.PassingCeremonyAudits)
 		}

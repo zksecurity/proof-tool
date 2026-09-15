@@ -58,9 +58,17 @@ checking an operational bundle alone does not establish that replay. V1–V3
 continue requiring and hashing every historical payload. The review's sorted
 dependency list is tested by copying only those files and re-verifying from the
 copied definition and signature, without historical contribution binaries.
+The V4 library now signs and verifies a local package with an inline exact review
+in FinalTranscript V3, while preserving the application manifest V1 and root-level
+key files. Only the fixed candidate filename set is relocated; all other logical
+names remain unchanged. Independent copies, exact file inventories, copied-byte
+review, and destination verification also cover exact retries. The output must
+be outside the source tree. Transcript V3 alone has a dedicated 64 MiB bound;
+ordinary signed JSON remains limited to 16 MiB. Package time is not proof of
+upload, and package signing is not a production GO decision.
 Normal initialization still emits V3. Do not release this slice alone: remaining
-final-release authoring and the new release/decision verification path
-are incomplete. These tests are not the normal CLI journey or a full ceremony.
+final-release checkpoint authoring, production decision integration and normal
+CLI guidance are incomplete. These tests are not a complete user ceremony.
 
 - Reserve Definition V4, Checkpoint V4 and `storage-first-v2` for the changed
   trust and submission rules; do not emit them until the whole verifier path

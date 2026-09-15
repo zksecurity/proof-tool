@@ -112,6 +112,9 @@ func runCheckpointV4Review(root string, trust m.TrustPaths, d m.CeremonyDefiniti
 			return fmt.Errorf("missing dependency accepted in snapshot: %s", ref.Name)
 		}
 	}
+	if err := runCheckpointV4Release(snapshot, snapshotTrust, d, review, filepath.Join(filepath.Dir(root), "identity-keys/release-signer.ed25519.private.hex"), filepath.Join(filepath.Dir(root), "release-v4")); err != nil {
+		return err
+	}
 	renamedTrust := trust
 	renamedTrust.DefinitionPath = filepath.Join(root, "renamed-trusted-definition.json")
 	definitionBytes, err := os.ReadFile(trust.DefinitionPath)

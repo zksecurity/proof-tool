@@ -733,6 +733,9 @@ func VerifyRelease(options VerifyReleaseOptions) (*VerifyReleaseResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	if transcript.Schema == FinalTranscriptSchemaV3 {
+		return nil, errors.New("final transcript v3 requires the definition v4 release path")
+	}
 	bundledAudits, err := bundledAuditsForTranscript(options.KeysDir, transcript.Audits)
 	if err != nil {
 		return nil, err
@@ -1799,12 +1802,13 @@ func publishReleaseDirectory(stagingDir, releaseDir string) (err error) {
 }
 
 func verifyReleaseTreeExact(dir string, auditCount int, operationalNames []string) error {
+	return verifyExactReleaseFiles(dir, append(releaseChecksumNames(auditCount, operationalNames), ReleaseChecksumsFile), false)
+}
+
+func verifyExactReleaseFiles(dir string, names []string, rejectHardlinks bool) error {
 	expectedFiles := make(map[string]struct{})
 	expectedDirectories := map[string]struct{}{".": {}}
-	for _, name := range append(
-		releaseChecksumNames(auditCount, operationalNames),
-		ReleaseChecksumsFile,
-	) {
+	for _, name := range names {
 		if err := validateArtifactName(name); err != nil {
 			return fmt.Errorf("expected release artifact %q: %w", name, err)
 		}
@@ -1841,6 +1845,11 @@ func verifyReleaseTreeExact(dir string, auditCount int, operationalNames []strin
 		}
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("release-tree entry %q is not a regular file", name)
+		}
+		if rejectHardlinks {
+			if err := requireSingleLinkV4(info); err != nil {
+				return fmt.Errorf("release-tree entry %q: %w", name, err)
+			}
 		}
 		if _, ok := expectedFiles[name]; !ok {
 			return fmt.Errorf("unexpected release-tree entry %q", name)

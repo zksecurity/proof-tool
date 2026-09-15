@@ -19,8 +19,9 @@ import (
 // checkpointReaderV4 confines all referenced reads to one public staging root.
 // Large payloads are hashed as streams; JSON and signatures remain bounded.
 type checkpointReaderV4 struct {
-	root *os.Root
-	path string
+	root          *os.Root
+	path          string
+	flatCandidate bool // internal V4 release layout only; never caller-defined aliases
 }
 
 func openCheckpointReaderV4(path string) (*checkpointReaderV4, error) {
@@ -58,7 +59,15 @@ func (r *checkpointReaderV4) read(ref ArtifactRef, limit int64, capture bool) ([
 	if capture && limit > maxSignedRecordBytes {
 		return nil, errors.New("large artifacts must be streamed, not retained in memory")
 	}
-	parts := strings.Split(ref.Name, "/")
+	name := ref.Name
+	if r.flatCandidate {
+		var err error
+		name, err = releasePhysicalNameV4(name)
+		if err != nil {
+			return nil, err
+		}
+	}
+	parts := strings.Split(name, "/")
 	var before os.FileInfo
 	for i := range parts {
 		info, err := r.root.Lstat(filepath.Join(parts[:i+1]...))
@@ -73,7 +82,7 @@ func (r *checkpointReaderV4) read(ref ArtifactRef, limit int64, capture bool) ([
 	if !before.Mode().IsRegular() || before.Size() != ref.Digest.Size {
 		return nil, fmt.Errorf("artifact %s is not a regular file of the expected size", ref.Name)
 	}
-	f, err := r.root.Open(filepath.FromSlash(ref.Name))
+	f, err := r.root.Open(filepath.FromSlash(name))
 	if err != nil {
 		return nil, err
 	}

@@ -78,6 +78,9 @@ func TestCheckpointV4RealContributionTurn(t *testing.T) {
 			if !strings.Contains(string(output), "V4 final review passed: no contribution replay input") {
 				t.Fatalf("missing final review completion: %s", output)
 			}
+			if !strings.Contains(string(output), "V4 signed package passed: exact-only source") {
+				t.Fatal("real fixture did not complete V4 release package signing and verification")
+			}
 			if scenario.name == "observers-disabled" {
 				testV4CoherentInvalidPublicProof(t, filepath.Join(outputRoot, "ceremony"))
 			}

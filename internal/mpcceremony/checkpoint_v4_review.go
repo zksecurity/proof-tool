@@ -68,6 +68,10 @@ func (r ReleaseReviewV4) Validate() error {
 // and required evidence. It trusts the coordinator's approved replay claim;
 // it never calls contribution replay and accepts no replay/circuit input.
 func VerifyReleaseReviewV4(trust TrustPaths, artifactRoot string, head, bundleRefs SignedArtifactRefs, releasedAt time.Time) (ReleaseReviewV4, error) {
+	return verifyReleaseReviewV4(trust, artifactRoot, head, bundleRefs, releasedAt, false)
+}
+
+func verifyReleaseReviewV4(trust TrustPaths, artifactRoot string, head, bundleRefs SignedArtifactRefs, releasedAt time.Time, flatCandidate bool) (ReleaseReviewV4, error) {
 	if releasedAt.IsZero() || releasedAt.Location() != time.UTC {
 		return ReleaseReviewV4{}, errors.New("release time must be nonzero UTC")
 	}
@@ -95,6 +99,7 @@ func VerifyReleaseReviewV4(trust TrustPaths, artifactRoot string, head, bundleRe
 		return ReleaseReviewV4{}, err
 	}
 	defer reader.root.Close()
+	reader.flatCandidate = flatCandidate
 	a, err := loadCheckpointAncestryV4(reader, d, db, ds, head)
 	if err != nil {
 		return ReleaseReviewV4{}, err
@@ -129,11 +134,18 @@ func VerifyReleaseReviewV4(trust TrustPaths, artifactRoot string, head, bundleRe
 	// where the signer saved its independently trusted local copy.
 	definitionRef := a.head.Definition.Record
 	candidateDir := filepath.Join(reader.path, "final/candidate")
+	if flatCandidate {
+		candidateDir = reader.path
+	}
 	candidate, candidateRef, err := verifyCandidate(d, definitionRef, candidateDir)
 	if err != nil {
 		return ReleaseReviewV4{}, err
 	}
-	candidate, inventory, err := verifyCandidateClosedTree(d, definitionRef, candidateDir, candidate, candidateRef)
+	verifyTree := verifyCandidateClosedTree
+	if flatCandidate {
+		verifyTree = verifyCandidateSubsetV4
+	}
+	candidate, inventory, err := verifyTree(d, definitionRef, candidateDir, candidate, candidateRef)
 	if err != nil {
 		return ReleaseReviewV4{}, err
 	}
@@ -195,6 +207,13 @@ func VerifyReleaseReviewV4(trust TrustPaths, artifactRoot string, head, bundleRe
 	}
 	if err := result.Validate(); err != nil {
 		return ReleaseReviewV4{}, err
+	}
+	// Bind every returned dependency to bytes at this root, including the
+	// definition pair when the independently trusted local copy lives elsewhere.
+	for _, ref := range result.RequiredArtifacts {
+		if _, err := reader.read(ref, MaxArtifactSize, false); err != nil {
+			return ReleaseReviewV4{}, err
+		}
 	}
 	return result, nil
 }
