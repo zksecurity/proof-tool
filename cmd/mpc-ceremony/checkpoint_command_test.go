@@ -358,22 +358,22 @@ func TestCheckpointCommandFullPhase1CandidateAcceptance(t *testing.T) {
 		"--manifest", manifestPath, "--acknowledgement", ackPath, "--acknowledgement-signature", ackSignaturePath,
 	)
 	cp3Packet := filepath.Join(fixture.root, "prepared", "cp3")
-	result := runCheckpointCommandCLI(t, append(append([]string{"--format", "json", "checkpoint", "prepare"}, args...), "--out-dir", cp3Packet))
+	result := runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "prepare"}, args...), "--out-dir", cp3Packet))
 	keyPath := filepath.Join(filepath.Dir(fixture.root), "identity-keys", "coordinator.ed25519.private.hex")
 	cp3SignaturePath := filepath.Join(fixture.root, "state", "signed-cp3.sig")
-	runCheckpointCommandCLI(t, append(append([]string{"--format", "json", "checkpoint", "sign"}, args...),
+	runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "sign"}, args...),
 		"--checkpoint", result.Outputs["checkpoint"], "--signing-request", result.Outputs["signing_request"],
 		"--coordinator-signing-key", keyPath, "--out", cp3SignaturePath))
-	verified := runCheckpointCommandCLI(t, append(append([]string{"--format", "json", "checkpoint", "verify-stored"}, fixture.trustArgs...),
+	verified := runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "verify-stored"}, fixture.trustArgs...),
 		"--checkpoint", result.Outputs["checkpoint"], "--checkpoint-signature", cp3SignaturePath, "--artifact-root", fixture.root))
 	if verified.CheckpointEvidenceInspection == nil || !verified.CheckpointEvidenceInspection.FullyVerified || verified.CheckpointEvidenceInspection.Sequence != 3 {
 		t.Fatalf("cp3 stored verification = %#v", verified.CheckpointEvidenceInspection)
 	}
 
-	assertChangedCheckpointEvidenceFails(t, args, accepted.OutputPayload.Name, "candidate-payload")
-	assertChangedCheckpointEvidenceFails(t, args, filepath.ToSlash(mustRelativeTestPath(t, fixture.root, manifestPath)), "manifest")
-	assertChangedCheckpointEvidenceFails(t, args, filepath.ToSlash(mustRelativeTestPath(t, fixture.root, ackSignaturePath)), "acknowledgement")
-	assertChangedCheckpointEvidenceFails(t, args, filepath.ToSlash(mustRelativeTestPath(t, fixture.root, chainPath)), "accepted-chain")
+	assertChangedCheckpointEvidenceFails(t, fixture.executable, args, accepted.OutputPayload.Name, "candidate-payload")
+	assertChangedCheckpointEvidenceFails(t, fixture.executable, args, filepath.ToSlash(mustRelativeTestPath(t, fixture.root, manifestPath)), "manifest")
+	assertChangedCheckpointEvidenceFails(t, fixture.executable, args, filepath.ToSlash(mustRelativeTestPath(t, fixture.root, ackSignaturePath)), "acknowledgement")
+	assertChangedCheckpointEvidenceFails(t, fixture.executable, args, filepath.ToSlash(mustRelativeTestPath(t, fixture.root, chainPath)), "accepted-chain")
 }
 
 func TestVerifyCandidateEnvelopePayloadsStreamsLargeContribution(t *testing.T) {
@@ -455,9 +455,16 @@ func writeWorkflowCheckpointCLIFixture(t *testing.T) (checkpointCLIFixture, ed25
 			t.Fatalf("build workflow helper: %v\n%s", buildErr, output)
 		}
 	}
+	commandPath := filepath.Join(t.TempDir(), "mpc-ceremony")
+	buildCommand := exec.Command("go", "build", "-o", commandPath, "./cmd/mpc-ceremony")
+	buildCommand.Dir = filepath.Clean(filepath.Join(repoRoot, "..", ".."))
+	if output, buildErr := buildCommand.CombinedOutput(); buildErr != nil {
+		t.Fatalf("build mpc-ceremony command: %v\n%s", buildErr, output)
+	}
 	workflowRoot := filepath.Join(t.TempDir(), "workflow")
 	run := exec.Command(helperPath, workflowRoot)
 	run.Dir = filepath.Clean(filepath.Join(repoRoot, "..", ".."))
+	run.Env = append(os.Environ(), "MPC_CEREMONY_TEST_BINARY="+commandPath)
 	if output, runErr := run.CombinedOutput(); runErr != nil {
 		t.Fatalf("run workflow helper: %v\n%s", runErr, output)
 	}
@@ -472,6 +479,7 @@ func writeWorkflowCheckpointCLIFixture(t *testing.T) (checkpointCLIFixture, ed25
 	coordinatorKey := readCheckpointTestKey(t, filepath.Join(workflowRoot, "identity-keys", "coordinator.ed25519.private.hex"))
 	participantKey := readCheckpointTestKey(t, filepath.Join(workflowRoot, "identity-keys", "participant-01.ed25519.private.hex"))
 	return checkpointCLIFixture{
+		executable: commandPath,
 		trustArgs: []string{
 			"--ceremony", definitionPath,
 			"--ceremony-signature", definitionSignaturePath,
@@ -590,14 +598,14 @@ func prepareAndSignReceiptCheckpoint(t *testing.T, fixture checkpointCLIFixture,
 	return result.Outputs["checkpoint"], signaturePath
 }
 
-func assertChangedCheckpointEvidenceFails(t *testing.T, args []string, relativePath, label string) {
+func assertChangedCheckpointEvidenceFails(t *testing.T, executable string, args []string, relativePath, label string) {
 	t.Helper()
 	path := filepath.Join(argsValueForTest(t, args, "--artifact-root"), filepath.FromSlash(relativePath))
 	original := mustReadTestFile(t, path)
 	changed := append([]byte(nil), original...)
 	changed[len(changed)/2] ^= 1
 	writeDecisionTestFile(t, path, changed, 0o600)
-	assertCheckpointCommandFails(t, append(append([]string{"--format", "json", "checkpoint", "prepare"}, args...),
+	assertCheckpointExecutableFails(t, executable, append(append([]string{"--format", "json", "checkpoint", "prepare"}, args...),
 		"--out-dir", filepath.Join(argsValueForTest(t, args, "--artifact-root"), "prepared", "cp3-tampered-"+label)), "")
 	writeDecisionTestFile(t, path, original, 0o600)
 }
@@ -728,6 +736,30 @@ func runCheckpointCommandCLI(t *testing.T, args []string) CommandResult {
 		t.Fatal(err)
 	}
 	return result
+}
+
+func runCheckpointCommandExecutable(t *testing.T, executable string, args []string) CommandResult {
+	t.Helper()
+	output, err := exec.Command(executable, args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run %s: %v, output = %q", executable, err, output)
+	}
+	var result CommandResult
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatalf("decode %s output: %v, output = %q", executable, err, output)
+	}
+	return result
+}
+
+func assertCheckpointExecutableFails(t *testing.T, executable string, args []string, want string) {
+	t.Helper()
+	output, err := exec.Command(executable, args...).CombinedOutput()
+	if err == nil {
+		t.Fatalf("command unexpectedly succeeded: %s", output)
+	}
+	if !strings.Contains(string(output), want) {
+		t.Fatalf("error %q does not contain %q", output, want)
+	}
 }
 
 func assertCheckpointCommandFails(t *testing.T, args []string, want string) {

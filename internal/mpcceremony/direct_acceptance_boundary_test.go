@@ -227,12 +227,7 @@ func TestVerifyAcceptedPhase1ChainCheckpointBoundary(t *testing.T) {
 	fixture := newDirectAcceptanceFixture(t)
 	// TrustedCeremony deliberately does not retain source paths. Use the
 	// fixture's canonical layout for this public read-only entry point.
-	trust := TrustPaths{
-		DefinitionPath:           filepath.Join(fixture.ceremonyRoot, "ceremony.json"),
-		DefinitionSignaturePath:  filepath.Join(fixture.ceremonyRoot, "ceremony.sig"),
-		CoordinatorPublicKeyPath: filepath.Join(filepath.Dir(fixture.coordinatorKeyPath), "trusted-coordinator.ed25519.public.hex"),
-	}
-	if _, _, err := VerifyAcceptedPhase1Chain(trust, fixture.circuit, fixture.phase1Chain1); err != nil {
+	if _, _, err := verifyAcceptedPhase1ChainForTest(fixture.trusted, fixture.circuit, fixture.phase1Chain1); err != nil {
 		t.Fatalf("verify authentic accepted phase1 chain: %v", err)
 	}
 
@@ -255,7 +250,7 @@ func TestVerifyAcceptedPhase1ChainCheckpointBoundary(t *testing.T) {
 			if err := os.WriteFile(test.path, changed, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if _, _, err := VerifyAcceptedPhase1Chain(trust, fixture.circuit, fixture.phase1Chain1); err == nil {
+			if _, _, err := verifyAcceptedPhase1ChainForTest(fixture.trusted, fixture.circuit, fixture.phase1Chain1); err == nil {
 				t.Fatal("changed accepted evidence passed full checkpoint replay")
 			}
 			if err := os.WriteFile(test.path, original, 0o600); err != nil {
@@ -263,6 +258,24 @@ func TestVerifyAcceptedPhase1ChainCheckpointBoundary(t *testing.T) {
 			}
 		})
 	}
+}
+
+// verifyAcceptedPhase1ChainForTest exercises the replay portion of the public
+// boundary without pretending that the temporary Go test executable is a
+// released ceremony binary. Production code has no equivalent bypass helper.
+func verifyAcceptedPhase1ChainForTest(trusted *TrustedCeremony, circuit *CompiledCircuit, paths PhaseTranscriptPaths) (Chain, SignedArtifactRefs, error) {
+	if err := validateWorkflowCircuit(trusted, circuit); err != nil {
+		return Chain{}, SignedArtifactRefs{}, err
+	}
+	chain, err := loadVerifiedPhase1Files(trusted, circuit, paths)
+	if err != nil {
+		return Chain{}, SignedArtifactRefs{}, err
+	}
+	_, refs, err := LoadSignedChainExact(trusted, paths)
+	if err != nil {
+		return Chain{}, SignedArtifactRefs{}, err
+	}
+	return chain, refs, nil
 }
 
 func forgeCommonsAndRebindEmptyPhase2Chain(

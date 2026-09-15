@@ -89,6 +89,17 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	if err != nil {
 		return fmt.Errorf("bind helper executable: %w", err)
 	}
+	if binary := os.Getenv("MPC_CEREMONY_TEST_BINARY"); binary != "" {
+		software, err = mpcceremony.SoftwareBindingWithAllowedBinaryFiles(
+			software,
+			prover.ProofToolVersion,
+			mpcceremony.ModeRehearsal,
+			[]string{binary},
+		)
+		if err != nil {
+			return fmt.Errorf("allow test command executable: %w", err)
+		}
+	}
 
 	if err := os.Mkdir(outputRoot, 0o700); err != nil {
 		return err

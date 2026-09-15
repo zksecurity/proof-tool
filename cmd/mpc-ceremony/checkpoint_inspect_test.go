@@ -17,6 +17,7 @@ import (
 )
 
 type checkpointCLIFixture struct {
+	executable         string
 	trustArgs          []string
 	checkpoint0Path    string
 	checkpoint0SigPath string
