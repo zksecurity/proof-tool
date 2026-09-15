@@ -205,6 +205,10 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	}
 
 	ceremonyRoot := filepath.Join(outputRoot, "ceremony")
+	phaseMinimum := uint8(2)
+	if os.Getenv("MPC_WORKFLOW_PHASE1_ONE") == "1" {
+		phaseMinimum = 1
+	}
 	auditors := []mpcceremony.Identity{}
 	assurance := &mpcceremony.AssurancePolicy{}
 	if !zeroAssurance {
@@ -231,7 +235,7 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 			},
 			Phase1Policy: mpcceremony.PhasePolicy{
 				Participants: []string{"participant-01", "participant-02"},
-				Minimum:      2,
+				Minimum:      phaseMinimum,
 			},
 			Phase2Policy: mpcceremony.PhasePolicy{
 				Participants: []string{"participant-01", "participant-02"},
