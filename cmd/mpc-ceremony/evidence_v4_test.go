@@ -324,6 +324,38 @@ func TestEvidenceV4CommandsOnRealArtifacts(t *testing.T) {
 		}
 		return result, nil
 	}
+	metadataResult, err := execute(CommandCheckpointInspectEnrollmentsV4, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := metadataResult.EnrollmentMetadataV4
+	if metadata == nil || len(metadata.Metadata.Enrollments) == 0 || metadata.Metadata.Checkpoint != review.ReviewCheckpoint || !metadata.EnrollmentSignaturesVerified || metadata.DisclosureContentsVerified || metadata.CompleteRosterVerified || metadata.GlobalFreshnessVerified {
+		t.Fatalf("committed enrollment inspection: %+v", metadata)
+	}
+	structure := metadataResult.CheckpointInspectionV4
+	if structure == nil || structure.CheckpointRefs != metadata.Metadata.Checkpoint || len(structure.Commitments.Enrollments) != len(metadata.Metadata.Enrollments) || structure.Depth != "checkpoint-structure" || structure.ArtifactsVerified || structure.MathematicsReplayed || structure.GlobalFreshnessVerified {
+		t.Fatal("missing or overclaimed combined structure")
+	}
+	for n, item := range metadata.Metadata.Enrollments {
+		if item.Refs != structure.Commitments.Enrollments[n] {
+			t.Fatal("combined enrollment set mismatch")
+		}
+	}
+	// A committed signature is required on every read; a previous inspection
+	// cannot substitute for missing or changed bytes.
+	committedSignature := filepath.Join(root, metadata.Metadata.Enrollments[0].Refs.Signature.Name)
+	signatureBytes := read(committedSignature)
+	if err := os.Remove(committedSignature); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := execute(CommandCheckpointInspectEnrollmentsV4, o); err == nil {
+		t.Fatal("missing committed enrollment signature accepted")
+	}
+	writeDecisionTestFile(t, committedSignature, []byte("changed"), 0o600)
+	if _, err := execute(CommandCheckpointInspectEnrollmentsV4, o); err == nil {
+		t.Fatal("changed committed enrollment signature accepted")
+	}
+	writeDecisionTestFile(t, committedSignature, signatureBytes, 0o600)
 	original := read(o.BundlePath)
 	var bundle m.OperationalEvidenceBundle
 	if err := m.UnmarshalCanonical(original, &bundle); err != nil {

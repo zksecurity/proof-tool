@@ -326,6 +326,17 @@ func TestReceiptV4FindsCommittedHandoffAfterRetirement(t *testing.T) {
 	if err := verifyOutboundReceiptV4(reader, d, previous, tx, known); err != nil {
 		t.Fatal(err)
 	}
+	newer := handoff
+	newer.CreatedAt = "2026-09-16T00:00:30Z"
+	newerPair := putCheckpointTestPairV4(t, root, "handoffs/newer-outbound", newer, d.Coordinator.KeyID, adversarialPrivateKey(1))
+	known[newerPair.Record.Digest.SHA256] = newerPair
+	// Publishing B does not change this receipt's signed acknowledgement of A.
+	if err := verifyOutboundReceiptV4(reader, d, previous, tx, known); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyOutboundReceiptV4(reader, d, previous, tx, map[string]SignedArtifactRefs{newerPair.Record.Digest.SHA256: newerPair}); err == nil {
+		t.Fatal("newest packet substituted for acknowledged older packet")
+	}
 	if err := verifyOutboundReceiptV4(reader, d, previous, tx, map[string]SignedArtifactRefs{}); err == nil {
 		t.Fatal("uncommitted handoff accepted")
 	}

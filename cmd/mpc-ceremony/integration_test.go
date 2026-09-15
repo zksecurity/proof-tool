@@ -51,6 +51,7 @@ func TestParticipantCLIHelpHasExplicitSafeFlagAllowlist(t *testing.T) {
 		{"checkpoint", "sign-v4"},
 		{"checkpoint", "verify-stored-v4"},
 		{"checkpoint", "inspect-signed-v4"},
+		{"checkpoint", "inspect-enrollments-v4"},
 		{"checkpoint", "verify-release-v4"},
 		{"release", "review-v4"},
 		{"ops", "prepare-bundle-v4"},
@@ -263,6 +264,7 @@ func TestFinalizationAuditAndReleaseCommandsAreWired(t *testing.T) {
 		{Command: CommandCheckpointSignV4, Options: CheckpointOptionsV4{}},
 		{Command: CommandCheckpointVerifyStoredV4, Options: CheckpointOptionsV4{}},
 		{Command: CommandCheckpointInspectSignedV4, Options: CheckpointOptionsV4{}},
+		{Command: CommandCheckpointInspectEnrollmentsV4, Options: CheckpointOptionsV4{}},
 		{Command: CommandInspectDefinitionProtocol, Options: InspectDefinitionOptions{}},
 		{Command: CommandOpsPrepareBundleV4, Options: EvidenceOptionsV4{}},
 		{Command: CommandOpsSignBundleV4, Options: EvidenceOptionsV4{}},
@@ -283,6 +285,7 @@ func TestEveryCommandRejectsWalletAndWitnessSecretInputs(t *testing.T) {
 	commands := [][]string{
 		{"inspect", "definition-protocol"},
 		{"checkpoint", "inspect-signed-v4"},
+		{"checkpoint", "inspect-enrollments-v4"},
 		{"init"},
 		{"identity", "generate"},
 		{"phase1", "contribute"},

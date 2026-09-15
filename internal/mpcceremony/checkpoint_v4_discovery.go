@@ -10,6 +10,8 @@ type CheckpointDiscoveryV4 struct {
 	Sequence                 uint64              `json:"sequence"`
 	PreviousCheckpoint       *SignedArtifactRefs `json:"previous_checkpoint,omitempty"`
 	VerificationDependencies []ArtifactRef       `json:"verification_dependencies"`
+	// Optional guidance dependency, not needed by structural verification.
+	Enrollment *SignedArtifactRefs `json:"enrollment,omitempty"`
 }
 
 // DiscoverSignedCheckpointV4 authenticates one exact pair, without loading its
@@ -21,6 +23,13 @@ func DiscoverSignedCheckpointV4(d CeremonyDefinition, definition, definitionSign
 		return CheckpointDiscoveryV4{}, err
 	}
 	r := CheckpointDiscoveryV4{CeremonyID: c.CeremonyID, Sequence: c.Sequence, PreviousCheckpoint: c.PreviousCheckpoint, VerificationDependencies: []ArtifactRef{}}
+	if c.Transition.Kind == CheckpointEnrollmentRecorded {
+		pair := *c.Transition.Record
+		if pair.Record.Digest.Size > maxSignedRecordBytes || pair.Signature.Digest.Size > 4096 {
+			return CheckpointDiscoveryV4{}, errors.New("enrollment discovery pair exceeds metadata limit")
+		}
+		r.Enrollment = &pair
+	}
 	if !isGovernanceTransitionV4(c.Transition.Kind) {
 		return r, nil
 	}

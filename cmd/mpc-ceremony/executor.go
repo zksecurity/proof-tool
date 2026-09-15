@@ -125,7 +125,7 @@ func (workflowExecutor) Execute(ctx context.Context, invocation Invocation) (Com
 		return executeSubmissionAccept(invocation.Options.(SubmissionAcceptOptions))
 	case CommandCheckpointPrepare:
 		return executeCheckpointPrepare(invocation.Options.(CheckpointPrepareOptions))
-	case CommandCheckpointPrepareV4, CommandCheckpointSignV4, CommandCheckpointVerifyStoredV4, CommandCheckpointInspectSignedV4:
+	case CommandCheckpointPrepareV4, CommandCheckpointSignV4, CommandCheckpointVerifyStoredV4, CommandCheckpointInspectSignedV4, CommandCheckpointInspectEnrollmentsV4:
 		return executeCheckpointV4(invocation.Command, invocation.Options.(CheckpointOptionsV4))
 	case CommandCheckpointSign:
 		return executeCheckpointSign(invocation.Options.(CheckpointSignOptions))

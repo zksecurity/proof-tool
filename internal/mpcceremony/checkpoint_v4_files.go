@@ -139,6 +139,7 @@ type checkpointAncestryV4 struct {
 	outbound                 map[string]SignedArtifactRefs
 	receipts                 map[ContributionScope]SignedArtifactRefs
 	enrollments              []SignedArtifactRefs
+	enrollmentTransitions    []CheckpointTransitionV4
 	mirrors                  []SignedArtifactRefs
 	witnesses                []SignedArtifactRefs
 	beaconEvidence           []SignedArtifactRefs
@@ -149,10 +150,11 @@ type checkpointAncestryV4 struct {
 	checkpoints              []SignedArtifactRefs // newest to oldest, including head
 	finalCandidateCheckpoint *SignedArtifactRefs
 	count                    uint64
+	turnCommitments          map[ContributionScope]*TurnCommitmentV4
 }
 
 func loadCheckpointAncestryV4(reader *checkpointReaderV4, d CeremonyDefinition, definitionBytes, definitionSignature []byte, refs SignedArtifactRefs) (checkpointAncestryV4, error) {
-	result := checkpointAncestryV4{outbound: map[string]SignedArtifactRefs{}, receipts: map[ContributionScope]SignedArtifactRefs{}, accepted: map[ContributionScope]SignedArtifactRefs{}, acceptedTransitions: map[ContributionScope]CheckpointTransitionV4{}}
+	result := checkpointAncestryV4{outbound: map[string]SignedArtifactRefs{}, receipts: map[ContributionScope]SignedArtifactRefs{}, accepted: map[ContributionScope]SignedArtifactRefs{}, acceptedTransitions: map[ContributionScope]CheckpointTransitionV4{}, turnCommitments: map[ContributionScope]*TurnCommitmentV4{}}
 	var child *CheckpointV4
 	for {
 		if result.count > MaxCheckpointSequenceV4 {
@@ -184,6 +186,9 @@ func loadCheckpointAncestryV4(reader *checkpointReaderV4, d CeremonyDefinition, 
 			}
 		}
 		result.count++
+		if err := collectTurnCommitmentV4(result.turnCommitments, current); err != nil {
+			return checkpointAncestryV4{}, err
+		}
 		result.checkpoints = append(result.checkpoints, refs)
 		if current.Transition.Kind == CheckpointIncidentRecorded {
 			result.incidents = append(result.incidents, current.Transition)
@@ -213,6 +218,7 @@ func loadCheckpointAncestryV4(reader *checkpointReaderV4, d CeremonyDefinition, 
 		}
 		if current.Transition.Kind == CheckpointEnrollmentRecorded {
 			result.enrollments = append(result.enrollments, *current.Transition.Record)
+			result.enrollmentTransitions = append(result.enrollmentTransitions, current.Transition)
 		}
 		if current.Transition.Kind == CheckpointPhase1ReceiptAccepted || current.Transition.Kind == CheckpointPhase2ReceiptAccepted {
 			result.receipts[*current.Transition.Scope] = *current.Transition.Record
@@ -234,28 +240,46 @@ func loadCheckpointAncestryV4(reader *checkpointReaderV4, d CeremonyDefinition, 
 // Governance edges additionally recheck their bounded evidence and exact scope.
 // The delivery service selects the current root; callers supply its exact pair.
 func VerifyStoredCheckpointV4(trust TrustPaths, artifactRoot string, head SignedArtifactRefs) (CheckpointV4, error) {
-	trusted, err := LoadSignedDefinition(trust)
+	c, err := openStoredCheckpointV4(trust, artifactRoot, head)
 	if err != nil {
 		return CheckpointV4{}, err
+	}
+	defer c.reader.root.Close()
+	return c.ancestry.head, nil
+}
+
+type storedCheckpointContextV4 struct {
+	reader          *checkpointReaderV4
+	trusted         *TrustedCeremony
+	definitionBytes []byte
+	ancestry        checkpointAncestryV4
+}
+
+// The caller owns the returned reader and must close it. Failed construction
+// never leaves an open root or returns a partially verified ancestry.
+func openStoredCheckpointV4(trust TrustPaths, artifactRoot string, head SignedArtifactRefs) (*storedCheckpointContextV4, error) {
+	trusted, err := LoadSignedDefinition(trust)
+	if err != nil {
+		return nil, err
 	}
 	db, err := MarshalCanonical(trusted.Definition)
 	if err != nil {
-		return CheckpointV4{}, err
+		return nil, err
 	}
 	ds, err := readRegularBounded(trust.DefinitionSignaturePath, 4096)
 	if err != nil {
-		return CheckpointV4{}, err
+		return nil, err
 	}
 	reader, err := openCheckpointReaderV4(artifactRoot)
 	if err != nil {
-		return CheckpointV4{}, err
+		return nil, err
 	}
-	defer reader.root.Close()
 	ancestry, err := loadCheckpointAncestryV4(reader, trusted.Definition, db, ds, head)
 	if err != nil {
-		return CheckpointV4{}, err
+		reader.root.Close()
+		return nil, err
 	}
-	return ancestry.head, nil
+	return &storedCheckpointContextV4{reader: reader, trusted: trusted, definitionBytes: db, ancestry: ancestry}, nil
 }
 
 // CheckpointPreparationV4 verifies a proposed protocol update before it may be

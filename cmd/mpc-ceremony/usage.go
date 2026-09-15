@@ -269,6 +269,17 @@ exact checked bytes. Keep the proposal and detached signature together. Neither
 is the published current head until the delivery service uploads both and
 successfully updates the head. Existing outputs require inspection, not overwrite.
 `,
+	"checkpoint inspect-enrollments-v4": `Usage:
+  mpc-ceremony checkpoint inspect-enrollments-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE
+
+Verifies signed ancestry and the exact committed enrollment record/signature
+set in one pass. Returns separately labelled structural commitments and
+authenticated identities bound to this head. Does not read
+disclosure contents, prove independent operators, or check roster completeness.
+No signing, contribution replay, network access or writes occur.
+`,
 	"checkpoint inspect-signed-v4": `Usage:
   mpc-ceremony checkpoint inspect-signed-v4 --ceremony FILE --ceremony-signature FILE \
     --coordinator-public-key-file KEY --artifact-root DIR \
@@ -302,6 +313,7 @@ performed. Keep the report outside final/candidate and final/release.
   mpc-ceremony checkpoint <prepare|sign|verify|verify-stored> [flags]
   mpc-ceremony checkpoint <prepare-v4|sign-v4|verify-stored-v4|verify-release-v4> [flags]
   mpc-ceremony checkpoint inspect-signed-v4 [flags]
+  mpc-ceremony checkpoint inspect-enrollments-v4 [flags]
 
 Legacy storage-first checkpoint operations re-authenticate
 the exact signed definition, predecessor, both phase chains and all records

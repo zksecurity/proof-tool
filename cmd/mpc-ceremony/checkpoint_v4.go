@@ -18,13 +18,14 @@ type CheckpointOptionsV4 struct {
 }
 
 type CheckpointInspectionV4 struct {
-	Schema                  string               `json:"schema"`
-	Depth                   string               `json:"depth"`
-	Checkpoint              m.CheckpointV4       `json:"checkpoint"`
-	CheckpointRefs          m.SignedArtifactRefs `json:"checkpoint_refs"`
-	ArtifactsVerified       bool                 `json:"artifacts_verified"`
-	MathematicsReplayed     bool                 `json:"mathematics_replayed"`
-	GlobalFreshnessVerified bool                 `json:"global_freshness_verified"`
+	Schema                  string                    `json:"schema"`
+	Depth                   string                    `json:"depth"`
+	Checkpoint              m.CheckpointV4            `json:"checkpoint"`
+	CheckpointRefs          m.SignedArtifactRefs      `json:"checkpoint_refs"`
+	Commitments             m.CheckpointCommitmentsV4 `json:"commitments"`
+	ArtifactsVerified       bool                      `json:"artifacts_verified"`
+	MathematicsReplayed     bool                      `json:"mathematics_replayed"`
+	GlobalFreshnessVerified bool                      `json:"global_freshness_verified"`
 }
 
 type CheckpointDiscoveryInspectionV4 struct {
@@ -38,12 +39,26 @@ type CheckpointDiscoveryInspectionV4 struct {
 	GlobalFreshnessVerified bool                    `json:"global_freshness_verified"`
 }
 
+type EnrollmentMetadataInspectionV4 struct {
+	Schema                       string                 `json:"schema"`
+	Depth                        string                 `json:"depth"`
+	Metadata                     m.EnrollmentMetadataV4 `json:"metadata"`
+	EnrollmentSignaturesVerified bool                   `json:"enrollment_signatures_verified"`
+	DisclosureContentsVerified   bool                   `json:"disclosure_contents_verified"`
+	CompleteRosterVerified       bool                   `json:"complete_roster_verified"`
+	GlobalFreshnessVerified      bool                   `json:"global_freshness_verified"`
+}
+
+func checkpointReadOnlyActionV4(action string) bool {
+	return action == "verify-stored-v4" || action == "inspect-signed-v4" || action == "inspect-enrollments-v4"
+}
+
 func parseCheckpointV4(action string, args []string) (CheckpointOptionsV4, error) {
 	var o CheckpointOptionsV4
 	fs := commandFlagSet("checkpoint " + action)
 	addCeremonyTrustFlags(fs, &o.CeremonyPath, &o.CeremonySignaturePath, &o.CoordinatorPublicKeyFile)
 	fs.StringVar(&o.ArtifactRoot, "artifact-root", "", "local root containing protocol artifacts")
-	if action == "verify-stored-v4" || action == "inspect-signed-v4" {
+	if checkpointReadOnlyActionV4(action) {
 		fs.StringVar(&o.CheckpointPath, "checkpoint", "", "exact checkpoint under artifact-root")
 		fs.StringVar(&o.CheckpointSignaturePath, "checkpoint-signature", "", "exact detached checkpoint signature under artifact-root")
 	} else {
@@ -60,7 +75,7 @@ func parseCheckpointV4(action string, args []string) (CheckpointOptionsV4, error
 	if err := requireValues(pathValue("--ceremony", o.CeremonyPath), pathValue("--ceremony-signature", o.CeremonySignaturePath), pathValue("--coordinator-public-key-file", o.CoordinatorPublicKeyFile), pathValue("--artifact-root", o.ArtifactRoot)); err != nil {
 		return o, err
 	}
-	if action == "verify-stored-v4" || action == "inspect-signed-v4" {
+	if checkpointReadOnlyActionV4(action) {
 		return o, requireValues(pathValue("--checkpoint", o.CheckpointPath), pathValue("--checkpoint-signature", o.CheckpointSignaturePath))
 	}
 	if action != "prepare-v4" && action != "sign-v4" {
@@ -111,6 +126,20 @@ func executeCheckpointV4(command Command, o CheckpointOptionsV4) (CommandResult,
 	if err := m.VerifyRunningSoftwareForMode(d.Software, d.Mode); err != nil {
 		return CommandResult{}, err
 	}
+	if command == CommandCheckpointInspectEnrollmentsV4 {
+		_, _, refs, err := checkpointSignedBytes(o.ArtifactRoot, o.CheckpointPath, o.CheckpointSignaturePath)
+		if err != nil {
+			return CommandResult{}, err
+		}
+		checkpoint, commitments, metadata, err := m.InspectCheckpointGuidanceV4(trust, o.ArtifactRoot, refs)
+		if err != nil {
+			return CommandResult{}, err
+		}
+		if metadata.CeremonyID != d.CeremonyID || metadata.Checkpoint != refs {
+			return CommandResult{}, errors.New("authenticated enrollment metadata changed ceremony or head")
+		}
+		return CommandResult{CeremonyID: d.CeremonyID, Summary: "Verified checkpoint ancestry and its exact committed enrollment signatures and identities. Disclosure contents and required roster completeness were not checked.", CheckpointInspectionV4: &CheckpointInspectionV4{Schema: "proof-tool-mpc-checkpoint-inspection-v4", Depth: "checkpoint-structure", Checkpoint: checkpoint, CheckpointRefs: refs, Commitments: commitments}, EnrollmentMetadataV4: &EnrollmentMetadataInspectionV4{Schema: "proof-tool-mpc-enrollment-metadata-v4", Depth: "committed-enrollment-signatures", Metadata: metadata, EnrollmentSignaturesVerified: true}}, nil
+	}
 	if command == CommandCheckpointInspectSignedV4 {
 		record, signature, refs, err := checkpointSignedBytes(o.ArtifactRoot, o.CheckpointPath, o.CheckpointSignaturePath)
 		if err != nil {
@@ -137,7 +166,7 @@ func executeCheckpointV4(command Command, o CheckpointOptionsV4) (CommandResult,
 		if err != nil {
 			return CommandResult{}, err
 		}
-		c, err := m.VerifyStoredCheckpointV4(trust, o.ArtifactRoot, refs)
+		c, commitments, err := m.InspectStoredCheckpointV4(trust, o.ArtifactRoot, refs)
 		if err != nil {
 			return CommandResult{}, err
 		}
@@ -146,7 +175,7 @@ func executeCheckpointV4(command Command, o CheckpointOptionsV4) (CommandResult,
 		}
 		return CommandResult{CeremonyID: c.CeremonyID,
 			Summary:                "Authenticated checkpoint ancestry and legal metadata transitions. Referenced artifacts, contribution mathematics and global freshness were not verified.",
-			CheckpointInspectionV4: &CheckpointInspectionV4{Schema: "proof-tool-mpc-checkpoint-inspection-v4", Depth: "checkpoint-structure", Checkpoint: c, CheckpointRefs: refs}}, nil
+			CheckpointInspectionV4: &CheckpointInspectionV4{Schema: "proof-tool-mpc-checkpoint-inspection-v4", Depth: "checkpoint-structure", Checkpoint: c, CheckpointRefs: refs, Commitments: commitments}}, nil
 	}
 	if command != CommandCheckpointPrepareV4 && command != CommandCheckpointSignV4 {
 		return CommandResult{}, errors.New("unknown V4 checkpoint command")

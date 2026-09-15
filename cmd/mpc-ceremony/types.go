@@ -72,6 +72,7 @@ const (
 	CommandCheckpointSignV4                 Command = "checkpoint sign-v4"
 	CommandCheckpointVerifyStoredV4         Command = "checkpoint verify-stored-v4"
 	CommandCheckpointInspectSignedV4        Command = "checkpoint inspect-signed-v4"
+	CommandCheckpointInspectEnrollmentsV4   Command = "checkpoint inspect-enrollments-v4"
 	CommandCheckpointVerifyReleaseV4        Command = "checkpoint verify-release-v4"
 )
 
@@ -652,6 +653,7 @@ type CommandResult struct {
 	DefinitionInspection                *DefinitionInspection                `json:"definition_inspection,omitempty"`
 	DefinitionProtocolInspection        *DefinitionProtocolInspection        `json:"definition_protocol_inspection,omitempty"`
 	CheckpointDiscoveryV4               *CheckpointDiscoveryInspectionV4     `json:"checkpoint_discovery_v4,omitempty"`
+	EnrollmentMetadataV4                *EnrollmentMetadataInspectionV4      `json:"enrollment_metadata_v4,omitempty"`
 	ChainInspection                     *ChainInspection                     `json:"chain_inspection,omitempty"`
 	ParticipantInspection               *ParticipantInspection               `json:"participant_inspection,omitempty"`
 	EnrollmentInspection                *EnrollmentInspection                `json:"enrollment_inspection,omitempty"`

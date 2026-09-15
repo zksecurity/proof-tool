@@ -37,6 +37,18 @@ Fresh-copy tests cover incident, abort, restart and accepted-contribution
 history; removing each required dependency fails verification. The discovery
 signature alone intentionally does not prove that an edge is legal.
 
+The V4 stored projection also includes an ancestry-derived commitment index:
+exact enrollment pairs and per-turn outbound history, accepted receipt, accepted
+chain/result, and return records. These are locations, not verified payloads.
+`checkpoint inspect-enrollments-v4` batch-verifies the exact committed enrollment
+set against that head, including proof of possession and the committed disclosure
+reference. Its output includes the structural index from the same ancestry walk,
+so consumers need not verify that history twice. Discovery labels enrollment
+pairs separately from structural dependencies. It does not read disclosure
+contents or claim roster completeness.
+Outbounds remain newest-first, but a signed receipt may acknowledge an older
+valid packet; publication attempts do not change that signed acknowledgement.
+
 Current draft: opt-in V4 construction, structural checkpoints and real-artifact
 verification through final-candidate recording exist in the library. The Linux
 integration test uses real tiny contributions in both phases, signed custody

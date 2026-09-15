@@ -176,6 +176,12 @@ func TestCheckpointV4CLIInitialPrepareSignInspectAndMutation(t *testing.T) {
 	if discovered == nil || discovered.Schema != "proof-tool-mpc-checkpoint-discovery-v4" || discovered.Depth != "signed-checkpoint-discovery" || discovered.AncestryVerified || discovered.ArtifactsVerified || discovered.MathematicsReplayed || discovered.GlobalFreshnessVerified || discovered.Discovery.Sequence != 0 || len(discovered.Discovery.VerificationDependencies) != 0 || discovered.CheckpointRefs != projection.CheckpointRefs {
 		t.Fatalf("discovery overclaim or wrong head: %+v", discovered)
 	}
+	enrollmentArgs := append([]string{"--format", "json", "checkpoint", "inspect-enrollments-v4"}, trustArgs...)
+	enrollmentArgs = append(enrollmentArgs, "--checkpoint", checkedPath, "--checkpoint-signature", signaturePath)
+	enrollments := runCheckpointCommandExecutable(t, executable, enrollmentArgs).EnrollmentMetadataV4
+	if enrollments == nil || enrollments.Schema != "proof-tool-mpc-enrollment-metadata-v4" || enrollments.Depth != "committed-enrollment-signatures" || !enrollments.EnrollmentSignaturesVerified || enrollments.DisclosureContentsVerified || enrollments.CompleteRosterVerified || enrollments.GlobalFreshnessVerified || enrollments.Metadata.Checkpoint != projection.CheckpointRefs || len(enrollments.Metadata.Enrollments) != 0 {
+		t.Fatalf("empty enrollment set overclaim or wrong head: %+v", enrollments)
+	}
 	// Sign again only after rereading every required byte, not a saved success marker.
 	genesis := filepath.Join(artifactRoot, payload.Name)
 	original := mustReadTestFile(t, genesis)
