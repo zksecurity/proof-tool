@@ -255,6 +255,8 @@ type ReleaseSignOptions struct {
 	CeremonySignaturePath    string
 	CoordinatorPublicKeyFile string
 	CandidateBundleDir       string
+	ReviewCheckpointPath     string
+	ReviewSignaturePath      string
 	AuditReportPaths         []string
 	AuditSignaturePaths      []string
 	OperationalEvidenceRoot  string

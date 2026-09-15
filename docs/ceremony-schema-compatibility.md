@@ -94,6 +94,13 @@ release package. Early stops use the existing authenticated abort procedure.
 Old decision behavior remains unchanged; only V4 accepts evidence-root during
 preparation. CLI tests cover signed format dispatch, missing roots, evidence
 failure before key loading, and output containment including symlink aliases.
+Release sign now accepts an exact review checkpoint pair for V4 instead of
+legacy candidate/audit/replay flags; mixing the two input forms is rejected.
+Metadata references are root-confined and size-bounded. The signing library
+rechecks the running executable against its authenticated definition before
+loading the release key. Release verify selects the V4 package verifier from
+the signed definition. These commands create/check local packages, not public
+publication or production authorization; legacy V3 signer replay is unchanged.
 Normal initialization still emits V3. Do not release this slice alone: remaining
 production integration and normal storage-first CLI guidance are incomplete.
 These tests are not a complete user ceremony.

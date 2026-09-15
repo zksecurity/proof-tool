@@ -581,9 +581,18 @@ Release authenticity is separate from MPC contribution identity.
 	assurance policy, plus the coordinator-signed Phase 1 and Phase 2 operational
 	bundle. Witness and mirror evidence likewise follows that signed policy;
 	multi-relay beacon evidence remains required. The candidate is
-	never mutated; all verified evidence is atomically published into a fresh
-	release directory. For current ceremonies, the release signer independently
-	replays both phases even when the signed audit minimum is zero.
+	never mutated; all verified evidence is assembled into a fresh local
+	release directory. Definition V3 requires independent signer replay of both
+	phases even when the signed audit minimum is zero.
+
+For Definition V4, replace --candidate-bundle, audit and replay flags with:
+  --review-checkpoint FILE --review-checkpoint-signature FILE
+Both files and the operational bundle pair must be under --operational-evidence-root.
+The signed review determines the candidate and required audits. The signer checks
+the exact coordinator replay binding, public proof, key exports and required
+evidence without replaying contributions. The approved executable is checked
+before loading the release key. The output must be outside the evidence root.
+This creates a local signed package, not a storage publication or production GO.
 `,
 	"release verify": `Usage:
   mpc-ceremony release verify --ceremony FILE --ceremony-signature FILE \
@@ -593,6 +602,8 @@ Release authenticity is separate from MPC contribution identity.
 Authenticates the release using the out-of-band release public key, then
 strictly verifies the bundled audit evidence, transcript, native keys, Cardano
 export, candidate signature, and checksums.
+Definition V4 selects the new exact review/package verifier automatically after
+authenticating the definition. This does not publish or approve production use.
 `,
 	"decision": `Usage:
   mpc-ceremony decision <prepare|sign|verify> [flags]

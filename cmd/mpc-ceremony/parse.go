@@ -1246,6 +1246,8 @@ func parseReleaseSign(args []string) (ReleaseSignOptions, error) {
 	fs := commandFlagSet("release sign")
 	addCeremonyTrustFlags(fs, &options.CeremonyPath, &options.CeremonySignaturePath, &options.CoordinatorPublicKeyFile)
 	fs.StringVar(&options.CandidateBundleDir, "candidate-bundle", "", "audited candidate key bundle directory")
+	fs.StringVar(&options.ReviewCheckpointPath, "review-checkpoint", "", "V4 exact signed review checkpoint under operational-evidence-root")
+	fs.StringVar(&options.ReviewSignaturePath, "review-checkpoint-signature", "", "V4 review checkpoint signature under operational-evidence-root")
 	fs.Var(&auditReports, "audit-report", "independent audit report path; repeat in auditor order")
 	fs.Var(&auditSignatures, "audit-signature", "detached audit signature path; repeat in matching order")
 	fs.StringVar(&options.OperationalEvidenceRoot, "operational-evidence-root", "", "local root containing the complete operational evidence tree")
@@ -1265,7 +1267,6 @@ func parseReleaseSign(args []string) (ReleaseSignOptions, error) {
 		pathValue("--ceremony", options.CeremonyPath),
 		pathValue("--ceremony-signature", options.CeremonySignaturePath),
 		pathValue("--coordinator-public-key-file", options.CoordinatorPublicKeyFile),
-		pathValue("--candidate-bundle", options.CandidateBundleDir),
 		pathValue("--operational-evidence-root", options.OperationalEvidenceRoot),
 		pathValue("--operational-bundle", options.OperationalBundlePath),
 		pathValue("--operational-bundle-signature", options.OperationalSignaturePath),
@@ -1274,6 +1275,15 @@ func parseReleaseSign(args []string) (ReleaseSignOptions, error) {
 		value("--released-at", options.ReleasedAt),
 		pathValue("--release-dir", options.ReleaseDir),
 	); err != nil {
+		return options, err
+	}
+	if options.ReviewCheckpointPath != "" || options.ReviewSignaturePath != "" {
+		if err := requireValues(pathValue("--review-checkpoint", options.ReviewCheckpointPath), pathValue("--review-checkpoint-signature", options.ReviewSignaturePath)); err != nil {
+			return options, err
+		}
+		return options, validateReleaseSignShapeV4(options)
+	}
+	if err := requireValues(pathValue("--candidate-bundle", options.CandidateBundleDir)); err != nil {
 		return options, err
 	}
 	if err := validateAuditArtifacts(options.AuditReportPaths, options.AuditSignaturePaths); err != nil {

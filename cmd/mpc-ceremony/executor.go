@@ -666,8 +666,18 @@ func executeReleaseSign(options ReleaseSignOptions) (CommandResult, error) {
 		options.CeremonySignaturePath,
 		options.CoordinatorPublicKeyFile,
 	)
-	if err := verifyRunningTrust(trust); err != nil {
+	trusted, err := mpcceremony.LoadSignedDefinition(trust)
+	if err != nil {
 		return CommandResult{}, err
+	}
+	if err := mpcceremony.VerifyRunningSoftwareForMode(trusted.Definition.Software, trusted.Definition.Mode); err != nil {
+		return CommandResult{}, err
+	}
+	if trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+		return executeReleaseSignV4(options, trust, trusted.Definition.CeremonyID)
+	}
+	if options.ReviewCheckpointPath != "" || options.ReviewSignaturePath != "" {
+		return CommandResult{}, fmt.Errorf("review checkpoint signing requires definition v4")
 	}
 	coordinatorPublicKey, err := readPublicKeyHex(options.CoordinatorPublicKeyFile)
 	if err != nil {
@@ -724,7 +734,11 @@ func executeReleaseVerify(options ReleaseVerifyOptions) (CommandResult, error) {
 		options.CeremonySignaturePath,
 		options.CoordinatorPublicKeyFile,
 	)
-	if err := verifyRunningTrust(trust); err != nil {
+	trusted, err := mpcceremony.LoadSignedDefinition(trust)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	if err := mpcceremony.VerifyRunningSoftwareForMode(trusted.Definition.Software, trusted.Definition.Mode); err != nil {
 		return CommandResult{}, err
 	}
 	coordinatorPublicKey, err := readPublicKeyHex(options.CoordinatorPublicKeyFile)
@@ -734,6 +748,18 @@ func executeReleaseVerify(options ReleaseVerifyOptions) (CommandResult, error) {
 	releasePublicKey, err := readPublicKeyHex(options.ManifestPublicKeyFile)
 	if err != nil {
 		return CommandResult{}, err
+	}
+	if trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+		result, err := mpcceremony.VerifyReleaseV4(mpcceremony.VerifyReleaseV4Options{Trust: trust, KeysDir: options.KeysDir, TrustedPublicKeyHex: releasePublicKey, ExpectedSignatureKeyID: options.SignatureKeyID})
+		if err != nil {
+			return CommandResult{}, err
+		}
+		if result.Transcript.CeremonyID != trusted.Definition.CeremonyID {
+			return CommandResult{}, fmt.Errorf("authenticated ceremony changed during release verification")
+		}
+		return CommandResult{CeremonyID: result.Transcript.CeremonyID, ReleaseManifestSHA256: result.ManifestSHA256,
+			Summary: "Verified the local signed package, coordinator replay binding, public proof and required evidence; no publication or production approval occurred.",
+			Outputs: map[string]string{"keys_dir": options.KeysDir}}, nil
 	}
 	result, err := mpcceremony.VerifyRelease(mpcceremony.VerifyReleaseOptions{
 		DefinitionPath:          options.CeremonyPath,

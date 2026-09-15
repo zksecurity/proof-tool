@@ -51,6 +51,9 @@ func SignReleaseV4(o SignReleaseV4Options) (*SignReleaseResult, error) {
 		return nil, err
 	}
 	d := trusted.Definition
+	if err := validateReleaseSigningDefinitionV4(d, review); err != nil {
+		return nil, err
+	}
 	if o.SignatureKeyID != d.ReleaseSigner.KeyID {
 		return nil, errors.New("release signature key id differs from signed definition")
 	}
@@ -166,6 +169,16 @@ func SignReleaseV4(o SignReleaseV4Options) (*SignReleaseResult, error) {
 		return nil, &publicationError{publicationCommitted, "verify V4 destination; retain for investigation", err}
 	}
 	return &SignReleaseResult{ManifestPath: filepath.Join(o.ReleaseDir, keybundle.ManifestFile), ManifestSignature: filepath.Join(o.ReleaseDir, keybundle.ManifestSignatureFile), ManifestPublicKey: filepath.Join(o.ReleaseDir, keybundle.ManifestPublicKeyFile), FinalTranscript: filepath.Join(o.ReleaseDir, FinalTranscriptFile), OperationalEvidence: filepath.Join(o.ReleaseDir, OperationalEvidenceBundleFile), ChecksumsPath: filepath.Join(o.ReleaseDir, ReleaseChecksumsFile)}, nil
+}
+
+func validateReleaseSigningDefinitionV4(d CeremonyDefinition, review ReleaseReviewV4) error {
+	if d.CeremonyID != review.CeremonyID {
+		return errors.New("ceremony definition changed after release review")
+	}
+	if err := VerifyRunningSoftwareForMode(d.Software, d.Mode); err != nil {
+		return fmt.Errorf("release signing software: %w", err)
+	}
+	return nil
 }
 
 func readReleaseReviewHeadV4(trust TrustPaths, root string, refs SignedArtifactRefs) (CheckpointV4, error) {

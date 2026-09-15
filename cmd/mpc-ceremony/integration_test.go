@@ -175,6 +175,8 @@ func TestParticipantCLIHelpHasExplicitSafeFlagAllowlist(t *testing.T) {
 		"--release-dir",
 		"--release-signing-key",
 		"--released-at",
+		"--review-checkpoint",
+		"--review-checkpoint-signature",
 		"--record",
 		"--record-type",
 		"--canonical",
