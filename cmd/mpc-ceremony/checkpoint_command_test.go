@@ -370,6 +370,33 @@ func TestCheckpointCommandFullPhase1CandidateAcceptance(t *testing.T) {
 		t.Fatalf("cp3 stored verification = %#v", verified.CheckpointEvidenceInspection)
 	}
 
+	closeResult := runCheckpointCommandExecutable(t, fixture.executable, append([]string{"--format", "json", "phase1", "close"}, append(fixture.trustArgs,
+		"--transcript-dir", fixture.root,
+		"--chain", chainPath,
+		"--chain-signature", chainSignaturePath,
+		"--coordinator-signing-key", keyPath,
+		"--beacon-round-lead", "12",
+	)...))
+	closureArgs := append(append([]string{}, fixture.trustArgs...),
+		"--artifact-root", fixture.root, "--relay-release-id", "role-images-test",
+		"--transition", string(mpcceremony.CheckpointPhase1Closed),
+		"--previous-checkpoint", result.Outputs["checkpoint"], "--previous-checkpoint-signature", cp3SignaturePath,
+		"--chain", chainPath, "--chain-signature", chainSignaturePath,
+		"--head-payload", filepath.Join(fixture.root, filepath.FromSlash(accepted.OutputPayload.Name)),
+		"--transition-record", closeResult.Outputs["closure"], "--transition-record-signature", closeResult.Outputs["closure_signature"],
+	)
+	cp4Packet := filepath.Join(fixture.root, "prepared", "cp4")
+	cp4 := runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "prepare"}, closureArgs...), "--out-dir", cp4Packet))
+	cp4SignaturePath := filepath.Join(fixture.root, "state", "signed-cp4.sig")
+	runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "sign"}, closureArgs...),
+		"--checkpoint", cp4.Outputs["checkpoint"], "--signing-request", cp4.Outputs["signing_request"],
+		"--coordinator-signing-key", keyPath, "--out", cp4SignaturePath))
+	verified = runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "verify-stored"}, fixture.trustArgs...),
+		"--checkpoint", cp4.Outputs["checkpoint"], "--checkpoint-signature", cp4SignaturePath, "--artifact-root", fixture.root))
+	if verified.CheckpointEvidenceInspection == nil || !verified.CheckpointEvidenceInspection.FullyVerified || verified.CheckpointEvidenceInspection.Sequence != 4 {
+		t.Fatalf("cp4 stored verification = %#v", verified.CheckpointEvidenceInspection)
+	}
+
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, args, accepted.OutputPayload.Name, "candidate-payload")
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, args, filepath.ToSlash(mustRelativeTestPath(t, fixture.root, manifestPath)), "manifest")
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, args, filepath.ToSlash(mustRelativeTestPath(t, fixture.root, ackSignaturePath)), "acknowledgement")

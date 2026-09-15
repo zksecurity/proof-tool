@@ -248,6 +248,54 @@ func TestCheckpointPhase1LegalSequence(t *testing.T) {
 	}
 }
 
+func TestCheckpointPhase1ClosureIsOneWayAndExact(t *testing.T) {
+	previous := phase1CheckpointSequence(t)[3]
+	closure := checkpointSigned("40-phase1-closure")
+	previousRef := checkpointReference(t, previous, "0003")
+	next := cloneCheckpoint(t, previous)
+	next.Sequence++
+	next.PreviousCheckpoint = &previousRef
+	next.Transition = CheckpointTransition{Kind: CheckpointPhase1Closed, Phase: Phase1, Record: &closure}
+	next.Phase1Closure = &closure
+	next.AcceptedArtifacts = appendCheckpointArtifacts(next.AcceptedArtifacts, closure.Record, closure.Signature)
+	if err := ValidateCheckpointTransition(previous, next); err != nil {
+		t.Fatalf("valid phase1 closure: %v", err)
+	}
+
+	mutations := []struct {
+		name   string
+		mutate func(*Checkpoint)
+	}{
+		{"changed head", func(c *Checkpoint) { c.Phase1.HeadRecordID = "sha256:" + strings.Repeat("9", 64) }},
+		{"changed slots", func(c *Checkpoint) { c.Submissions = c.Submissions[:1] }},
+		{"different committed closure", func(c *Checkpoint) {
+			c.Phase1Closure = &SignedArtifactRefs{Record: checkpointArtifact("other.json", "other"), Signature: checkpointArtifact("other.sig", "other sig")}
+		}},
+		{"unexpected artifact", func(c *Checkpoint) {
+			c.AcceptedArtifacts = appendCheckpointArtifacts(c.AcceptedArtifacts, checkpointArtifact("unexpected.json", "unexpected"))
+		}},
+	}
+	for _, test := range mutations {
+		t.Run(test.name, func(t *testing.T) {
+			changed := cloneCheckpoint(t, next)
+			test.mutate(&changed)
+			if err := ValidateCheckpointTransition(previous, changed); err == nil {
+				t.Fatal("mutated closure unexpectedly accepted")
+			}
+		})
+	}
+
+	afterClose := cloneCheckpoint(t, next)
+	illegalOutbound := checkpointSigned("41-illegal-outbound")
+	afterClose.Transition = CheckpointTransition{
+		Kind: CheckpointPhase1OutboundPublished, Phase: Phase1, Index: 2,
+		ParticipantID: "participant-02", AttemptID: strings.Repeat("e", 32), Record: &illegalOutbound,
+	}
+	if err := validateOutboundTransition(next, afterClose); err == nil || !strings.Contains(err.Error(), "after closure") {
+		t.Fatalf("phase1 turn after closure err=%v", err)
+	}
+}
+
 func TestCheckpointPredecessorIncludesFetchableSignatureReference(t *testing.T) {
 	checkpoints := phase1CheckpointSequence(t)
 	parent := checkpoints[1].PreviousCheckpoint
