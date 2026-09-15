@@ -859,7 +859,7 @@ func validateProductionDecisionBinding(definition CeremonyDefinition, decision P
 	if decision.CeremonyID != definition.CeremonyID {
 		return errors.New("production decision ceremony_id does not match the signed definition")
 	}
-	if definition.Schema == DefinitionSchema {
+	if definition.Schema == DefinitionSchemaV3 {
 		if decision.Schema != ProductionDecisionSchema || decision.AssurancePolicy == nil || *decision.AssurancePolicy != *definition.AssurancePolicy {
 			return errors.New("production decision assurance_policy does not exactly match signed definition")
 		}
@@ -902,7 +902,7 @@ func validateProductionDecisionBinding(definition CeremonyDefinition, decision P
 }
 
 func expectedFinalTranscriptSchema(definition CeremonyDefinition) string {
-	if definition.Schema == DefinitionSchema {
+	if definition.Schema == DefinitionSchemaV3 {
 		return FinalTranscriptSchema
 	}
 	return FinalTranscriptSchemaV1

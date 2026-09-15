@@ -399,6 +399,25 @@ func compareCandidateToReplay(
 	return nil
 }
 
+// Pin released replay semantics to explicit identifiers, not the moving
+// DefinitionSchema default. Future formats must add a separately verified path.
+func verifyRequiredReleaseSignerReplay(schema string, options SignReleaseOptions) error {
+	switch schema {
+	case DefinitionSchemaV1, DefinitionSchemaV2:
+		return nil
+	case DefinitionSchemaV3:
+		if options.Replay == nil || options.Circuit == nil {
+			return errors.New("storage-first release signing requires independent two-phase replay inputs")
+		}
+		if _, err := ReplayCandidate(*options.Replay, options.Circuit, options.CandidateDir); err != nil {
+			return fmt.Errorf("release-signer independent replay: %w", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported release-signing definition schema %q", schema)
+	}
+}
+
 // SignRelease validates the signed definition's required passing-audit count,
 // assembles the final setup transcript and key manifest without
 // replacing candidate files, then signs the exact manifest with the distinct
@@ -431,13 +450,8 @@ func SignRelease(options SignReleaseOptions) (*SignReleaseResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	if definition.Schema == DefinitionSchema {
-		if options.Replay == nil || options.Circuit == nil {
-			return nil, errors.New("storage-first release signing requires independent two-phase replay inputs")
-		}
-		if _, err := ReplayCandidate(*options.Replay, options.Circuit, options.CandidateDir); err != nil {
-			return nil, fmt.Errorf("release-signer independent replay: %w", err)
-		}
+	if err := verifyRequiredReleaseSignerReplay(definition.Schema, options); err != nil {
+		return nil, err
 	}
 	if options.SignatureKeyID != definition.ReleaseSigner.KeyID {
 		return nil, fmt.Errorf(
@@ -1074,7 +1088,7 @@ func verifyPassingAudits(
 	inputs []AuditArtifact,
 ) ([]ArtifactRef, time.Time, error) {
 	minimum := 1
-	if definition.Schema == DefinitionSchema {
+	if definition.Schema == DefinitionSchemaV3 {
 		minimum = int(definition.AssurancePolicy.PassingCeremonyAudits)
 	}
 	if len(inputs) < minimum {

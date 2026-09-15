@@ -21,7 +21,8 @@ import (
 const (
 	DefinitionSchemaV1            = "proof-tool-mpc-ceremony-definition-v1"
 	DefinitionSchemaV2            = "proof-tool-mpc-ceremony-definition-v2"
-	DefinitionSchema              = "proof-tool-mpc-ceremony-definition-v3"
+	DefinitionSchemaV3            = "proof-tool-mpc-ceremony-definition-v3"
+	DefinitionSchema              = DefinitionSchemaV3
 	DetachedSignatureSchema       = "proof-tool-mpc-detached-signature-v1"
 	ContributionAttestationSchema = "proof-tool-mpc-contribution-attestation-v2"
 	ErasureAttestationSchema      = "proof-tool-mpc-erasure-attestation-v2"

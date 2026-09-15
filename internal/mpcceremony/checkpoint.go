@@ -687,7 +687,7 @@ func VerifySignedCheckpoint(definition CeremonyDefinition, definitionBytes, defi
 }
 
 func validateCheckpointDefinitionVersion(definition CeremonyDefinition, checkpoint Checkpoint) error {
-	if definition.Schema == DefinitionSchema {
+	if definition.Schema == DefinitionSchemaV3 {
 		if (checkpoint.Schema != CheckpointSchema && checkpoint.Schema != CheckpointSchemaV2) || checkpoint.AssurancePolicy == nil || *checkpoint.AssurancePolicy != *definition.AssurancePolicy {
 			return errors.New("definition v3 requires a checkpoint v2 or v3 with exactly matching assurance_policy")
 		}

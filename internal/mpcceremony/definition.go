@@ -216,7 +216,7 @@ func (d CeremonyDefinition) Validate() error {
 
 func (d CeremonyDefinition) validate(requireID bool) error {
 	switch d.Schema {
-	case DefinitionSchema:
+	case DefinitionSchemaV3:
 	case DefinitionSchemaV2:
 		if d.AssurancePolicy != nil {
 			return errors.New("definition v2 must not contain v3-only assurance_policy")
@@ -291,7 +291,7 @@ func (d CeremonyDefinition) validate(requireID bool) error {
 	if err := d.Software.Validate(); err != nil {
 		return fmt.Errorf("software: %w", err)
 	}
-	if (d.Schema == DefinitionSchema || d.Schema == DefinitionSchemaV2) && len(d.Software.Binaries) == 0 {
+	if (d.Schema == DefinitionSchemaV3 || d.Schema == DefinitionSchemaV2) && len(d.Software.Binaries) == 0 {
 		return errors.New("definition v2 or v3 requires at least one allowed software binary")
 	}
 	if d.Mode == ModeProduction {
@@ -320,7 +320,7 @@ func (d CeremonyDefinition) validate(requireID bool) error {
 	if d.ReleaseSigner.ID == d.Coordinator.ID || d.ReleaseSigner.KeyID == d.Coordinator.KeyID {
 		return errors.New("release signer must be distinct from coordinator")
 	}
-	if d.Schema == DefinitionSchema && d.Auditors == nil {
+	if d.Schema == DefinitionSchemaV3 && d.Auditors == nil {
 		return errors.New("definition v3 requires an explicit auditors array; use [] when audits are disabled")
 	}
 	if len(d.Auditors) > MaxAuditors {
@@ -358,7 +358,7 @@ func (d CeremonyDefinition) validate(requireID bool) error {
 		keyIDs[auditor.KeyID] = "auditor"
 		publicKeyFingerprints[auditor.PublicKeyFingerprint] = "auditor"
 	}
-	if d.Schema == DefinitionSchema {
+	if d.Schema == DefinitionSchemaV3 {
 		if d.AssurancePolicy == nil {
 			return errors.New("definition v3 requires assurance_policy; omission does not disable controls")
 		}

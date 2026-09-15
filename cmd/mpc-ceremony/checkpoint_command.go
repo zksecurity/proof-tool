@@ -1381,7 +1381,7 @@ func buildPhase1ClosedCheckpoint(options CheckpointEvidenceOptions, trusted *mpc
 }
 
 func checkpointSchemaForDefinition(definition mpcceremony.CeremonyDefinition) string {
-	if definition.Schema == mpcceremony.DefinitionSchema {
+	if definition.Schema == mpcceremony.DefinitionSchemaV3 {
 		return mpcceremony.CheckpointSchema
 	}
 	return mpcceremony.CheckpointSchemaV1

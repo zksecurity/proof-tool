@@ -1074,7 +1074,11 @@ func prepareAndSignReceiptCheckpoint(t *testing.T, fixture checkpointCLIFixture,
 		AttemptID:                  slot.AttemptID, ManifestKey: slot.ManifestKey,
 		Payloads: checkpointSortedArtifacts(receiptRef, receiptSignatureRef),
 	}
-	envelopePath, envelopeSignaturePath := filepath.Join(receiptDir, "envelope.json"), filepath.Join(receiptDir, "envelope.sig")
+	envelopeDir := filepath.Join(fixture.root, filepath.FromSlash(strings.TrimSuffix(slot.ManifestKey, "/manifest.json")))
+	if err := os.MkdirAll(envelopeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	envelopePath, envelopeSignaturePath := filepath.Join(envelopeDir, "envelope.json"), filepath.Join(envelopeDir, "envelope.sig")
 	envelopeBytes, envelopeSignatureBytes, err := mpcceremony.SignSubmissionEnvelope(fixture.definition, cp1, slot, envelope, participantKey)
 	if err != nil {
 		t.Fatal(err)

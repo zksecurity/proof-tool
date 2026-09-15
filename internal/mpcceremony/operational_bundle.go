@@ -328,7 +328,7 @@ func verifyOperationalEvidenceContents(options VerifyOperationalEvidenceOptions,
 		return VerifiedOperationalEvidence{}, errors.New("operational evidence bundle does not bind ceremony coordinator")
 	}
 	expectedAssurance := defaultAssurancePolicy(options.Definition.Mode)
-	if options.Definition.Schema == DefinitionSchema {
+	if options.Definition.Schema == DefinitionSchemaV3 {
 		if bundle.Schema != OperationalEvidenceBundleSchema {
 			return VerifiedOperationalEvidence{}, errors.New("definition v3 requires operational evidence bundle v3")
 		}
@@ -373,7 +373,7 @@ func verifyOperationalEvidenceContents(options VerifyOperationalEvidenceOptions,
 		options.EvidenceRoot,
 		bundle.Phase1,
 		options.Phase1Close,
-		enrollments, expectedAssurance, options.Definition.Schema != DefinitionSchema,
+		enrollments, expectedAssurance, options.Definition.Schema != DefinitionSchemaV3,
 	)
 	if err != nil {
 		return VerifiedOperationalEvidence{}, fmt.Errorf("phase1 operational evidence: %w", err)
@@ -384,7 +384,7 @@ func verifyOperationalEvidenceContents(options VerifyOperationalEvidenceOptions,
 		options.EvidenceRoot,
 		bundle.Phase2,
 		options.Phase2Close,
-		enrollments, expectedAssurance, options.Definition.Schema != DefinitionSchema,
+		enrollments, expectedAssurance, options.Definition.Schema != DefinitionSchemaV3,
 	)
 	if err != nil {
 		return VerifiedOperationalEvidence{}, fmt.Errorf("phase2 operational evidence: %w", err)
