@@ -390,6 +390,7 @@ type CheckpointEvidenceOptions struct {
 	ManifestKey                     string
 	NextAttemptID                   string
 	NextManifestKey                 string
+	CandidateDir                    string
 }
 
 type CheckpointPrepareOptions struct {

@@ -709,6 +709,9 @@ func validateArtifactName(value string) error {
 		return fmt.Errorf("artifact name %q %w", value, err)
 	}
 	for segment := range strings.SplitSeq(value, "/") {
+		if segment == ".." {
+			return fmt.Errorf("artifact name %q must not escape its artifact root", value)
+		}
 		if segment != strings.TrimSpace(segment) {
 			return fmt.Errorf("artifact name %q has untrimmed whitespace in a path segment", value)
 		}

@@ -82,6 +82,7 @@ func addCheckpointEvidenceFlags(fs *flag.FlagSet, options *CheckpointEvidenceOpt
 	fs.StringVar(&options.ManifestKey, "manifest-key", "", "preallocated receipt manifest key")
 	fs.StringVar(&options.NextAttemptID, "next-attempt-id", "", "preallocated candidate attempt ID")
 	fs.StringVar(&options.NextManifestKey, "next-manifest-key", "", "preallocated candidate manifest key")
+	fs.StringVar(&options.CandidateDir, "candidate-dir", "", "exact closed finalized candidate directory")
 }
 
 func validateCheckpointEvidenceOptions(options CheckpointEvidenceOptions) error {
@@ -95,6 +96,9 @@ func validateCheckpointEvidenceOptions(options CheckpointEvidenceOptions) error 
 		return err
 	}
 	kind := mpcceremony.CheckpointTransitionKind(options.TransitionKind)
+	if kind != mpcceremony.CheckpointFinalCandidateRecorded && options.CandidateDir != "" {
+		return errors.New("--candidate-dir is permitted only for final-candidate-recorded")
+	}
 	switch kind {
 	case mpcceremony.CheckpointInitial:
 		if checkpointTransitionOnlyInputsPresent(options) {
@@ -194,6 +198,13 @@ func validateCheckpointEvidenceOptions(options CheckpointEvidenceOptions) error 
 		}
 		return requireCheckpointPhase2TurnValues(options,
 			pathValue("--transition-record", options.TransitionRecordPath), pathValue("--transition-record-signature", options.TransitionRecordSignaturePath))
+	case mpcceremony.CheckpointFinalCandidateRecorded:
+		if options.TransitionRecordPath != "" || options.TransitionRecordSignaturePath != "" || options.AcknowledgementPath != "" ||
+			options.AcknowledgementSignaturePath != "" || options.ManifestPath != "" || options.AttemptID != "" || options.ManifestKey != "" ||
+			options.NextAttemptID != "" || options.NextManifestKey != "" || options.Phase2GenesisPath != "" {
+			return errors.New("final candidate checkpoint derives its record and inventory from candidate-dir and must not supply submission inputs")
+		}
+		return requireCheckpointPhase2TurnValues(options, pathValue("--candidate-dir", options.CandidateDir))
 	default:
 		return fmt.Errorf("unsupported guarded checkpoint transition %q", kind)
 	}
@@ -218,6 +229,7 @@ func checkpointTransitionOnlyInputsPresent(options CheckpointEvidenceOptions) bo
 		options.AcknowledgementPath != "" || options.AcknowledgementSignaturePath != "" ||
 		options.ManifestPath != "" || options.AttemptID != "" || options.ManifestKey != "" ||
 		options.NextAttemptID != "" || options.NextManifestKey != "" || options.Phase2GenesisPath != "" ||
+		options.CandidateDir != "" ||
 		checkpointPhase2TurnInputsPresent(options)
 }
 
@@ -299,7 +311,7 @@ func executeCheckpointPrepare(options CheckpointPrepareOptions) (CommandResult, 
 	}
 	return CommandResult{
 		CeremonyID: built.checkpoint.CeremonyID,
-		Summary:    fmt.Sprintf("prepared checkpoint %d from authenticated Phase 1 evidence; review before signing", built.checkpoint.Sequence),
+		Summary:    fmt.Sprintf("prepared checkpoint %d from authenticated lifecycle evidence; review before signing", built.checkpoint.Sequence),
 		Outputs: map[string]string{
 			"checkpoint": checkpointPath, "signing_request": requestPath,
 		},
@@ -372,7 +384,7 @@ func executeCheckpointVerify(options CheckpointVerifyOptions) (CommandResult, er
 		Schema: checkpointEvidenceInspectionSchema, CeremonyID: built.checkpoint.CeremonyID,
 		Sequence: built.checkpoint.Sequence, CheckpointDigest: mpcceremony.NewDigest(checkpointBytes),
 		TransitionKind: built.checkpoint.Transition.Kind, FullyVerified: true,
-		VerifiedEvidenceBoundary: "authenticated ceremony checkpoint through phase2 participant turns: exact definition and ancestry; full contribution and cleanup replay for accepted candidates; exact closure, beacon, sealed commons, and deterministic phase2 genesis",
+		VerifiedEvidenceBoundary: checkpointEvidenceBoundary(built.checkpoint.Transition.Kind, false),
 	}
 	return CommandResult{
 		CeremonyID:                   built.checkpoint.CeremonyID,
@@ -390,13 +402,24 @@ func executeCheckpointVerifyStored(options CheckpointVerifyStoredOptions) (Comma
 		Schema: checkpointEvidenceInspectionSchema, CeremonyID: checkpoint.CeremonyID,
 		Sequence: checkpoint.Sequence, CheckpointDigest: mpcceremony.NewDigest(checkpointBytes),
 		TransitionKind: checkpoint.Transition.Kind, FullyVerified: true,
-		VerifiedEvidenceBoundary: "complete fetched ancestry through phase2 participant turns; every edge is re-derived from exact signed records, including full accepted-contribution replay, exact beacon evidence, sealed commons, and deterministic phase2 genesis",
+		VerifiedEvidenceBoundary: checkpointEvidenceBoundary(checkpoint.Transition.Kind, true),
 	}
 	return CommandResult{
 		CeremonyID:                   checkpoint.CeremonyID,
 		Summary:                      fmt.Sprintf("fully authenticated stored checkpoint ancestry through sequence %d", checkpoint.Sequence),
 		CheckpointEvidenceInspection: &inspection,
 	}, nil
+}
+
+func checkpointEvidenceBoundary(kind mpcceremony.CheckpointTransitionKind, stored bool) string {
+	prefix := "authenticated checkpoint"
+	if stored {
+		prefix = "complete fetched checkpoint ancestry"
+	}
+	if kind == mpcceremony.CheckpointFinalCandidateRecorded {
+		return prefix + " through the finalized candidate: every transition is re-derived from exact signed records; both phases, cleanup, closure, beacon, sealed commons, deterministic Phase 2 genesis, and the closed candidate file inventory are fully replayed"
+	}
+	return prefix + " through " + string(kind) + ": every transition is re-derived from exact signed records, including full accepted-contribution replay and every lifecycle record reached so far"
 }
 
 func verifyStoredCheckpointAncestry(options CheckpointVerifyStoredOptions, checkpointPath, signaturePath string, seen map[string]struct{}, depth int) (mpcceremony.Checkpoint, []byte, error) {
@@ -503,6 +526,11 @@ func inferStoredCheckpointEvidence(options CheckpointVerifyStoredOptions, checkp
 		}
 		evidence.Phase2GenesisPath = filepath.Join(options.ArtifactRoot, filepath.FromSlash(checkpoint.Phase2.HeadPayload.Name))
 	case mpcceremony.CheckpointPhase2Closed, mpcceremony.CheckpointPhase2BeaconRecorded:
+	case mpcceremony.CheckpointFinalCandidateRecorded:
+		if checkpoint.FinalCandidate == nil {
+			return CheckpointEvidenceOptions{}, errors.New("stored final candidate checkpoint has no final candidate")
+		}
+		evidence.CandidateDir = filepath.Dir(filepath.Join(options.ArtifactRoot, filepath.FromSlash(checkpoint.FinalCandidate.Record.Name)))
 	default:
 		return CheckpointEvidenceOptions{}, fmt.Errorf("stored checkpoint transition %q is outside the supported authenticated lifecycle boundary", checkpoint.Transition.Kind)
 	}
@@ -579,7 +607,7 @@ func buildCheckpointEvidenceWithParent(options CheckpointEvidenceOptions, verify
 
 	kind := mpcceremony.CheckpointTransitionKind(options.TransitionKind)
 	var circuit *mpcceremony.CompiledCircuit
-	if kind == mpcceremony.CheckpointPhase1CandidateAccepted || kind == mpcceremony.CheckpointPhase1Sealed || kind == mpcceremony.CheckpointPhase2Initialized || kind == mpcceremony.CheckpointPhase2CandidateAccepted || kind == mpcceremony.CheckpointPhase2Closed {
+	if kind == mpcceremony.CheckpointPhase1CandidateAccepted || kind == mpcceremony.CheckpointPhase1Sealed || kind == mpcceremony.CheckpointPhase2Initialized || kind == mpcceremony.CheckpointPhase2CandidateAccepted || kind == mpcceremony.CheckpointPhase2Closed || kind == mpcceremony.CheckpointFinalCandidateRecorded {
 		r1csPath := filepath.Join(options.ArtifactRoot, filepath.FromSlash(trusted.Definition.Circuit.R1CS.Name))
 		rootAbs, rootErr := filepath.Abs(options.ArtifactRoot)
 		if rootErr != nil {
@@ -673,7 +701,7 @@ func buildCheckpointEvidenceWithParent(options CheckpointEvidenceOptions, verify
 	activePhase := mpcceremony.Phase1
 	activeState := phaseState
 	activeChain := chain
-	if kind == mpcceremony.CheckpointPhase2OutboundPublished || kind == mpcceremony.CheckpointPhase2ReceiptAccepted || kind == mpcceremony.CheckpointPhase2CandidateAccepted || kind == mpcceremony.CheckpointPhase2Closed || kind == mpcceremony.CheckpointPhase2BeaconRecorded {
+	if kind == mpcceremony.CheckpointPhase2OutboundPublished || kind == mpcceremony.CheckpointPhase2ReceiptAccepted || kind == mpcceremony.CheckpointPhase2CandidateAccepted || kind == mpcceremony.CheckpointPhase2Closed || kind == mpcceremony.CheckpointPhase2BeaconRecorded || kind == mpcceremony.CheckpointFinalCandidateRecorded {
 		if previous.Phase2 == nil || previous.Phase1Seal == nil {
 			return builtCheckpointEvidence{}, errors.New("phase2 turn requires an initialized phase2 checkpoint")
 		}
@@ -744,6 +772,8 @@ func buildCheckpointEvidenceWithParent(options CheckpointEvidenceOptions, verify
 		return buildPhaseClosedCheckpoint(options, trusted, previous, previousRefs, activeState, activeChain, mpcceremony.Phase2)
 	case mpcceremony.CheckpointPhase2BeaconRecorded:
 		return buildPhaseBeaconCheckpoint(options, trusted, previous, previousRefs, activeState, mpcceremony.Phase2)
+	case mpcceremony.CheckpointFinalCandidateRecorded:
+		return buildFinalCandidateCheckpoint(options, trusted, previous, previousRefs, phaseState, activeState, circuit)
 	default:
 		return builtCheckpointEvidence{}, fmt.Errorf("unsupported guarded checkpoint transition %q", kind)
 	}
@@ -949,6 +979,85 @@ func validateDistinctPhaseBeaconRecords(phase1, phase2 mpcceremony.BeaconRecord)
 		return errors.New("phase1 and phase2 must use distinct beacon challenges and rounds")
 	}
 	return nil
+}
+
+func buildFinalCandidateCheckpoint(options CheckpointEvidenceOptions, trusted *mpcceremony.TrustedCeremony, previous mpcceremony.Checkpoint, previousRefs mpcceremony.SignedArtifactRefs, phase1State, phase2State mpcceremony.CheckpointPhaseState, circuit *mpcceremony.CompiledCircuit) (builtCheckpointEvidence, error) {
+	if previous.Phase1Closure == nil || previous.Phase1Beacon == nil || previous.Phase1Seal == nil || previous.Phase2 == nil || previous.Phase2Closure == nil || previous.Phase2Beacon == nil {
+		return builtCheckpointEvidence{}, errors.New("final candidate requires both completed phases and the phase1 seal")
+	}
+	if previous.FinalCandidate != nil {
+		return builtCheckpointEvidence{}, errors.New("final candidate is already recorded in the previous checkpoint")
+	}
+	rootAbs, err := filepath.Abs(options.ArtifactRoot)
+	if err != nil {
+		return builtCheckpointEvidence{}, err
+	}
+	candidateAbs, err := filepath.Abs(options.CandidateDir)
+	if err != nil {
+		return builtCheckpointEvidence{}, err
+	}
+	if err := validateCheckpointPathComponents(rootAbs, candidateAbs); err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("final candidate directory: %w", err)
+	}
+	relativeCandidate, err := filepath.Rel(rootAbs, candidateAbs)
+	if err != nil || filepath.ToSlash(relativeCandidate) != "final/candidate" {
+		return builtCheckpointEvidence{}, errors.New("final candidate directory must be the canonical final/candidate path under artifact-root")
+	}
+	replay := mpcceremony.ReplayPaths{
+		TranscriptRoot:            options.ArtifactRoot,
+		CoordinatorPublicKeyHex:   trusted.Definition.Coordinator.Ed25519PublicKeyHex,
+		DefinitionPath:            options.CeremonyPath,
+		DefinitionSignaturePath:   options.CeremonySignaturePath,
+		Phase1ChainPath:           options.ChainPath,
+		Phase1ChainSignaturePath:  options.ChainSignaturePath,
+		Phase1ClosePath:           filepath.Join(options.ArtifactRoot, filepath.FromSlash(previous.Phase1Closure.Record.Name)),
+		Phase1CloseSignaturePath:  filepath.Join(options.ArtifactRoot, filepath.FromSlash(previous.Phase1Closure.Signature.Name)),
+		Phase1BeaconPath:          filepath.Join(options.ArtifactRoot, filepath.FromSlash(previous.Phase1Beacon.Record.Name)),
+		Phase1BeaconSignaturePath: filepath.Join(options.ArtifactRoot, filepath.FromSlash(previous.Phase1Beacon.Signature.Name)),
+		Phase1SealPath:            filepath.Join(options.ArtifactRoot, filepath.FromSlash(previous.Phase1Seal.Record.Name)),
+		Phase1SealSignaturePath:   filepath.Join(options.ArtifactRoot, filepath.FromSlash(previous.Phase1Seal.Signature.Name)),
+		Phase2ChainPath:           options.Phase2ChainPath,
+		Phase2ChainSignaturePath:  options.Phase2ChainSignaturePath,
+		Phase2ClosePath:           filepath.Join(options.ArtifactRoot, filepath.FromSlash(previous.Phase2Closure.Record.Name)),
+		Phase2CloseSignaturePath:  filepath.Join(options.ArtifactRoot, filepath.FromSlash(previous.Phase2Closure.Signature.Name)),
+		Phase2BeaconPath:          filepath.Join(options.ArtifactRoot, filepath.FromSlash(previous.Phase2Beacon.Record.Name)),
+		Phase2BeaconSignaturePath: filepath.Join(options.ArtifactRoot, filepath.FromSlash(previous.Phase2Beacon.Signature.Name)),
+	}
+	_, candidateRefs, err := mpcceremony.VerifyFinalCandidateCheckpoint(replay, circuit, options.CandidateDir)
+	if err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("final candidate verification: %w", err)
+	}
+	prefixed := make([]mpcceremony.ArtifactRef, 0, len(candidateRefs))
+	for _, ref := range candidateRefs {
+		ref.Name = "final/candidate/" + ref.Name
+		prefixed = append(prefixed, ref)
+	}
+	prefixed = checkpointSortedArtifacts(prefixed...)
+	var recordRefs mpcceremony.SignedArtifactRefs
+	evidence := make([]mpcceremony.ArtifactRef, 0, len(prefixed)-2)
+	for _, ref := range prefixed {
+		switch ref.Name {
+		case "final/candidate/" + mpcceremony.CandidateMetadataFile:
+			recordRefs.Record = ref
+		case "final/candidate/" + mpcceremony.CandidateSignatureFile:
+			recordRefs.Signature = ref
+		default:
+			evidence = append(evidence, ref)
+		}
+	}
+	if err := recordRefs.Validate(); err != nil {
+		return builtCheckpointEvidence{}, fmt.Errorf("final candidate record: %w", err)
+	}
+	checkpoint := previous
+	checkpoint.Sequence++
+	checkpoint.PreviousCheckpoint = &previousRefs
+	checkpoint.Transition = mpcceremony.CheckpointTransition{Kind: mpcceremony.CheckpointFinalCandidateRecorded, Record: &recordRefs, Evidence: evidence}
+	checkpoint.Phase1 = phase1State
+	state := phase2State
+	checkpoint.Phase2 = &state
+	checkpoint.FinalCandidate = &recordRefs
+	checkpoint.AcceptedArtifacts = checkpointSortedArtifacts(append(append([]mpcceremony.ArtifactRef(nil), previous.AcceptedArtifacts...), prefixed...)...)
+	return finishTransitionCheckpoint(trusted, previous, checkpoint)
 }
 
 func buildPhase1BeaconCheckpoint(options CheckpointEvidenceOptions, trusted *mpcceremony.TrustedCeremony, previous mpcceremony.Checkpoint, previousRefs mpcceremony.SignedArtifactRefs, phaseState mpcceremony.CheckpointPhaseState) (builtCheckpointEvidence, error) {

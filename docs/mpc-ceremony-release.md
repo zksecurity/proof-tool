@@ -143,3 +143,7 @@ After the configured minimum is met, the graph accepts the canonical signed
 Phase 2 closure and then the canonical signed beacon record plus its raw drand
 response. Both edges preserve the exact Phase 1 seal, Phase 2 head, and all
 submission results; stored verification replays that complete ancestry.
+The next guarded edge independently replays both phases and accepts only the
+closed `final/candidate` tree: the coordinator-signed candidate, exact checksum
+inventory, final keys, Phase 2 seal, and public proof-verification evidence.
+Extra, missing, linked, or changed files are rejected.

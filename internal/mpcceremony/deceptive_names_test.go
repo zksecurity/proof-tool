@@ -129,6 +129,8 @@ func TestArtifactNameRejectsDeceptiveRunes(t *testing.T) {
 		"phase1/" + rlo + "gnp.nib",
 		"phase1/chain" + zwsp + "-0001.json",
 		"phase1/" + rli + "chain.json",
+		"../outside.bin",
+		"phase1/../../outside.bin",
 	} {
 		if err := validateArtifactName(name); err == nil {
 			t.Fatalf("artifact name %q was accepted", name)
@@ -141,6 +143,27 @@ func TestArtifactNameRejectsDeceptiveRunes(t *testing.T) {
 	} {
 		if err := validateArtifactName(name); err != nil {
 			t.Fatalf("legitimate artifact name %q was rejected: %v", name, err)
+		}
+	}
+}
+
+func TestCandidateMetadataRequiresCanonicalArtifactNames(t *testing.T) {
+	base := CandidateMetadata{
+		ConstraintSystem:    ArtifactRef{Name: "ownership-destination.ccs"},
+		ProvingKey:          ArtifactRef{Name: NativeProvingKeyFile},
+		VerifyingKey:        ArtifactRef{Name: NativeVerifyingKeyFile},
+		CardanoVerifyingKey: ArtifactRef{Name: CardanoVKBytesFile},
+		CardanoVKHex:        ArtifactRef{Name: CardanoVKHexFile},
+		CardanoVKFormat:     ArtifactRef{Name: CardanoVKFormatFile},
+		VerificationReport:  ArtifactRef{Name: VerificationReportFile},
+		PublicEvidence:      ArtifactRef{Name: PublicEvidenceFile},
+		Phase2SealRecord:    ArtifactRef{Name: Phase2SealFile},
+	}
+	for _, name := range []string{"other.pk", "../outside.pk"} {
+		candidate := base
+		candidate.ProvingKey.Name = name
+		if err := validateCandidateArtifactNames(candidate); err == nil {
+			t.Fatalf("candidate proving-key name %q was accepted", name)
 		}
 	}
 }

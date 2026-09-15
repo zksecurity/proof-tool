@@ -574,6 +574,25 @@ func TestCheckpointCommandFullLifecycleThroughPhase2Turn(t *testing.T) {
 	if verified.CheckpointEvidenceInspection == nil || !verified.CheckpointEvidenceInspection.FullyVerified || verified.CheckpointEvidenceInspection.Sequence != 12 {
 		t.Fatalf("cp12 stored verification = %#v", verified.CheckpointEvidenceInspection)
 	}
+	finalCandidateArgs := append(append([]string{}, fixture.trustArgs...),
+		"--artifact-root", fixture.root, "--relay-release-id", "role-images-test",
+		"--transition", string(mpcceremony.CheckpointFinalCandidateRecorded),
+		"--previous-checkpoint", cp12.Outputs["checkpoint"], "--previous-checkpoint-signature", cp12SignaturePath,
+		"--chain", chainPath, "--chain-signature", chainSignaturePath,
+		"--head-payload", filepath.Join(fixture.root, filepath.FromSlash(accepted.OutputPayload.Name)),
+		"--candidate-dir", filepath.Join(fixture.root, "final", "candidate"),
+	)
+	finalCandidateArgs = append(finalCandidateArgs, phase2ActiveArgs...)
+	cp13 := runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "prepare"}, finalCandidateArgs...), "--out-dir", filepath.Join(fixture.root, "prepared", "cp13")))
+	cp13SignaturePath := filepath.Join(fixture.root, "state", "signed-cp13.sig")
+	runCheckpointFixtureCommand(t, fixture, append(append([]string{"--format", "json", "checkpoint", "sign"}, finalCandidateArgs...),
+		"--checkpoint", cp13.Outputs["checkpoint"], "--signing-request", cp13.Outputs["signing_request"],
+		"--coordinator-signing-key", keyPath, "--out", cp13SignaturePath))
+	verified = runCheckpointCommandExecutable(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "verify-stored"}, fixture.trustArgs...),
+		"--checkpoint", cp13.Outputs["checkpoint"], "--checkpoint-signature", cp13SignaturePath, "--artifact-root", fixture.root))
+	if verified.CheckpointEvidenceInspection == nil || !verified.CheckpointEvidenceInspection.FullyVerified || verified.CheckpointEvidenceInspection.Sequence != 13 {
+		t.Fatalf("cp13 stored verification = %#v", verified.CheckpointEvidenceInspection)
+	}
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, phase2Args, "phase2/genesis.bin", "phase2-genesis")
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, phase2Args, "phase2/chain-0000.json", "phase2-chain")
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, phase2Args, "phase2/chain-0000.sig", "phase2-chain-signature")
@@ -586,6 +605,47 @@ func TestCheckpointCommandFullLifecycleThroughPhase2Turn(t *testing.T) {
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, args, filepath.ToSlash(mustRelativeTestPath(t, fixture.root, chainPath)), "accepted-chain")
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, phase2ClosureArgs, "phase2/closure/record.sig", "phase2-closure-signature")
 	assertChangedCheckpointEvidenceFails(t, fixture.executable, phase2BeaconArgs, "phase2/beacon/raw-response.bin", "phase2-beacon-response")
+	for _, testCase := range []struct{ path, label string }{
+		{"final/candidate/ownership.pk", "proving-key"},
+		{"final/candidate/ownership.vk", "verifying-key"},
+		{"final/candidate/candidate.json", "metadata"},
+		{"final/candidate/candidate.sig.json", "signature"},
+		{"final/candidate/candidate-checksums.sha256", "checksums"},
+		{"final/candidate/public-finalization-evidence.json", "public-evidence"},
+	} {
+		assertChangedCheckpointEvidenceFails(t, fixture.executable, finalCandidateArgs, testCase.path, "final-candidate-"+testCase.label)
+	}
+	candidateDir := filepath.Join(fixture.root, "final", "candidate")
+	missingPath := filepath.Join(candidateDir, "ownership.vk")
+	missingBackup := missingPath + ".test-backup"
+	if err := os.Rename(missingPath, missingBackup); err != nil {
+		t.Fatal(err)
+	}
+	assertCheckpointExecutableFails(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "prepare"}, finalCandidateArgs...),
+		"--out-dir", filepath.Join(fixture.root, "prepared", "cp13-missing")), "")
+	if err := os.Rename(missingBackup, missingPath); err != nil {
+		t.Fatal(err)
+	}
+	extraPath := filepath.Join(candidateDir, "unexpected.bin")
+	writeDecisionTestFile(t, extraPath, []byte("unexpected"), 0o600)
+	assertCheckpointExecutableFails(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "prepare"}, finalCandidateArgs...),
+		"--out-dir", filepath.Join(fixture.root, "prepared", "cp13-extra")), "")
+	if err := os.Remove(extraPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(missingPath, missingBackup); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Base(missingBackup), missingPath); err == nil {
+		assertCheckpointExecutableFails(t, fixture.executable, append(append([]string{"--format", "json", "checkpoint", "prepare"}, finalCandidateArgs...),
+			"--out-dir", filepath.Join(fixture.root, "prepared", "cp13-symlink")), "")
+		if err := os.Remove(missingPath); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Rename(missingBackup, missingPath); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func prepareAndSignCandidateCheckpoint(t *testing.T, fixture checkpointCLIFixture, participantKey ed25519.PrivateKey, previousPath, previousSignaturePath string, phase mpcceremony.Phase, chainPath, chainSignaturePath string) (string, string) {

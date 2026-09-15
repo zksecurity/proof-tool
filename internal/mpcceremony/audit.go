@@ -205,6 +205,81 @@ func ReplayCandidate(paths ReplayPaths, circuit *CompiledCircuit, candidateDir s
 	return replay.definition.CeremonyID, nil
 }
 
+// VerifyFinalCandidateCheckpoint fully replays a finalized candidate and
+// returns the exact closed file inventory a storage-first checkpoint may
+// commit. Extra files, missing files, symbolic links, other non-regular
+// entries, and changed bytes are rejected. Regular hard links are treated as
+// ordinary files; the checkpoint commits their exact contents, not inode
+// identity.
+func VerifyFinalCandidateCheckpoint(paths ReplayPaths, circuit *CompiledCircuit, candidateDir string) (CandidateMetadata, []ArtifactRef, error) {
+	if circuit == nil || circuit.R1CS == nil {
+		return CandidateMetadata{}, nil, errors.New("independently compiled circuit is required")
+	}
+	replay, err := loadReplay(paths)
+	if err != nil {
+		return CandidateMetadata{}, nil, err
+	}
+	if err := VerifyRunningSoftwareForMode(replay.definition.Software, replay.definition.Mode); err != nil {
+		return CandidateMetadata{}, nil, err
+	}
+	if err := ValidateCircuitBinding(circuit, replay.definition.Circuit); err != nil {
+		return CandidateMetadata{}, nil, err
+	}
+	candidate, candidateRef, err := verifyCandidate(replay.definition, replay.definitionRef, candidateDir)
+	if err != nil {
+		return CandidateMetadata{}, nil, err
+	}
+	if err := verifyCandidateReplay(circuit, &replay, paths, candidate, candidateDir); err != nil {
+		return CandidateMetadata{}, nil, err
+	}
+	names := append(candidateChecksumNames(), CandidateChecksumsFile)
+	expected := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		expected[name] = struct{}{}
+	}
+	entries, err := os.ReadDir(candidateDir)
+	if err != nil {
+		return CandidateMetadata{}, nil, err
+	}
+	refs := make([]ArtifactRef, 0, len(names))
+	for _, entry := range entries {
+		name := entry.Name()
+		if _, ok := expected[name]; !ok {
+			return CandidateMetadata{}, nil, fmt.Errorf("unexpected finalized candidate entry %q", name)
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return CandidateMetadata{}, nil, err
+		}
+		if !info.Mode().IsRegular() {
+			return CandidateMetadata{}, nil, fmt.Errorf("finalized candidate entry %q is not a regular file", name)
+		}
+		ref, err := artifactRefForFile(name, filepath.Join(candidateDir, name))
+		if err != nil {
+			return CandidateMetadata{}, nil, err
+		}
+		refs = append(refs, ref)
+		delete(expected, name)
+	}
+	if len(expected) != 0 {
+		return CandidateMetadata{}, nil, errors.New("finalized candidate tree is incomplete")
+	}
+	slices.SortFunc(refs, func(a, b ArtifactRef) int { return strings.Compare(a.Name, b.Name) })
+	for _, ref := range refs {
+		if ref.Name == CandidateMetadataFile && ref != candidateRef {
+			return CandidateMetadata{}, nil, errors.New("finalized candidate record changed during verification")
+		}
+	}
+	verifiedAgain, candidateRefAgain, err := verifyCandidate(replay.definition, replay.definitionRef, candidateDir)
+	if err != nil {
+		return CandidateMetadata{}, nil, fmt.Errorf("finalized candidate changed during closed-tree verification: %w", err)
+	}
+	if !reflect.DeepEqual(verifiedAgain, candidate) || candidateRefAgain != candidateRef {
+		return CandidateMetadata{}, nil, errors.New("finalized candidate changed during closed-tree verification")
+	}
+	return candidate, refs, nil
+}
+
 func verifyCandidateReplay(circuit *CompiledCircuit, replay *loadedReplay, paths ReplayPaths, candidate CandidateMetadata, dir string) error {
 	phase2Seal, err := loadCandidatePhase2Seal(replay.definition, candidate, dir)
 	if err != nil {
@@ -214,11 +289,36 @@ func verifyCandidateReplay(circuit *CompiledCircuit, replay *loadedReplay, paths
 		return fmt.Errorf("candidate phase2 seal: %w", err)
 	}
 	replay.phase2Seal = phase2Seal
+	phase1Summary, err := phaseSummary(replay.phase1Chain, replay.phase1ChainRef, replay.phase1Close, replay.phase1Beacon, replay.phase1Seal)
+	if err != nil {
+		return fmt.Errorf("derive phase1 candidate summary: %w", err)
+	}
+	phase2Summary, err := phaseSummary(replay.phase2Chain, replay.phase2ChainRef, replay.phase2Close, replay.phase2Beacon, replay.phase2Seal)
+	if err != nil {
+		return fmt.Errorf("derive phase2 candidate summary: %w", err)
+	}
+	var report VerificationReport
+	if _, err := readCanonicalFile(filepath.Join(dir, VerificationReportFile), &report); err != nil {
+		return fmt.Errorf("candidate verification report: %w", err)
+	}
+	if err := validateCandidateReplayClaims(candidate, phase1Summary, phase2Summary, phase2Seal, report); err != nil {
+		return err
+	}
 	replayed, err := replayAll(circuit, *replay, paths)
 	if err != nil {
 		return err
 	}
 	return compareCandidateToReplay(circuit, *replay, replayed.pk, replayed.vk, candidate, dir)
+}
+
+func validateCandidateReplayClaims(candidate CandidateMetadata, phase1, phase2 PhaseSummary, phase2Seal SealRecord, report VerificationReport) error {
+	if !reflect.DeepEqual(candidate.Phase1, phase1) || !reflect.DeepEqual(candidate.Phase2, phase2) {
+		return errors.New("candidate phase summaries do not equal the authenticated replay")
+	}
+	if candidate.FinalizedAt != phase2Seal.SealedAt || candidate.FinalizedAt != report.CheckedAt {
+		return errors.New("candidate finalization, phase2 seal, and verification report timestamps must match exactly")
+	}
+	return nil
 }
 
 func compareCandidateToReplay(

@@ -646,6 +646,21 @@ func TestCheckpointPhase2ParticipantTurnSequence(t *testing.T) {
 	if err := ValidateCheckpointTransition(closed, beaconed); err != nil {
 		t.Fatalf("valid phase2 beacon: %v", err)
 	}
+	finalRefs := checkpointSigned("final/candidate/candidate")
+	finalEvidence := checkpointArtifacts(
+		checkpointArtifact("final/candidate/candidate-checksums.sha256", "checksums"),
+		checkpointArtifact("final/candidate/ownership.pk", "pk"),
+	)
+	finalized := cloneCheckpoint(t, beaconed)
+	finalized.Sequence++
+	finalParent := checkpointReference(t, beaconed, "p2-beaconed")
+	finalized.PreviousCheckpoint = &finalParent
+	finalized.Transition = CheckpointTransition{Kind: CheckpointFinalCandidateRecorded, Record: &finalRefs, Evidence: finalEvidence}
+	finalized.FinalCandidate = &finalRefs
+	finalized.AcceptedArtifacts = appendCheckpointArtifacts(finalized.AcceptedArtifacts, finalRefs.Record, finalRefs.Signature, finalEvidence[0], finalEvidence[1])
+	if err := ValidateCheckpointTransition(beaconed, finalized); err != nil {
+		t.Fatalf("valid final candidate: %v", err)
+	}
 
 	allocated := cloneCheckpoint(t, candidate)
 	allocated.Submissions[phase2CandidateIndex].Status = CheckpointSubmissionAllocated
@@ -682,6 +697,23 @@ func TestCheckpointPhase2ParticipantTurnSequence(t *testing.T) {
 	if err := ValidateCheckpointTransition(closed, unexpected); err == nil {
 		t.Fatal("phase2 beacon accepted an unexpected artifact")
 	}
+	tooEarly := cloneCheckpoint(t, finalized)
+	tooEarly.Phase2Beacon = nil
+	if err := ValidateCheckpointTransition(closed, tooEarly); err == nil {
+		t.Fatal("final candidate accepted before phase2 beacon")
+	}
+	repeatedFinal := cloneCheckpoint(t, finalized)
+	repeatedFinal.Sequence++
+	repeatedFinalParent := checkpointReference(t, finalized, "final-again")
+	repeatedFinal.PreviousCheckpoint = &repeatedFinalParent
+	if err := ValidateCheckpointTransition(finalized, repeatedFinal); err == nil {
+		t.Fatal("final candidate accepted twice")
+	}
+	extraFinal := cloneCheckpoint(t, finalized)
+	extraFinal.AcceptedArtifacts = appendCheckpointArtifacts(extraFinal.AcceptedArtifacts, checkpointArtifact("final/candidate/extra.bin", "extra"))
+	if err := ValidateCheckpointTransition(beaconed, extraFinal); err == nil {
+		t.Fatal("final candidate accepted an extra artifact")
+	}
 }
 
 func TestCheckpointOldSchemasRejectPhase2TurnTransition(t *testing.T) {
@@ -711,6 +743,47 @@ func TestCheckpointOldSchemasRejectPhase2TurnTransition(t *testing.T) {
 		if err := checkpoint.Validate(); err == nil {
 			t.Fatalf("schema %s accepted phase2 submission slot", schema)
 		}
+	}
+	for _, schema := range []string{CheckpointSchemaV1, CheckpointSchemaV2} {
+		checkpoint := phase1CheckpointSequence(t)[0]
+		checkpoint.Schema = schema
+		if schema == CheckpointSchemaV1 {
+			checkpoint.AssurancePolicy = nil
+		}
+		finalRefs := checkpointSigned("final/candidate/candidate")
+		checkpoint.Transition = CheckpointTransition{Kind: CheckpointFinalCandidateRecorded, Record: &finalRefs}
+		checkpoint.FinalCandidate = &finalRefs
+		checkpoint.AcceptedArtifacts = appendCheckpointArtifacts(checkpoint.AcceptedArtifacts, finalRefs.Record, finalRefs.Signature)
+		if err := checkpoint.Validate(); err == nil {
+			t.Fatalf("schema %s accepted final-candidate state", schema)
+		}
+	}
+}
+
+func TestValidateCandidateReplayClaims(t *testing.T) {
+	phase1 := PhaseSummary{Phase: Phase1}
+	phase2 := PhaseSummary{Phase: Phase2}
+	timestamp := "2026-09-15T00:00:00Z"
+	candidate := CandidateMetadata{Phase1: phase1, Phase2: phase2, FinalizedAt: timestamp}
+	seal := SealRecord{SealedAt: timestamp}
+	report := VerificationReport{CheckedAt: timestamp}
+	if err := validateCandidateReplayClaims(candidate, phase1, phase2, seal, report); err != nil {
+		t.Fatalf("matching replay claims rejected: %v", err)
+	}
+	changed := candidate
+	changed.Phase1.ContributionCount++
+	if err := validateCandidateReplayClaims(changed, phase1, phase2, seal, report); err == nil {
+		t.Fatal("changed Phase 1 summary accepted")
+	}
+	changed = candidate
+	changed.Phase2.ContributionCount++
+	if err := validateCandidateReplayClaims(changed, phase1, phase2, seal, report); err == nil {
+		t.Fatal("changed Phase 2 summary accepted")
+	}
+	changed = candidate
+	changed.FinalizedAt = "2026-09-15T00:00:01Z"
+	if err := validateCandidateReplayClaims(changed, phase1, phase2, seal, report); err == nil {
+		t.Fatal("inconsistent candidate chronology accepted")
 	}
 }
 

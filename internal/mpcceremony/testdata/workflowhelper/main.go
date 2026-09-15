@@ -66,21 +66,28 @@ func main() {
 
 func run(outputRoot, operationalEvidenceHelper string) error {
 	zeroAssurance := os.Getenv("PROOF_TOOL_TEST_ZERO_ASSURANCE") == "1"
-	compiled, err := frontend.Compile(
-		ecc.BLS12_381.ScalarField(),
-		r1cs.NewBuilder,
-		&tinyCommittedCircuit{},
-	)
+	checkpointPhase2One := os.Getenv("MPC_WORKFLOW_PHASE2_ONE") == "1"
+	var circuit *mpcceremony.CompiledCircuit
+	var err error
+	if checkpointPhase2One {
+		circuit, err = mpcceremony.CompileForKeyVersion(mpcceremony.KeyVersionRehearsal)
+	} else {
+		compiled, compileErr := frontend.Compile(
+			ecc.BLS12_381.ScalarField(),
+			r1cs.NewBuilder,
+			&tinyCommittedCircuit{},
+		)
+		if compileErr != nil {
+			return fmt.Errorf("compile tiny circuit: %w", compileErr)
+		}
+		native, ok := compiled.(*cs.R1CS)
+		if !ok {
+			return fmt.Errorf("compiled circuit type %T, want *bls12-381.R1CS", compiled)
+		}
+		circuit, err = mpcceremony.BindDestinationV2R1CS(native)
+	}
 	if err != nil {
 		return fmt.Errorf("compile tiny circuit: %w", err)
-	}
-	native, ok := compiled.(*cs.R1CS)
-	if !ok {
-		return fmt.Errorf("compiled circuit type %T, want *bls12-381.R1CS", compiled)
-	}
-	circuit, err := mpcceremony.BindDestinationV2R1CS(native)
-	if err != nil {
-		return fmt.Errorf("bind tiny circuit: %w", err)
 	}
 	var software mpcceremony.SoftwareBinding
 	if binary := os.Getenv("MPC_CEREMONY_TEST_BINARY"); binary != "" {
@@ -207,7 +214,6 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	ceremonyRoot := filepath.Join(outputRoot, "ceremony")
 	phaseMinimum := uint8(2)
 	phase2Minimum := uint8(2)
-	checkpointPhase2One := os.Getenv("MPC_WORKFLOW_PHASE2_ONE") == "1"
 	if os.Getenv("MPC_WORKFLOW_PHASE1_ONE") == "1" || checkpointPhase2One {
 		phaseMinimum = 1
 	}
@@ -750,6 +756,55 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 			"--transcript-dir", ceremonyRoot,
 		); err != nil {
 			return fmt.Errorf("record checkpoint Phase 2 beacon: %w", err)
+		}
+		replayArgs := []string{
+			"--transcript-root", ceremonyRoot,
+			"--phase1-chain", phase1Paths.ChainPath, "--phase1-chain-signature", phase1Paths.ChainSignaturePath,
+			"--phase1-close", phase1Close.ClosePath, "--phase1-close-signature", phase1Close.SignaturePath,
+			"--phase1-beacon", filepath.Join(ceremonyRoot, "phase1", "beacon", "record.json"),
+			"--phase1-beacon-signature", filepath.Join(ceremonyRoot, "phase1", "beacon", "record.sig"),
+			"--phase1-seal", phase1Seal.SealPath, "--phase1-seal-signature", phase1Seal.SignaturePath,
+			"--phase2-chain", phase2Paths.ChainPath, "--phase2-chain-signature", phase2Paths.ChainSignaturePath,
+			"--phase2-close", phase2Close.ClosePath, "--phase2-close-signature", phase2Close.SignaturePath,
+			"--phase2-beacon", filepath.Join(ceremonyRoot, "phase2", "beacon", "record.json"),
+			"--phase2-beacon-signature", filepath.Join(ceremonyRoot, "phase2", "beacon", "record.sig"),
+		}
+		preliminaryDir := filepath.Join(outputRoot, "checkpoint-preliminary")
+		prepareArgs := []string{"finalize", "prepare",
+			"--ceremony", trust.DefinitionPath, "--ceremony-signature", trust.DefinitionSignaturePath,
+			"--coordinator-public-key-file", trust.CoordinatorPublicKeyPath,
+		}
+		prepareArgs = append(prepareArgs, replayArgs...)
+		prepareArgs = append(prepareArgs, "--coordinator-signing-key", coordinatorKeyPath, "--prepared-at", "2023-08-23T15:11:34Z", "--out-dir", preliminaryDir)
+		if err := runTestCommand(prepareArgs...); err != nil {
+			return fmt.Errorf("prepare checkpoint finalization: %w", err)
+		}
+		publicEvidencePath := filepath.Join(outputRoot, "checkpoint-public-finalization-evidence.json")
+		if err := runTestCommand("finalize", "rehearsal-evidence",
+			"--keys-dir", preliminaryDir,
+			"--coordinator-public-key-file", trust.CoordinatorPublicKeyPath,
+			"--ceremony-id", trusted.Definition.CeremonyID,
+			"--out", publicEvidencePath,
+		); err != nil {
+			return fmt.Errorf("create checkpoint rehearsal evidence: %w", err)
+		}
+		candidateDir := filepath.Join(ceremonyRoot, "final", "candidate")
+		if err := os.Mkdir(filepath.Dir(candidateDir), 0o700); err != nil {
+			return fmt.Errorf("create checkpoint final directory: %w", err)
+		}
+		completeArgs := []string{"finalize", "complete",
+			"--ceremony", trust.DefinitionPath, "--ceremony-signature", trust.DefinitionSignaturePath,
+			"--coordinator-public-key-file", trust.CoordinatorPublicKeyPath,
+		}
+		completeArgs = append(completeArgs, replayArgs...)
+		completeArgs = append(completeArgs,
+			"--coordinator-signing-key", coordinatorKeyPath,
+			"--public-evidence", publicEvidencePath,
+			"--finalized-at", "2023-08-23T15:11:35Z",
+			"--out-dir", candidateDir,
+		)
+		if err := runTestCommand(completeArgs...); err != nil {
+			return fmt.Errorf("complete checkpoint finalization: %w", err)
 		}
 		return nil
 	}
