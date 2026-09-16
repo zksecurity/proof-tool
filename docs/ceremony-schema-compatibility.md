@@ -74,6 +74,10 @@ investigation, and accepted/rejected/retired attempts remain in bounded history.
 - release review verifies that replay binding, the exact final files, enabled
   assurance evidence and the required release signer. Independent signer or
   auditor replay is optional additional assurance in V4.
+- each V4 phase retains the exact coordinator-signed beacon record and its one
+  cryptographically verified drand response. A second endpoint may be tried as
+  an availability fallback, but V4 does not create a separate multi-relay
+  evidence record. Released V1-V3 verification rules remain unchanged.
 
 Large contribution payloads are hashed and verified as streams. Canonical JSON
 records and signatures retain strict small-file limits. Final reports have their

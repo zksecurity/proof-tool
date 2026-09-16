@@ -37,7 +37,6 @@ func TestCheckpointV4RealContributionTurn(t *testing.T) {
 		{name: "observers-enabled", mirrorMode: "1"},
 		{name: "audits-enabled", mirrorMode: "1", extra: "MPC_WORKFLOW_V4_AUDITS=1"},
 		{name: "missing-witness", mirrorMode: "1", extra: "MPC_WORKFLOW_SKIP_WITNESS=1", rejection: "signed witness minimum"},
-		{name: "missing-beacon-evidence", mirrorMode: "0", extra: "MPC_WORKFLOW_SKIP_BEACON_EVIDENCE=1", rejection: "multi-relay beacon evidence is required"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			outputRoot := filepath.Join(t.TempDir(), "ceremony-run")

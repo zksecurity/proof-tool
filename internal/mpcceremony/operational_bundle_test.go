@@ -461,6 +461,37 @@ func TestVerifyOperationalEvidenceBundleEndToEndAndNegatives(t *testing.T) {
 	})
 }
 
+func TestOperationalEvidenceV4UsesOneSignedBeaconAndNoMultiRelayRecord(t *testing.T) {
+	f := newOperationalBundleFixture(t)
+	bundle := f.bundle
+	bundle.Schema = OperationalEvidenceBundleSchemaV4
+	for _, phase := range []*PhaseOperationalEvidence{&bundle.Phase1, &bundle.Phase2} {
+		phase.Beacon = phase.MultiRelayBeaconEvidence
+		phase.MultiRelayBeaconEvidence = SignedArtifactRefs{}
+		phase.RawBeaconResponses = phase.RawBeaconResponses[:1]
+		for index := range phase.AcceptedHeads {
+			phase.AcceptedHeads[index].OutboundHandoff = SignedArtifactRefs{}
+			phase.AcceptedHeads[index].OutboundReceipt = SignedArtifactRefs{}
+			phase.AcceptedHeads[index].ReturnHandoff = SignedArtifactRefs{}
+			phase.AcceptedHeads[index].ReturnReceipt = SignedArtifactRefs{}
+		}
+	}
+	if err := bundle.Validate(); err != nil {
+		t.Fatalf("single-beacon V4 bundle rejected: %v", err)
+	}
+
+	bad := bundle
+	bad.Phase1.MultiRelayBeaconEvidence = f.bundle.Phase1.MultiRelayBeaconEvidence
+	if err := bad.Validate(); err == nil {
+		t.Fatal("V4 accepted a separate multi-relay beacon record")
+	}
+	bad = bundle
+	bad.Phase1.RawBeaconResponses = append(bad.Phase1.RawBeaconResponses, f.bundle.Phase1.RawBeaconResponses[1])
+	if err := bad.Validate(); err == nil {
+		t.Fatal("V4 accepted more than one raw beacon response")
+	}
+}
+
 func newOperationalBundleFixture(t *testing.T) operationalBundleFixture {
 	return newOperationalBundleFixtureConfigured(t, nil, false)
 }

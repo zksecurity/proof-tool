@@ -403,33 +403,6 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 	if err = commit(); err != nil {
 		return err
 	}
-	beaconEvidence := m.MultiRelayBeaconEvidence{Schema: m.MultiRelayBeaconEvidenceSchema, CeremonyID: d.CeremonyID, Phase: m.Phase1, CloseID: closure.CloseID, BeaconRound: 42, Provider: d.BeaconPolicy.Provider, Network: d.BeaconPolicy.Network, CoordinatorID: d.Coordinator.ID, CoordinatorKeyID: d.Coordinator.KeyID, RecordedAt: "2023-08-23T15:11:30Z"}
-	rawRefs := []m.ArtifactRef{}
-	for _, id := range []string{"fixture-a", "fixture-b"} {
-		name := "phase1/beacon-evidence/" + id + ".json"
-		if err = os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0700); err != nil {
-			return err
-		}
-		if err = os.WriteFile(filepath.Join(root, name), []byte(quicknetRound42), 0600); err != nil {
-			return err
-		}
-		rr, err := ref(name)
-		if err != nil {
-			return err
-		}
-		rawRefs = append(rawRefs, rr)
-		beaconEvidence.Observations = append(beaconEvidence.Observations, m.RelayObservation{RelayID: id, OperatorID: id, EndpointSHA256: m.NewDigest([]byte(id)).SHA256, RawResponse: rr, RetrievedAt: "2023-08-23T15:11:30Z", VerifiedRandomness: beacon.Beacon.RandomnessHex})
-	}
-	beRefs, err := writePair("phase1/beacon-evidence/record", beaconEvidence, d.Coordinator.KeyID, coordinator)
-	if err != nil {
-		return err
-	}
-	if os.Getenv("MPC_WORKFLOW_SKIP_BEACON_EVIDENCE") != "1" {
-		next(m.CheckpointTransitionV4{Kind: m.CheckpointBeaconEvidenceRecorded, Record: &beRefs, Evidence: sorted(rawRefs)})
-		if err = commit(); err != nil {
-			return err
-		}
-	}
 	seal, err := m.SealPhase1Files(m.SealPhase1FilesOptions{Trust: trust, Circuit: circuit, TranscriptRoot: root, ClosePath: filepath.Join(root, closureRefs.Record.Name), CloseSignaturePath: filepath.Join(root, closureRefs.Signature.Name), BeaconPath: beacon.BeaconPath, BeaconSignaturePath: beacon.SignaturePath, CoordinatorPrivateKeyPath: coordinatorPath, OutputDir: filepath.Join(root, "phase1/sealed")})
 	if err != nil {
 		return err

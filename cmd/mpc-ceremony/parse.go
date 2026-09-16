@@ -602,10 +602,6 @@ func parseOps(invocation Invocation, args []string) (Invocation, error) {
 		options, err := parseOpsPrepareMirrorReceipt(args[1:])
 		invocation.Command, invocation.Options = CommandOpsPrepareMirrorReceipt, options
 		return invocation, wrapCommandError(err, "ops", "prepare-mirror-receipt")
-	case "prepare-beacon-evidence":
-		options, err := parseOpsPrepareBeaconEvidence(args[1:])
-		invocation.Command, invocation.Options = CommandOpsPrepareBeaconEvidence, options
-		return invocation, wrapCommandError(err, "ops", "prepare-beacon-evidence")
 	case "export-signing":
 		options, err := parseOpsExportSigning(args[1:])
 		invocation.Command, invocation.Options = CommandOpsExportSigning, options
@@ -624,32 +620,6 @@ func parseOps(invocation Invocation, args []string) (Invocation, error) {
 			topic:   []string{"ops"},
 		}
 	}
-}
-
-func parseOpsPrepareBeaconEvidence(args []string) (OpsPrepareBeaconEvidenceOptions, error) {
-	var options OpsPrepareBeaconEvidenceOptions
-	fs := commandFlagSet("ops prepare-beacon-evidence")
-	addCeremonyTrustFlags(fs, &options.CeremonyPath, &options.CeremonySignaturePath, &options.CoordinatorPublicKeyFile)
-	fs.StringVar(&options.TranscriptRoot, "transcript-root", "", "local root containing the signed closure and raw relay responses")
-	fs.StringVar(&options.ClosurePath, "closure", "", "exact coordinator-signed closure record")
-	fs.StringVar(&options.ClosureSignaturePath, "closure-signature", "", "detached coordinator signature for the closure")
-	fs.StringVar(&options.ObservationsPath, "observations", "", "strict JSON describing independently operated relay endpoints and retained raw response names")
-	fs.StringVar(&options.RecordedAt, "recorded-at", "", "evidence preparation time in RFC3339 UTC")
-	fs.StringVar(&options.OutDir, "out-dir", "", "fresh directory for canonical evidence and signing request")
-	if err := parseFlags(fs, args); err != nil {
-		return options, err
-	}
-	return options, requireValues(
-		pathValue("--ceremony", options.CeremonyPath),
-		pathValue("--ceremony-signature", options.CeremonySignaturePath),
-		pathValue("--coordinator-public-key-file", options.CoordinatorPublicKeyFile),
-		pathValue("--transcript-root", options.TranscriptRoot),
-		pathValue("--closure", options.ClosurePath),
-		pathValue("--closure-signature", options.ClosureSignaturePath),
-		pathValue("--observations", options.ObservationsPath),
-		value("--recorded-at", options.RecordedAt),
-		pathValue("--out-dir", options.OutDir),
-	)
 }
 
 func parseOpsPreparePublicWitnessReceipt(args []string) (OpsPreparePublicWitnessReceiptOptions, error) {

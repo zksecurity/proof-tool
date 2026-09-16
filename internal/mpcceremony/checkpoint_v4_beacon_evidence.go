@@ -2,7 +2,6 @@ package mpcceremony
 
 import (
 	"errors"
-	"slices"
 )
 
 func checkpointClosureV4(reader *checkpointReaderV4, d CeremonyDefinition, p CheckpointProgressV4, phase Phase) (CloseRecord, []byte, ArtifactRef, error) {
@@ -72,57 +71,4 @@ func verifyCheckpointWitnessesV4(reader *checkpointReaderV4, d CeremonyDefinitio
 		counts[phase] = len(receipts)
 	}
 	return counts, nil
-}
-
-func verifyCheckpointBeaconEvidenceV4(reader *checkpointReaderV4, d CeremonyDefinition, p CheckpointProgressV4, refs []SignedArtifactRefs, tx CheckpointTransitionV4) (map[Phase]bool, error) {
-	result := map[Phase]bool{}
-	key, err := identityPublicKey(d.Coordinator)
-	if err != nil {
-		return nil, err
-	}
-	for _, pair := range refs {
-		rb, sb, err := reader.pair(pair)
-		if err != nil {
-			return nil, err
-		}
-		var evidence MultiRelayBeaconEvidence
-		if err = VerifySignedRecord(rb, sb, &evidence, d.Coordinator.KeyID, key); err != nil {
-			return nil, err
-		}
-		closure, _, _, err := checkpointClosureV4(reader, d, p, evidence.Phase)
-		if err != nil {
-			return nil, err
-		}
-		if result[evidence.Phase] {
-			return nil, errors.New("duplicate beacon evidence for phase")
-		}
-		beaconRefs := p.Phase1Beacon
-		if evidence.Phase == Phase2 {
-			beaconRefs = p.Phase2Beacon
-		}
-		if beaconRefs == nil {
-			return nil, errors.New("beacon evidence requires the recorded phase beacon")
-		}
-		raw := map[string][]byte{}
-		expected := []ArtifactRef{}
-		for _, observation := range evidence.Observations {
-			b, err := reader.read(observation.RawResponse, maxDrandResponseBytes, true)
-			if err != nil {
-				return nil, err
-			}
-			raw[observation.RelayID] = b
-			expected = append(expected, observation.RawResponse)
-		}
-		if err = ValidateMultiRelayBeaconEvidence(d, closure, evidence, raw); err != nil {
-			return nil, err
-		}
-		if tx.Kind == CheckpointBeaconEvidenceRecorded && tx.Record != nil && pair == *tx.Record {
-			slices.SortFunc(expected, compareArtifactRefName)
-			if !slices.Equal(expected, tx.Evidence) {
-				return nil, errors.New("beacon evidence edge differs from its signed raw responses")
-			}
-		}
-		result[evidence.Phase] = true
-	}
-	return result, nil
 }

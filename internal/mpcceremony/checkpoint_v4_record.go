@@ -26,7 +26,7 @@ type RecordedCheckpointV4 struct {
 func recordableCheckpointKindV4(kind CheckpointTransitionKind) bool {
 	switch kind {
 	case CheckpointEnrollmentRecorded, CheckpointMirrorRecorded, CheckpointWitnessRecorded,
-		CheckpointBeaconEvidenceRecorded, CheckpointAuditRecorded, CheckpointIncidentRecorded,
+		CheckpointAuditRecorded, CheckpointIncidentRecorded,
 		CheckpointPhase1Closed, CheckpointPhase1BeaconRecorded, CheckpointPhase1Sealed,
 		CheckpointPhase2Initialized, CheckpointPhase2Closed, CheckpointPhase2BeaconRecorded,
 		CheckpointFinalCandidateRecorded, CheckpointReleaseReviewRecorded, CheckpointFinalReleaseRecorded, CheckpointAborted:

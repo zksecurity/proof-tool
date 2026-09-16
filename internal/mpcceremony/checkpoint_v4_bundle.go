@@ -97,9 +97,6 @@ func deriveOperationalBundleV4(reader *checkpointReaderV4, trusted *TrustedCerem
 	if _, err = verifyCheckpointWitnessesV4(reader, d, p, enrollments, a.witnesses); err != nil {
 		return OperationalEvidenceBundle{}, err
 	}
-	if _, err = verifyCheckpointBeaconEvidenceV4(reader, d, p, a.beaconEvidence, CheckpointTransitionV4{}); err != nil {
-		return OperationalEvidenceBundle{}, err
-	}
 	read := func(refs SignedArtifactRefs, out any) error {
 		rb, _, err := reader.pair(refs)
 		if err != nil {
@@ -110,7 +107,7 @@ func deriveOperationalBundleV4(reader *checkpointReaderV4, trusted *TrustedCerem
 	witnesses := map[Phase][]SignedArtifactRefs{}
 	mirrors := map[Phase]map[uint8][]SignedArtifactRefs{Phase1: {}, Phase2: {}}
 	beacons := map[Phase]SignedArtifactRefs{}
-	raws := map[Phase][]ArtifactRef{}
+	raws := map[Phase]ArtifactRef{}
 	for _, refs := range a.witnesses {
 		var r PublicWitnessReceipt
 		if err = read(refs, &r); err != nil {
@@ -125,15 +122,19 @@ func deriveOperationalBundleV4(reader *checkpointReaderV4, trusted *TrustedCerem
 		}
 		mirrors[r.Phase][r.Index] = append(mirrors[r.Phase][r.Index], refs)
 	}
-	for _, refs := range a.beaconEvidence {
-		var r MultiRelayBeaconEvidence
-		if err = read(refs, &r); err != nil {
+	for phase, refs := range map[Phase]*SignedArtifactRefs{Phase1: p.Phase1Beacon, Phase2: p.Phase2Beacon} {
+		if refs == nil {
+			return OperationalEvidenceBundle{}, fmt.Errorf("%s signed beacon is missing", phase)
+		}
+		var r BeaconRecord
+		if err = read(*refs, &r); err != nil {
 			return OperationalEvidenceBundle{}, err
 		}
-		beacons[r.Phase] = refs
-		for _, ob := range r.Observations {
-			raws[r.Phase] = append(raws[r.Phase], ob.RawResponse)
+		if r.Phase != phase {
+			return OperationalEvidenceBundle{}, fmt.Errorf("%s signed beacon has wrong phase", phase)
 		}
+		beacons[phase] = *refs
+		raws[phase] = r.RawResponse
 	}
 	bundle := OperationalEvidenceBundle{Schema: OperationalEvidenceBundleSchemaV4, CeremonyID: d.CeremonyID, AssurancePolicy: cloneAssurancePolicy(d.AssurancePolicy), Enrollments: sortedSignedRefsV4(a.enrollments), GovernanceRecords: []SignedArtifactRefs{}, CoordinatorID: d.Coordinator.ID, CoordinatorKeyID: d.Coordinator.KeyID, AssembledAt: at.Format(time.RFC3339Nano)}
 	used := 0
@@ -165,8 +166,7 @@ func deriveOperationalBundleV4(reader *checkpointReaderV4, trusted *TrustedCerem
 		if err = verifyV4ChainProjection(chain, state.Chain, state); err != nil {
 			return OperationalEvidenceBundle{}, err
 		}
-		pe := PhaseOperationalEvidence{Phase: phase, AcceptedChain: state.Chain, Close: *close, AcceptedHeads: []AcceptedHeadOperationalEvidence{}, PublicWitnessQuorum: d.AssurancePolicy.PublicWitnessesPerPhase, PublicWitnessReceipts: sortedSignedRefsV4(witnesses[phase]), MultiRelayBeaconEvidence: beacons[phase], RawBeaconResponses: append([]ArtifactRef{}, raws[phase]...)}
-		slices.SortFunc(pe.RawBeaconResponses, func(a, b ArtifactRef) int { return strings.Compare(a.Name, b.Name) })
+		pe := PhaseOperationalEvidence{Phase: phase, AcceptedChain: state.Chain, Close: *close, AcceptedHeads: []AcceptedHeadOperationalEvidence{}, PublicWitnessQuorum: d.AssurancePolicy.PublicWitnessesPerPhase, PublicWitnessReceipts: sortedSignedRefsV4(witnesses[phase]), Beacon: beacons[phase], RawBeaconResponses: []ArtifactRef{raws[phase]}}
 		for _, record := range chain.Records {
 			scope := ContributionScope{CeremonyID: d.CeremonyID, Phase: phase, Index: record.Index, ParticipantID: record.ParticipantID, ParentHeadID: record.PreviousRecordID}
 			tx, ok := a.acceptedTransitions[scope]

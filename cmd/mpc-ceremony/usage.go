@@ -73,7 +73,6 @@ Commands:
   ops sign             Sign your reviewed enrollment or observation offline
   ops prepare-public-witness-receipt  Prepare witnessed closure bytes
   ops prepare-mirror-receipt  Authenticate a relay draft for offline signing
-  ops prepare-beacon-evidence  Verify multiple relay responses and prepare evidence
   ops export-signing   Export canonical operational bytes for offline signing
   ops import-signature Import and verify a raw offline Ed25519 signature
   ops verify           Verify a signed operational record fail-closed
@@ -740,8 +739,8 @@ closed final/candidate and final/release directories. Parent must exist.
 
 	Requires at least the signed minimum number of passing ceremony audits
 	assurance policy, plus the coordinator-signed Phase 1 and Phase 2 operational
-	bundle. Witness and mirror evidence likewise follows that signed policy;
-	multi-relay beacon evidence remains required. The candidate is
+	bundle. Witness and mirror evidence likewise follows that signed policy.
+	Definitions V1-V3 retain their multi-relay beacon-evidence requirement. The candidate is
 	never mutated; all verified evidence is assembled into a fresh local
 	release directory. Definition V3 requires independent signer replay of both
 	phases even when the signed audit minimum is zero.
@@ -751,7 +750,9 @@ For Definition V4, replace --candidate-bundle, audit and replay flags with:
 Both files and the operational bundle pair must be under --operational-evidence-root.
 The signed review determines the candidate and required audits. The signer checks
 the exact coordinator replay binding, public proof, key exports and required
-evidence without replaying contributions. The approved executable is checked
+evidence, including each phase's signed beacon and raw verified response,
+without replaying contributions or requiring a separate multi-relay record.
+The approved executable is checked
 before loading the release key. The output must be outside the evidence root.
 This creates a local signed package, not a storage publication or production GO.
 `,
@@ -824,8 +825,10 @@ proof that the reported real-world actions happened.
   mpc-ceremony ops <prepare-bundle-v4|sign-bundle-v4> [flags]
 
 Operational records cover proof-of-possession enrollment, transfers and
-receipts, immutable mirrors, pre-beacon public witnesses, multi-operator relay
-evidence, governance events, and the release-bound operational evidence bundle.
+receipts, immutable mirrors, pre-beacon public witnesses, legacy multi-operator
+relay evidence, governance events, and the release-bound operational evidence
+bundle. V4 binds the already signed beacon record and its one verified raw
+response instead of adding a separate relay-evidence record.
 `,
 	"ops prepare-public-witness-receipt": `Usage:
   mpc-ceremony ops prepare-public-witness-receipt \
@@ -855,22 +858,6 @@ Authenticates the exact accepted chain prefix and the mirror operator's signed
 proof-of-possession enrollment, recomputes every receipt file reference, and
 requires the relay draft to match. It then exports canonical.json and
 signing-request.json without reading a private signing key.
-`,
-	"ops prepare-beacon-evidence": `Usage:
-  mpc-ceremony ops prepare-beacon-evidence \
-    --ceremony FILE --ceremony-signature FILE \
-    --coordinator-public-key-file KEY --transcript-root DIR \
-    --closure FILE --closure-signature FILE \
-    --observations FILE --recorded-at RFC3339_UTC \
-    --out-dir FRESH_DIR
-
-Authenticates the signed closure, then reads a strict observation-input file.
-Each observation names a relay ID, operator ID, HTTPS endpoint, retrieval time,
-and raw response path relative to the transcript root. At least two distinct
-operators and endpoints are required. The command verifies every response's
-drand signature and round, requires identical randomness, hashes endpoint
-identities, and exports canonical.json plus signing-request.json. It performs
-no network access and does not read a private signing key.
 `,
 	"ops prepare-enrollment": `Usage:
   mpc-ceremony ops prepare-enrollment --ceremony FILE --ceremony-signature FILE \

@@ -19,7 +19,6 @@ const (
 	CheckpointEnrollmentRecorded       CheckpointTransitionKind = "enrollment-recorded"
 	CheckpointMirrorRecorded           CheckpointTransitionKind = "mirror-recorded"
 	CheckpointWitnessRecorded          CheckpointTransitionKind = "witness-recorded"
-	CheckpointBeaconEvidenceRecorded   CheckpointTransitionKind = "beacon-evidence-recorded"
 	CheckpointAuditRecorded            CheckpointTransitionKind = "audit-recorded"
 	CheckpointReleaseReviewRecorded    CheckpointTransitionKind = "release-review-recorded"
 	CheckpointIncidentRecorded         CheckpointTransitionKind = "incident-recorded"
@@ -341,10 +340,6 @@ func (t CheckpointTransitionV4) Validate() error {
 			if len(t.Evidence) != 0 {
 				return errors.New("assurance evidence edge adds only its signed record")
 			}
-		case CheckpointBeaconEvidenceRecorded:
-			if len(t.Evidence) < 2 || len(t.Evidence) > 16 {
-				return errors.New("beacon evidence edge requires two to sixteen raw responses")
-			}
 		case CheckpointPhase1Closed, CheckpointPhase2Closed:
 			if len(t.Evidence) != 0 {
 				return errors.New("closure transition only adds the signed closure")
@@ -519,7 +514,7 @@ func ValidateCheckpointTransitionV4(previous, next CheckpointV4) error {
 		}
 		return nil
 	}
-	if t.Kind == CheckpointEnrollmentRecorded || t.Kind == CheckpointMirrorRecorded || t.Kind == CheckpointWitnessRecorded || t.Kind == CheckpointBeaconEvidenceRecorded || t.Kind == CheckpointAuditRecorded {
+	if t.Kind == CheckpointEnrollmentRecorded || t.Kind == CheckpointMirrorRecorded || t.Kind == CheckpointWitnessRecorded || t.Kind == CheckpointAuditRecorded {
 		if previous.Progress.FinalRelease != nil {
 			return errors.New("cannot add assurance evidence after final release")
 		}

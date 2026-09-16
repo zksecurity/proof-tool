@@ -141,7 +141,6 @@ type checkpointAncestryV4 struct {
 	enrollmentTransitions    []CheckpointTransitionV4
 	mirrors                  []SignedArtifactRefs
 	witnesses                []SignedArtifactRefs
-	beaconEvidence           []SignedArtifactRefs
 	audits                   []SignedArtifactRefs
 	incidents                []CheckpointTransitionV4
 	accepted                 map[ContributionScope]SignedArtifactRefs
@@ -201,9 +200,6 @@ func loadCheckpointAncestryV4(reader *checkpointReaderV4, d CeremonyDefinition, 
 		}
 		if current.Transition.Kind == CheckpointWitnessRecorded {
 			result.witnesses = append(result.witnesses, *current.Transition.Record)
-		}
-		if current.Transition.Kind == CheckpointBeaconEvidenceRecorded {
-			result.beaconEvidence = append(result.beaconEvidence, *current.Transition.Record)
 		}
 		if current.Transition.Kind == CheckpointMirrorRecorded {
 			result.mirrors = append(result.mirrors, *current.Transition.Record)
@@ -450,24 +446,16 @@ func PrepareCheckpointV4(options CheckpointPreparationV4) ([]byte, error) {
 			return nil, errors.New("participant enrollment must be committed before candidate allocation")
 		}
 	}
-	if c.Transition.Kind == CheckpointWitnessRecorded || c.Transition.Kind == CheckpointBeaconEvidenceRecorded || c.Transition.Kind == CheckpointPhase1Sealed || c.Transition.Kind == CheckpointFinalCandidateRecorded {
+	if c.Transition.Kind == CheckpointWitnessRecorded || c.Transition.Kind == CheckpointPhase1Sealed || c.Transition.Kind == CheckpointFinalCandidateRecorded {
 		witnessRefs := append([]SignedArtifactRefs{}, evidenceAncestry.witnesses...)
-		beaconRefs := append([]SignedArtifactRefs{}, evidenceAncestry.beaconEvidence...)
 		if c.Transition.Kind == CheckpointWitnessRecorded {
 			witnessRefs = append(witnessRefs, *c.Transition.Record)
-		}
-		if c.Transition.Kind == CheckpointBeaconEvidenceRecorded {
-			beaconRefs = append(beaconRefs, *c.Transition.Record)
 		}
 		witnessCounts, err := verifyCheckpointWitnessesV4(reader, d, previous.Progress, verifiedEnrollments, witnessRefs)
 		if err != nil {
 			return nil, err
 		}
-		beacons, err := verifyCheckpointBeaconEvidenceV4(reader, d, previous.Progress, beaconRefs, c.Transition)
-		if err != nil {
-			return nil, err
-		}
-		if c.Transition.Kind == CheckpointWitnessRecorded || c.Transition.Kind == CheckpointBeaconEvidenceRecorded {
+		if c.Transition.Kind == CheckpointWitnessRecorded {
 			return MarshalCanonical(c)
 		}
 		phase := Phase1
@@ -476,9 +464,6 @@ func PrepareCheckpointV4(options CheckpointPreparationV4) ([]byte, error) {
 		}
 		if witnessCounts[phase] < int(d.AssurancePolicy.PublicWitnessesPerPhase) {
 			return nil, errors.New("signed witness minimum is not satisfied for this phase")
-		}
-		if !beacons[phase] {
-			return nil, errors.New("verified multi-relay beacon evidence is required for this phase")
 		}
 	}
 	if err := verifyCheckpointEvidenceV4(options, trusted, reader, previous, allocations); err != nil {

@@ -93,11 +93,12 @@ type PhaseOperationalEvidence struct {
 	AcceptedHeads            []AcceptedHeadOperationalEvidence `json:"accepted_heads"`
 	PublicWitnessQuorum      uint8                             `json:"public_witness_quorum"`
 	PublicWitnessReceipts    []SignedArtifactRefs              `json:"public_witness_receipts"`
-	MultiRelayBeaconEvidence SignedArtifactRefs                `json:"multi_relay_beacon_evidence"`
+	Beacon                   SignedArtifactRefs                `json:"beacon,omitempty"`
+	MultiRelayBeaconEvidence SignedArtifactRefs                `json:"multi_relay_beacon_evidence,omitempty"`
 	RawBeaconResponses       []ArtifactRef                     `json:"raw_beacon_responses"`
 }
 
-func (p PhaseOperationalEvidence) validate(custodyRequired bool) error {
+func (p PhaseOperationalEvidence) validate(custodyRequired, singleBeacon bool) error {
 	if err := p.Phase.Validate(); err != nil {
 		return err
 	}
@@ -128,8 +129,23 @@ func (p PhaseOperationalEvidence) validate(custodyRequired bool) error {
 	if err := validateSignedArtifactSet("public_witness_receipts", p.PublicWitnessReceipts); err != nil {
 		return err
 	}
-	if err := p.MultiRelayBeaconEvidence.Validate(); err != nil {
-		return fmt.Errorf("multi_relay_beacon_evidence: %w", err)
+	if singleBeacon {
+		if err := p.Beacon.Validate(); err != nil {
+			return fmt.Errorf("beacon: %w", err)
+		}
+		if p.MultiRelayBeaconEvidence != (SignedArtifactRefs{}) {
+			return errors.New("operational evidence v4 forbids separate multi-relay beacon evidence")
+		}
+		if len(p.RawBeaconResponses) != 1 {
+			return errors.New("operational evidence v4 requires exactly one raw beacon response")
+		}
+	} else {
+		if p.Beacon != (SignedArtifactRefs{}) {
+			return errors.New("legacy operational evidence forbids the v4 beacon field")
+		}
+		if err := p.MultiRelayBeaconEvidence.Validate(); err != nil {
+			return fmt.Errorf("multi_relay_beacon_evidence: %w", err)
+		}
 	}
 	if err := validateArtifactSet("raw_beacon_responses", p.RawBeaconResponses); err != nil {
 		return err
@@ -137,14 +153,14 @@ func (p PhaseOperationalEvidence) validate(custodyRequired bool) error {
 	return nil
 }
 
-func (p PhaseOperationalEvidence) Validate() error { return p.validate(true) }
+func (p PhaseOperationalEvidence) Validate() error { return p.validate(true, false) }
 
-// OperationalEvidenceBundle is the one canonical release input for
-// independently witnessed pre-beacon publication and multi-relay beacon
-// retrieval in both phases. Every referenced byte string is content-addressed
-// and resolved below one caller-supplied evidence root. Definition V4 verifies
-// historical payload references through signed records, not payload bytes;
-// its final review separately requires the coordinator's full-replay claim.
+// OperationalEvidenceBundle is the one canonical release input for operational
+// evidence in both phases. Released formats retain independently witnessed
+// pre-beacon publication and multi-relay retrieval. Definition V4 instead binds
+// each signed beacon and its one verified raw response, verifies historical
+// payload references through signed records rather than payload bytes, and
+// separately requires the coordinator's full-replay claim in final review.
 type OperationalEvidenceBundle struct {
 	Schema            string                   `json:"schema"`
 	CeremonyID        string                   `json:"ceremony_id"`
@@ -202,13 +218,14 @@ func (b OperationalEvidenceBundle) Validate() error {
 		}
 	}
 	custodyRequired := b.Schema != OperationalEvidenceBundleSchemaV4
-	if err := b.Phase1.validate(custodyRequired); err != nil {
+	singleBeacon := b.Schema == OperationalEvidenceBundleSchemaV4
+	if err := b.Phase1.validate(custodyRequired, singleBeacon); err != nil {
 		return fmt.Errorf("phase1: %w", err)
 	}
 	if b.Phase1.Phase != Phase1 {
 		return errors.New("phase1 evidence has wrong phase")
 	}
-	if err := b.Phase2.validate(custodyRequired); err != nil {
+	if err := b.Phase2.validate(custodyRequired, singleBeacon); err != nil {
 		return fmt.Errorf("phase2: %w", err)
 	}
 	if b.Phase2.Phase != Phase2 {
@@ -392,7 +409,7 @@ func verifyOperationalEvidenceContents(options VerifyOperationalEvidenceOptions,
 		options.EvidenceRoot,
 		bundle.Phase1,
 		options.Phase1Close,
-		enrollments, expectedAssurance, !options.Definition.UsesSignedAssurancePolicy(),
+		enrollments, expectedAssurance, !options.Definition.UsesSignedAssurancePolicy(), bundle.Schema == OperationalEvidenceBundleSchemaV4,
 	)
 	if err != nil {
 		return VerifiedOperationalEvidence{}, fmt.Errorf("phase1 operational evidence: %w", err)
@@ -403,7 +420,7 @@ func verifyOperationalEvidenceContents(options VerifyOperationalEvidenceOptions,
 		options.EvidenceRoot,
 		bundle.Phase2,
 		options.Phase2Close,
-		enrollments, expectedAssurance, !options.Definition.UsesSignedAssurancePolicy(),
+		enrollments, expectedAssurance, !options.Definition.UsesSignedAssurancePolicy(), bundle.Schema == OperationalEvidenceBundleSchemaV4,
 	)
 	if err != nil {
 		return VerifiedOperationalEvidence{}, fmt.Errorf("phase2 operational evidence: %w", err)
@@ -552,17 +569,29 @@ func latestOperationalTimestamp(root string, bundle OperationalEvidenceBundle) (
 			}
 			advance(record.ObservedAt)
 		}
-		beaconBytes, err := verifyArtifactBytes(root, phase.MultiRelayBeaconEvidence.Record, maxSignedRecordBytes)
+		beaconPair := phase.MultiRelayBeaconEvidence
+		if bundle.Schema == OperationalEvidenceBundleSchemaV4 {
+			beaconPair = phase.Beacon
+		}
+		beaconBytes, err := verifyArtifactBytes(root, beaconPair.Record, maxSignedRecordBytes)
 		if err != nil {
 			return time.Time{}, err
 		}
-		var beacon MultiRelayBeaconEvidence
-		if err := UnmarshalCanonical(beaconBytes, &beacon); err != nil {
-			return time.Time{}, err
-		}
-		advance(beacon.RecordedAt)
-		for _, observation := range beacon.Observations {
-			advance(observation.RetrievedAt)
+		if bundle.Schema == OperationalEvidenceBundleSchemaV4 {
+			var beacon BeaconRecord
+			if err := UnmarshalCanonical(beaconBytes, &beacon); err != nil {
+				return time.Time{}, err
+			}
+			advance(beacon.PublishedAt)
+		} else {
+			var beacon MultiRelayBeaconEvidence
+			if err := UnmarshalCanonical(beaconBytes, &beacon); err != nil {
+				return time.Time{}, err
+			}
+			advance(beacon.RecordedAt)
+			for _, observation := range beacon.Observations {
+				advance(observation.RetrievedAt)
+			}
 		}
 	}
 	if latest.IsZero() {
@@ -580,6 +609,7 @@ func verifyPhaseOperationalEvidence(
 	enrollments map[string]EnrollmentRecord,
 	assurance AssurancePolicy,
 	legacy bool,
+	singleBeacon bool,
 ) ([]ArtifactRef, error) {
 	if err := authenticated.Record.Validate(); err != nil {
 		return nil, err
@@ -729,6 +759,40 @@ func verifyPhaseOperationalEvidence(
 		int(phaseEvidence.PublicWitnessQuorum),
 	); err != nil {
 		return nil, err
+	}
+
+	if singleBeacon {
+		beaconBytes, err := verifyArtifactBytes(root, phaseEvidence.Beacon.Record, maxSignedRecordBytes)
+		if err != nil {
+			return nil, err
+		}
+		beaconSignatureBytes, err := verifyArtifactBytes(root, phaseEvidence.Beacon.Signature, maxSignedRecordBytes)
+		if err != nil {
+			return nil, err
+		}
+		var beacon BeaconRecord
+		if err := VerifySignedRecord(beaconBytes, beaconSignatureBytes, &beacon, definition.Coordinator.KeyID, coordinatorPublicKey); err != nil {
+			return nil, fmt.Errorf("beacon signature: %w", err)
+		}
+		if err := ValidateBeacon(definition, authenticated.Record, beacon); err != nil {
+			return nil, err
+		}
+		if len(phaseEvidence.RawBeaconResponses) != 1 || phaseEvidence.RawBeaconResponses[0] != beacon.RawResponse {
+			return nil, errors.New("raw beacon response does not exactly match the signed beacon record")
+		}
+		raw, err := verifyArtifactBytes(root, beacon.RawResponse, maxDrandResponseBytes)
+		if err != nil {
+			return nil, err
+		}
+		randomness, err := VerifyDrandBeaconResponse(definition.BeaconPolicy, beacon.Round, raw)
+		if err != nil {
+			return nil, err
+		}
+		if randomness != beacon.RandomnessHex {
+			return nil, errors.New("signed beacon randomness differs from verified archived response")
+		}
+		refs = append(refs, phaseEvidence.Beacon.Record, phaseEvidence.Beacon.Signature, beacon.RawResponse)
+		return refs, nil
 	}
 
 	beaconBytes, err := verifyArtifactBytes(

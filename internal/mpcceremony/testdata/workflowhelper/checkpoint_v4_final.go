@@ -219,31 +219,6 @@ func runCheckpointV4Final(output, root string, trust m.TrustPaths, circuit *m.Co
 	if err = commit(); err != nil {
 		return err
 	}
-	be := m.MultiRelayBeaconEvidence{Schema: m.MultiRelayBeaconEvidenceSchema, CeremonyID: d.CeremonyID, Phase: m.Phase2, CloseID: closure.CloseID, BeaconRound: 43, Provider: d.BeaconPolicy.Provider, Network: d.BeaconPolicy.Network, CoordinatorID: d.Coordinator.ID, CoordinatorKeyID: d.Coordinator.KeyID, RecordedAt: "2023-08-23T15:11:33Z"}
-	raws := []m.ArtifactRef{}
-	for _, id := range []string{"fixture-a", "fixture-b"} {
-		name := "phase2/beacon-evidence/" + id + ".json"
-		if err = os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0700); err != nil {
-			return err
-		}
-		if err = os.WriteFile(filepath.Join(root, name), []byte(quicknetRound43), 0600); err != nil {
-			return err
-		}
-		r, err := ref(name)
-		if err != nil {
-			return err
-		}
-		raws = append(raws, r)
-		be.Observations = append(be.Observations, m.RelayObservation{RelayID: id, OperatorID: id, EndpointSHA256: m.NewDigest([]byte(id)).SHA256, RawResponse: r, RetrievedAt: "2023-08-23T15:11:33Z", VerifiedRandomness: beacon.Beacon.RandomnessHex})
-	}
-	ber, err := writePair("phase2/beacon-evidence/record", be, d.Coordinator.KeyID, coordinator)
-	if err != nil {
-		return err
-	}
-	next(m.CheckpointTransitionV4{Kind: m.CheckpointBeaconEvidenceRecorded, Record: &ber, Evidence: sorted(raws)})
-	if err = commit(); err != nil {
-		return err
-	}
 	pr := c.Progress
 	replay := m.ReplayPaths{TranscriptRoot: root, CoordinatorPublicKeyHex: d.Coordinator.Ed25519PublicKeyHex, DefinitionPath: trust.DefinitionPath, DefinitionSignaturePath: trust.DefinitionSignaturePath, Phase1ChainPath: path(pr.Phase1.Chain.Record), Phase1ChainSignaturePath: path(pr.Phase1.Chain.Signature), Phase1ClosePath: path(pr.Phase1Closure.Record), Phase1CloseSignaturePath: path(pr.Phase1Closure.Signature), Phase1BeaconPath: path(pr.Phase1Beacon.Record), Phase1BeaconSignaturePath: path(pr.Phase1Beacon.Signature), Phase1SealPath: path(pr.Phase1Seal.Record), Phase1SealSignaturePath: path(pr.Phase1Seal.Signature), Phase2ChainPath: path(pr.Phase2.Chain.Record), Phase2ChainSignaturePath: path(pr.Phase2.Chain.Signature), Phase2ClosePath: path(pr.Phase2Closure.Record), Phase2CloseSignaturePath: path(pr.Phase2Closure.Signature), Phase2BeaconPath: path(pr.Phase2Beacon.Record), Phase2BeaconSignaturePath: path(pr.Phase2Beacon.Signature)}
 	preliminary := filepath.Join(output, "v4-preliminary")

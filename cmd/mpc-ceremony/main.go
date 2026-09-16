@@ -277,7 +277,7 @@ command:
 		},
 		"ops": {
 			"export-signing": {}, "help": {}, "import-signature": {}, "sign": {}, "prepare-enrollment": {}, "prepare-handoff": {}, "prepare-receipt": {},
-			"prepare-beacon-evidence": {}, "prepare-mirror-receipt": {}, "prepare-public-witness-receipt": {}, "prepare-bundle": {}, "prepare-bundle-v4": {}, "sign-bundle-v4": {}, "verify": {},
+			"prepare-mirror-receipt": {}, "prepare-public-witness-receipt": {}, "prepare-bundle": {}, "prepare-bundle-v4": {}, "sign-bundle-v4": {}, "verify": {},
 		},
 		"finalize":  {"prepare": {}, "complete": {}, "rehearsal-evidence": {}},
 		"release":   {"help": {}, "sign": {}, "verify": {}, "review-v4": {}},
