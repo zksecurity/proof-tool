@@ -351,28 +351,13 @@ func ValidateAttestationAcceptance(
 	if !ok || participant.Identity.KeyID != attestation.ParticipantKeyID {
 		return errors.New("attestation participant identity does not match definition")
 	}
-	if !definition.Software.AllowsToolBinary(attestation.ToolBinary) ||
-		definition.Software.SourceCommit != attestation.SourceCommit ||
-		definition.Software.GnarkVersion != attestation.GnarkVersion ||
-		definition.Software.GnarkCryptoVersion != attestation.GnarkCryptoVersion ||
-		definition.Software.DrandVersion != attestation.DrandVersion {
-		return errors.New("attestation software binding does not match definition")
+	if err := validateAttestationSoftwareBinding(definition, attestation); err != nil {
+		return err
 	}
-	createdAt, _ := time.Parse(time.RFC3339Nano, definition.CreatedAt)
-	contributedAt, _ := time.Parse(time.RFC3339Nano, attestation.ContributedAt)
 	destroyedAt, _ := time.Parse(time.RFC3339Nano, erasure.DestroyedAt)
 	acceptedAt, _ := time.Parse(time.RFC3339Nano, record.AcceptedAt)
-	if !contributedAt.After(createdAt) {
-		return errors.New("contributed_at must be strictly after the ceremony definition")
-	}
-	if len(chain.Records) > 0 {
-		previousAcceptedAt, _ := time.Parse(
-			time.RFC3339Nano,
-			chain.Records[len(chain.Records)-1].AcceptedAt,
-		)
-		if !contributedAt.After(previousAcceptedAt) {
-			return errors.New("contributed_at must be strictly after the previous acceptance")
-		}
+	if err := validateContributionChronology(definition, chain, attestation); err != nil {
+		return err
 	}
 	if !acceptedAt.After(destroyedAt) {
 		return errors.New("accepted_at must be strictly after destroyed_at")

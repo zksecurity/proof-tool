@@ -107,6 +107,22 @@ three; use an explicitly reviewed compatible release. Do not edit an existing
 signed ceremony's software allowlist or replace its pinned binary to force an
 in-progress ceremony through a changed verifier policy.
 
+## Experimental V4 retained-candidate inspection
+
+`inspect contribution-inventory-v4` reconstructs a retained contribution from
+its exact signed predecessor and expected turn. It returns a five-file inventory
+after computation and cleanup attestation, and a distinct seven-file inventory
+after the signed return packet is complete. Partial or inconsistent return
+packets are errors; they must not trigger another computation. Only the final
+seven-file identity is used for candidate delivery/acceptance comparisons.
+
+This read-only inspection checks signatures, file hashes and locally checkable
+chronology—not contribution mathematics, backend freshness, physical erasure or
+acceptance. Uploaders must recheck the returned file hashes. Extra local files
+are not part of the upload inventory. Existing ceremony formats retain their
+existing commands and verification requirements; V4 remains explicit opt-in
+while the downstream workflow is being completed.
+
 ## Toxic Waste Handling
 
 gnark samples the Groth16 trapdoor in process memory during `groth16.Setup`.

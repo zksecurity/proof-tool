@@ -63,6 +63,7 @@ Commands:
   inspect definition   Authenticate and describe a ceremony definition
   inspect definition-protocol  Authenticate its protocol selector and schedules
   inspect chain        Authenticate and describe an accepted chain
+  inspect contribution-inventory-v4  Reconstruct retained V4 candidate files
   inspect participant  Match an existing key to the participant roster
   inspect enrollment   Authenticate an operational enrollment
   inspect checkpoint   Authenticate a storage-first workflow checkpoint
@@ -196,6 +197,20 @@ backend progress or replay contributions. Failure must not trigger legacy fallba
 
 Authenticates the exact canonical ceremony definition against the out-of-band
 coordinator public key and reports its identity, mode, schedules, and circuit.
+`,
+	"inspect contribution-inventory-v4": `Usage:
+  mpc-ceremony --format json inspect contribution-inventory-v4 --ceremony FILE \
+    --ceremony-signature FILE --coordinator-public-key-file KEY \
+    --transcript-root DIR --chain FILE --chain-signature FILE \
+    --scope FILE --candidate-dir DIR
+
+Read-only. The canonical scope must come from authenticated ceremony state or
+the exact retained operation. Verifies the signed predecessor, participant
+signatures, cleanup claim and streamed payload digest. Returns the five-file
+inventory and, when complete, the seven-file signed return inventory. A partial
+return pair is an error. Other local files are ignored, not approved for upload.
+Does not verify mathematics, acceptance, freshness or physical erasure. Recheck
+returned digests when uploading; paths are not frozen by this inspection.
 `,
 	"inspect chain": `Usage:
   mpc-ceremony --format json inspect chain --ceremony FILE \

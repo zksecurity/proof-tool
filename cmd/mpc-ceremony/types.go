@@ -56,6 +56,7 @@ const (
 	CommandInspectDefinition                Command = "inspect definition"
 	CommandInspectDefinitionProtocol        Command = "inspect definition-protocol"
 	CommandInspectChain                     Command = "inspect chain"
+	CommandInspectContributionInventoryV4   Command = "inspect contribution-inventory-v4"
 	CommandInspectParticipant               Command = "inspect participant"
 	CommandInspectEnrollment                Command = "inspect enrollment"
 	CommandInspectCheckpoint                Command = "inspect checkpoint"
@@ -652,6 +653,7 @@ type CommandResult struct {
 	Identity                            *mpcceremony.Identity                `json:"identity,omitempty"`
 	DefinitionInspection                *DefinitionInspection                `json:"definition_inspection,omitempty"`
 	DefinitionProtocolInspection        *DefinitionProtocolInspection        `json:"definition_protocol_inspection,omitempty"`
+	ContributionInventoryV4             *ContributionInventoryInspectionV4   `json:"contribution_inventory_v4,omitempty"`
 	CheckpointDiscoveryV4               *CheckpointDiscoveryInspectionV4     `json:"checkpoint_discovery_v4,omitempty"`
 	EnrollmentMetadataV4                *EnrollmentMetadataInspectionV4      `json:"enrollment_metadata_v4,omitempty"`
 	ChainInspection                     *ChainInspection                     `json:"chain_inspection,omitempty"`

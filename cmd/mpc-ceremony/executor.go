@@ -107,6 +107,8 @@ func (workflowExecutor) Execute(ctx context.Context, invocation Invocation) (Com
 		return executeInspectDefinitionProtocol(invocation.Options.(InspectDefinitionOptions))
 	case CommandInspectChain:
 		return executeInspectChain(invocation.Options.(InspectChainOptions))
+	case CommandInspectContributionInventoryV4:
+		return executeContributionInventoryV4(invocation.Options.(ContributionInventoryOptionsV4))
 	case CommandInspectParticipant:
 		return executeInspectParticipant(invocation.Options.(InspectParticipantOptions))
 	case CommandInspectEnrollment:

@@ -135,6 +135,7 @@ func TestCheckpointV4CLIInitialPrepareSignInspectAndMutation(t *testing.T) {
 	if err := m.UnmarshalCanonical(mustReadTestFile(t, filepath.Join(artifactRoot, chainRefs.Record.Name)), &chain); err != nil {
 		t.Fatal(err)
 	}
+	checkContributionInventoryExecutableV4(t, executable, artifactRoot, d, chain)
 	head, err := chain.HeadRecordID()
 	if err != nil {
 		t.Fatal(err)

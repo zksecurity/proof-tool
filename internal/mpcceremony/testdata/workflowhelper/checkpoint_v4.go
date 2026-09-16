@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/ed25519"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -217,6 +218,13 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 		return err
 	}
 	returnFiles := []m.ArtifactRef{}
+	computedInventory, err := m.InspectContributionInventoryV4(trust, paths, scope, candidateDir)
+	if err != nil {
+		return err
+	}
+	if computedInventory.Complete != nil || computedInventory.ComputedCandidateID == "" {
+		return errors.New("computed inventory reconstruction failed")
+	}
 	for _, name := range []string{"attestation.json", "attestation.sig", "contribution.bin", "erasure.json", "erasure.sig"} {
 		b, err := os.ReadFile(filepath.Join(candidateDir, name))
 		if err != nil {
@@ -243,6 +251,22 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 	returnReceiptRefs, err := writePair("custody/return-receipt", returnReceipt, d.Coordinator.KeyID, coordinator)
 	if err != nil {
 		return err
+	}
+	for _, ref := range []m.ArtifactRef{returnRefs.Record, returnRefs.Signature} {
+		b, err := os.ReadFile(filepath.Join(root, ref.Name))
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(candidateDir, filepath.Base(ref.Name)), b, 0600); err != nil {
+			return err
+		}
+	}
+	completeInventory, err := m.InspectContributionInventoryV4(trust, paths, scope, candidateDir)
+	if err != nil {
+		return err
+	}
+	if completeInventory.Complete == nil || completeInventory.ComputedCandidateID != computedInventory.ComputedCandidateID || completeInventory.CandidateResultID == computedInventory.ComputedCandidateID {
+		return errors.New("complete inventory reconstruction failed")
 	}
 	accepted, err := m.VerifyAndAcceptContribution(m.AcceptContributionFilesOptions{Trust: trust, Circuit: circuit, Phase: m.Phase1, Transcript: paths, CandidateDir: candidateDir, CoordinatorPrivateKeyPath: coordinatorPath, AcceptedAt: "2023-08-23T15:05:00Z"})
 	if err != nil {
@@ -274,6 +298,9 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 	inventory := m.CandidateInventory{Schema: m.CandidateInventorySchemaV1, Scope: scope, Files: append([]m.ArtifactRef{}, files...)}
 	for i := range inventory.Files {
 		inventory.Files[i].Name = filepath.Base(inventory.Files[i].Name)
+	}
+	if id, err := inventory.ID(); err != nil || id != completeInventory.CandidateResultID {
+		return errors.New("accepted inventory differs from inspected candidate")
 	}
 	evidence := append(append([]m.ArtifactRef{}, files...), returnEvidence[2:]...)
 	evidence = append(evidence, last.Verification)

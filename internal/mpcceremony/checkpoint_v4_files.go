@@ -696,12 +696,29 @@ func verifyCandidateChainInventoryV4(last ChainRecord, scope ContributionScope, 
 }
 
 func verifyReturnHandoffV4(reader *checkpointReaderV4, d CeremonyDefinition, scope ContributionScope, inventory CandidateInventory) error {
+	if err := inventory.Validate(); err != nil {
+		return err
+	}
+	if len(inventory.Files) != 7 || inventory.Scope != scope {
+		return errors.New("return handoff requires the complete seven-file inventory for this scope")
+	}
 	base := fmt.Sprintf("%s/contributions/%04d/", scope.Phase, scope.Index)
 	refs := SignedArtifactRefs{Record: ArtifactRef{Name: base + inventory.Files[5].Name, Digest: inventory.Files[5].Digest}, Signature: ArtifactRef{Name: base + inventory.Files[6].Name, Digest: inventory.Files[6].Digest}}
 	record, signature, err := reader.pair(refs)
 	if err != nil {
 		return err
 	}
+	return verifyReturnHandoffBytesV4(d, scope, inventory, record, signature)
+}
+
+func verifyReturnHandoffBytesV4(d CeremonyDefinition, scope ContributionScope, inventory CandidateInventory, record, signature []byte) error {
+	if err := inventory.Validate(); err != nil {
+		return err
+	}
+	if len(inventory.Files) != 7 || inventory.Scope != scope || NewDigest(record) != inventory.Files[5].Digest || NewDigest(signature) != inventory.Files[6].Digest {
+		return errors.New("return handoff differs from the complete candidate inventory")
+	}
+	base := fmt.Sprintf("%s/contributions/%04d/", scope.Phase, scope.Index)
 	participant, ok := d.ParticipantByID(scope.ParticipantID)
 	if !ok {
 		return errors.New("return sender is not in roster")
