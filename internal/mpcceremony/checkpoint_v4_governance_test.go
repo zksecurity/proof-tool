@@ -12,7 +12,7 @@ import (
 func TestCheckpointV4TerminationPreservesActiveDeliveries(t *testing.T) {
 	d, genesis, _, _ := checkpointFixtureV4(t)
 	turn := checkpointTurnV4(t, d, genesis, Phase1)
-	for _, start := range []CheckpointV4{genesis, turn[1], turn[2], turn[3]} {
+	for _, start := range []CheckpointV4{genesis, turn[1], turn[2]} {
 		for _, kind := range []CheckpointTransitionKind{CheckpointIncidentRecorded, CheckpointAborted, CheckpointRestarted} {
 			record := checkpointSigned("governance/record")
 			tx := CheckpointTransitionV4{Kind: kind, Record: &record, Evidence: checkpointArtifacts(checkpointArtifact("governance/statement.txt", "public"))}
@@ -47,7 +47,7 @@ func TestCheckpointV4TerminationPreservesActiveDeliveries(t *testing.T) {
 			if err := ValidateCheckpointTransitionV4(next, repeated); err == nil || !strings.Contains(err.Error(), "no transition may follow ceremony termination") {
 				t.Fatalf("structurally valid child did not reach terminal gate: %v", err)
 			}
-			for _, later := range []CheckpointTransitionKind{CheckpointIncidentRecorded, CheckpointAborted, CheckpointRestarted, CheckpointEnrollmentRecorded, CheckpointPhase1Closed, CheckpointPhase1OutboundPublished, CheckpointFinalReleaseRecorded} {
+			for _, later := range []CheckpointTransitionKind{CheckpointIncidentRecorded, CheckpointAborted, CheckpointRestarted, CheckpointEnrollmentRecorded, CheckpointPhase1Closed, CheckpointPhase1CandidateAllocated, CheckpointFinalReleaseRecorded} {
 				child := nextCheckpointV4(t, next, tx)
 				child.Transition.Kind = later
 				child.Progress.Terminal = nil

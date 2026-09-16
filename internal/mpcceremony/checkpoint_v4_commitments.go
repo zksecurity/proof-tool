@@ -2,7 +2,6 @@ package mpcceremony
 
 import (
 	"errors"
-	"fmt"
 	"slices"
 	"strings"
 )
@@ -15,15 +14,10 @@ type CheckpointCommitmentsV4 struct {
 	Turns       []TurnCommitmentV4   `json:"turns"`
 }
 
-type OutboundCommitmentV4 struct {
-	CheckpointSequence uint64             `json:"checkpoint_sequence"`
-	PublishedAttemptID string             `json:"published_attempt_id"`
-	Pair               SignedArtifactRefs `json:"pair"`
-}
-
-type AcceptedTurnRecordV4 struct {
-	AttemptID string             `json:"attempt_id"`
-	Pair      SignedArtifactRefs `json:"pair"`
+type CandidateAllocationV4 struct {
+	CheckpointSequence uint64 `json:"checkpoint_sequence"`
+	AttemptID          string `json:"attempt_id"`
+	AllocatedAt        string `json:"allocated_at"`
 }
 
 type AcceptedChainCommitmentV4 struct {
@@ -33,20 +27,15 @@ type AcceptedChainCommitmentV4 struct {
 }
 
 type TurnCommitmentV4 struct {
-	Scope ContributionScope `json:"scope"`
-	// Newest first. PublishedAttemptID records transport history only; a later
-	// accepted receipt may acknowledge an older still-valid packet in this list.
-	Outbounds     []OutboundCommitmentV4     `json:"outbounds"`
-	InputReceipt  *AcceptedTurnRecordV4      `json:"input_receipt,omitempty"`
+	Scope         ContributionScope          `json:"scope"`
+	Allocations   []CandidateAllocationV4    `json:"allocations"`
 	AcceptedChain *AcceptedChainCommitmentV4 `json:"accepted_chain,omitempty"`
-	ReturnHandoff *SignedArtifactRefs        `json:"return_handoff,omitempty"`
-	ReturnReceipt *SignedArtifactRefs        `json:"return_receipt,omitempty"`
 }
 
 func collectTurnCommitmentV4(turns map[ContributionScope]*TurnCommitmentV4, c CheckpointV4) error {
 	t := c.Transition
 	switch t.Kind {
-	case CheckpointPhase1OutboundPublished, CheckpointPhase2OutboundPublished, CheckpointPhase1ReceiptAccepted, CheckpointPhase2ReceiptAccepted, CheckpointPhase1CandidateAccepted, CheckpointPhase2CandidateAccepted:
+	case CheckpointPhase1CandidateAllocated, CheckpointPhase2CandidateAllocated, CheckpointPhase1CandidateAccepted, CheckpointPhase2CandidateAccepted:
 	default:
 		return nil
 	}
@@ -56,20 +45,15 @@ func collectTurnCommitmentV4(turns map[ContributionScope]*TurnCommitmentV4, c Ch
 		if len(turns) >= 2*MaxParticipants {
 			return errors.New("turn commitment index exceeds protocol capacity")
 		}
-		turn = &TurnCommitmentV4{Scope: scope, Outbounds: []OutboundCommitmentV4{}}
+		turn = &TurnCommitmentV4{Scope: scope, Allocations: []CandidateAllocationV4{}}
 		turns[scope] = turn
 	}
 	switch t.Kind {
-	case CheckpointPhase1OutboundPublished, CheckpointPhase2OutboundPublished:
-		if len(turn.Outbounds) >= MaxDeliveryAttemptsPerSubmissionV2 {
-			return errors.New("outbound commitment index exceeds receipt-attempt limit")
+	case CheckpointPhase1CandidateAllocated, CheckpointPhase2CandidateAllocated:
+		if len(turn.Allocations) >= MaxDeliveryAttemptsPerSubmissionV2 {
+			return errors.New("candidate allocation index exceeds attempt limit")
 		}
-		turn.Outbounds = append(turn.Outbounds, OutboundCommitmentV4{CheckpointSequence: c.Sequence, PublishedAttemptID: t.AttemptID, Pair: *t.Record})
-	case CheckpointPhase1ReceiptAccepted, CheckpointPhase2ReceiptAccepted:
-		if turn.InputReceipt != nil {
-			return errors.New("duplicate accepted receipt commitment")
-		}
-		turn.InputReceipt = &AcceptedTurnRecordV4{AttemptID: t.AttemptID, Pair: *t.Record}
+		turn.Allocations = append(turn.Allocations, CandidateAllocationV4{CheckpointSequence: c.Sequence, AttemptID: t.AttemptID, AllocatedAt: t.AllocatedAt})
 	case CheckpointPhase1CandidateAccepted, CheckpointPhase2CandidateAccepted:
 		if turn.AcceptedChain != nil {
 			return errors.New("duplicate candidate commitment")
@@ -79,30 +63,6 @@ func collectTurnCommitmentV4(turns map[ContributionScope]*TurnCommitmentV4, c Ch
 			return err
 		}
 		turn.AcceptedChain = &AcceptedChainCommitmentV4{AttemptID: t.AttemptID, ContributionResultID: resultID, Pair: *t.Record}
-		base := fmt.Sprintf("%s/contributions/%04d/", scope.Phase, scope.Index)
-		pair := func(name string) (*SignedArtifactRefs, error) {
-			p := SignedArtifactRefs{}
-			for _, ref := range t.Evidence {
-				if ref.Name == base+name+".json" {
-					p.Record = ref
-				}
-				if ref.Name == base+name+".sig" {
-					p.Signature = ref
-				}
-			}
-			if err := p.Validate(); err != nil {
-				return nil, err
-			}
-			return &p, nil
-		}
-		turn.ReturnHandoff, err = pair("return-handoff")
-		if err != nil {
-			return err
-		}
-		turn.ReturnReceipt, err = pair("return-receipt")
-		if err != nil {
-			return err
-		}
 	}
 	return nil
 }

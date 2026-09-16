@@ -298,6 +298,31 @@ exact checked bytes. Keep the proposal and detached signature together. Neither
 is the published current head until the delivery service uploads both and
 successfully updates the head. Existing outputs require inspection, not overwrite.
 `,
+	"checkpoint allocate-v4": `Usage:
+  mpc-ceremony checkpoint allocate-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE --attempt-id HEX \
+    --allocated-at RFC3339 --coordinator-signing-key KEY --out-dir FRESH_DIR
+
+Authenticates the complete retained checkpoint ancestry, derives the exact next
+phase, participant, index and input head from signed ceremony state, and creates
+a signed candidate-allocation checkpoint. The caller cannot override the turn.
+The output is not current until the delivery service uploads the pair and
+conditionally advances the ceremony head.
+`,
+	"checkpoint accept-candidate-v4": `Usage:
+  mpc-ceremony checkpoint accept-candidate-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE --attempt-id HEX \
+    --candidate-dir DIR --accepted-at RFC3339 \
+    --coordinator-signing-key KEY --out-dir FRESH_DIR
+
+Authenticates the active allocation, independently verifies the exact candidate
+and contribution mathematics against its immutable input snapshot, writes the
+accepted transcript artifacts, then creates the signed descendant checkpoint.
+The output is not current until the delivery service conditionally advances the
+ceremony head. No participant transport envelope or custody receipt is used.
+`,
 	"checkpoint inspect-enrollments-v4": `Usage:
   mpc-ceremony checkpoint inspect-enrollments-v4 --ceremony FILE --ceremony-signature FILE \
     --coordinator-public-key-file KEY --artifact-root DIR \
@@ -340,7 +365,8 @@ performed. Keep the report outside final/candidate and final/release.
 `,
 	"checkpoint": `Usage:
   mpc-ceremony checkpoint <prepare|sign|verify|verify-stored> [flags]
-  mpc-ceremony checkpoint <prepare-v4|sign-v4|verify-stored-v4|verify-release-v4> [flags]
+	  mpc-ceremony checkpoint <prepare-v4|sign-v4|allocate-v4|accept-candidate-v4> [flags]
+	  mpc-ceremony checkpoint <verify-stored-v4|verify-release-v4> [flags]
   mpc-ceremony checkpoint inspect-signed-v4 [flags]
   mpc-ceremony checkpoint inspect-enrollments-v4 [flags]
 
@@ -350,39 +376,10 @@ that cause the transition. The authenticated lifecycle runs from initialization
 through both phases, the fully replayed final candidate, and the exact signed
 release tree. Candidate acceptance and finalization replay the contribution
 mathematics and cleanup evidence.
-The explicit V4 commands use canonical protocol proposals rather than legacy
-submission envelopes. prepare-v4 and sign-v4 verify required transition evidence;
+The explicit V4 commands use candidate allocations and coordinator acceptance
+rather than participant transport envelopes. prepare-v4 and sign-v4 verify required transition evidence;
 verify-stored-v4 checks signed ancestry/metadata only, not all artifact bytes,
 mathematics or freshness. See each command's help for its exact boundary.
-`,
-	"submission": `Usage:
-  mpc-ceremony submission <sign|accept> [flags]
-
-Participant-authored storage-first submission envelopes. The exact slot is
-selected only by its coordinator-preallocated attempt ID.
-`,
-	"submission accept": `Usage:
-  mpc-ceremony submission accept [checkpoint evidence flags except acknowledgement] \
-    --coordinator-signing-key KEY --out-dir FRESH_DIR
-
-Replays the complete stored ancestry and the receipt or candidate evidence,
-then creates the accepted acknowledgement and its descendant checkpoint as one
-atomic four-file result. The coordinator key is loaded only after all untrusted
-evidence passes verification. The acknowledgement is not acceptance by itself;
-Relay must publish it only with the signed descendant checkpoint.
-`,
-	"submission sign": `Usage:
-  mpc-ceremony submission sign --ceremony FILE --ceremony-signature FILE \
-    --coordinator-public-key-file KEY --artifact-root DIR \
-    --checkpoint FILE --checkpoint-signature FILE --attempt-id ID \
-    --participant-signing-key KEY \
-    (--receipt FILE --receipt-signature FILE | --candidate-dir DIR) \
-    --out-dir FRESH_DIR
-
-Authenticates the complete stored checkpoint ancestry, derives the exact
-allocated slot, hashes only its fixed receipt or candidate payload inventory,
-and atomically writes the participant-signed envelope pair. It does not create
-or upload the transport manifest and never accepts a submission.
 `,
 	"checkpoint prepare": `Usage:
   mpc-ceremony checkpoint prepare --ceremony FILE --ceremony-signature FILE \
@@ -483,10 +480,14 @@ the exact accepted chain; the command never discovers a "latest" state.
     --ceremony-signature FILE --coordinator-public-key-file KEY \
     --transcript-dir DIR --chain FILE --chain-signature FILE \
     --participant-id ID --participant-signing-key KEY \
-    --environment FILE --contributed-at RFC3339 --out-dir FRESH_DIR
+    --environment FILE --contributed-at RFC3339 --out-dir FRESH_DIR \
+    [--artifact-root DIR --checkpoint FILE --checkpoint-signature FILE \
+     --attempt-id HEX]
 
 Replays the complete accepted phase 1 chain before adding OS-generated
-randomness. The input chain is never modified.
+randomness. The input chain is never modified. Definition V4 requires the four
+allocation flags; it derives and rechecks the exact input snapshot from that
+signed checkpoint in this same process before generating randomness.
 `,
 	"phase1 attest-erasure": `Usage:
   mpc-ceremony phase1 attest-erasure --ceremony FILE \
@@ -565,7 +566,12 @@ Phase 2 is bound to the exact compiled R1CS and verified phase 1 seal.
     --phase1-seal FILE --phase1-seal-signature FILE \
     --transcript-dir DIR --chain FILE --participant-id ID \
     --chain-signature FILE --participant-signing-key KEY \
-    --environment FILE --contributed-at RFC3339 --out-dir FRESH_DIR
+    --environment FILE --contributed-at RFC3339 --out-dir FRESH_DIR \
+    [--artifact-root DIR --checkpoint FILE --checkpoint-signature FILE \
+     --attempt-id HEX]
+
+Definition V4 requires the four allocation flags and derives the exact Phase 2
+chain and Phase 1 seal from the authenticated checkpoint before randomness.
 `,
 	"phase2 attest-erasure": `Usage:
   mpc-ceremony phase2 attest-erasure --ceremony FILE \

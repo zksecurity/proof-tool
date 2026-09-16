@@ -24,41 +24,9 @@ func runCheckpointV4Final(output, root string, trust m.TrustPaths, circuit *m.Co
 	path := func(r m.ArtifactRef) string { return filepath.Join(root, r.Name) }
 	seal := *c.Progress.Phase1Seal
 	paths := m.PhaseTranscriptPaths{RootDir: root, ChainPath: path(c.Progress.Phase2.Chain.Record), ChainSignaturePath: path(c.Progress.Phase2.Chain.Signature)}
-	handoff, err := m.NewTransferHandoff(d, m.Phase2, 1, scope.ParentHeadID, []m.ArtifactRef{c.Progress.Phase2.HeadPayload}, d.Coordinator, p, "2023-08-23T15:11:30.1Z", "2023-08-23T16:11:30.1Z")
-	if err != nil {
-		return err
-	}
-	hr, err := writePair("custody/phase2-outbound", handoff, d.Coordinator.KeyID, coordinator)
-	if err != nil {
-		return err
-	}
-	const receiptAttempt = "dddddddddddddddddddddddddddddddd"
 	const candidateAttempt = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-	next(m.CheckpointTransitionV4{Kind: m.CheckpointPhase2OutboundPublished, Scope: &scope, AttemptID: receiptAttempt, Record: &hr, Evidence: []m.ArtifactRef{}})
-	c.Deliveries, err = m.AllocateDeliveryV2(c.Deliveries, scope, m.CheckpointSubmissionReceipt, receiptAttempt)
-	if err != nil {
-		return err
-	}
-	if err = commit(); err != nil {
-		return err
-	}
-	hb, err := os.ReadFile(path(hr.Record))
-	if err != nil {
-		return err
-	}
-	receipt, err := m.NewTransferReceipt(handoff, hb, m.ReceiptReceiver, "2023-08-23T15:11:30.2Z")
-	if err != nil {
-		return err
-	}
-	rr, err := writePair("custody/phase2-receipt", receipt, p.KeyID, participant)
-	if err != nil {
-		return err
-	}
-	next(m.CheckpointTransitionV4{Kind: m.CheckpointPhase2ReceiptAccepted, Scope: &scope, AttemptID: receiptAttempt, NextAttemptID: candidateAttempt, Record: &rr, Evidence: []m.ArtifactRef{}})
-	c.Deliveries, err = m.AdvanceDeliveryV2(c.Deliveries, receiptAttempt, m.DeliveryAccepted, nil)
-	if err != nil {
-		return err
-	}
+	next(m.CheckpointTransitionV4{Kind: m.CheckpointPhase2CandidateAllocated, Scope: &scope, AttemptID: candidateAttempt, AllocatedAt: "2023-08-23T15:11:30.1Z", Evidence: []m.ArtifactRef{}})
+	var err error
 	c.Deliveries, err = m.AllocateDeliveryV2(c.Deliveries, scope, m.CheckpointSubmissionCandidate, candidateAttempt)
 	if err != nil {
 		return err
@@ -66,9 +34,18 @@ func runCheckpointV4Final(output, root string, trust m.TrustPaths, circuit *m.Co
 	if err = commit(); err != nil {
 		return err
 	}
+	checkpointRecord, err := ref(fmt.Sprintf("checkpoints/%04d.json", c.Sequence))
+	if err != nil {
+		return err
+	}
+	checkpointSignature, err := ref(fmt.Sprintf("checkpoints/%04d.sig", c.Sequence))
+	if err != nil {
+		return err
+	}
+	checkpoint := m.SignedArtifactRefs{Record: checkpointRecord, Signature: checkpointSignature}
 	candidateDir := filepath.Join(output, "candidates/v4-phase2")
 	environment := m.ContributionEnvironment{OS: runtime.GOOS, Architecture: runtime.GOARCH, EntropySource: "operating-system-csprng", ContributorSwapDisabled: true, ContributorCrashDumpsDisabled: true, ContributorTelemetryDisabled: true, EphemeralEnvironment: true, EphemeralCleanupRequired: true, HostRemnantsNotExcluded: true}
-	if _, err = m.CreateContributionCandidate(m.ContributionFilesOptions{Trust: trust, Circuit: circuit, Phase: m.Phase2, Transcript: paths, Phase1SealPath: path(seal.Record), Phase1SealSignaturePath: path(seal.Signature), ParticipantID: p.ID, ParticipantPrivateKeyPath: participantPath, Environment: environment, ContributedAt: "2023-08-23T15:11:30.3Z", CandidateDir: candidateDir}); err != nil {
+	if _, err = m.CreateAllocatedContributionCandidateV4(m.AllocatedContributionFilesV4Options{Trust: trust, Circuit: circuit, ArtifactRoot: root, Checkpoint: checkpoint, AttemptID: candidateAttempt, ParticipantPrivateKeyPath: participantPath, Environment: environment, ContributedAt: "2023-08-23T15:11:30.3Z", CandidateDir: candidateDir}); err != nil {
 		return err
 	}
 	if _, err = m.CreateErasureAttestationFiles(m.CreateErasureAttestationFilesOptions{Trust: trust, ParticipantID: p.ID, ParticipantPrivateKeyPath: participantPath, CandidateDir: candidateDir, DestroyedAt: "2023-08-23T15:11:30.4Z"}); err != nil {
@@ -82,26 +59,6 @@ func runCheckpointV4Final(output, root string, trust m.TrustPaths, circuit *m.Co
 		}
 		files = append(files, m.ArtifactRef{Name: "phase2/contributions/0001/" + name, Digest: m.NewDigest(b)})
 	}
-	rh, err := m.NewTransferHandoff(d, m.Phase2, 1, scope.ParentHeadID, files, p, d.Coordinator, "2023-08-23T15:11:30.41Z", "2023-08-23T16:11:30.41Z")
-	if err != nil {
-		return err
-	}
-	rhr, err := writePair("custody/phase2-return-handoff", rh, p.KeyID, participant)
-	if err != nil {
-		return err
-	}
-	b, err := os.ReadFile(path(rhr.Record))
-	if err != nil {
-		return err
-	}
-	returnReceipt, err := m.NewTransferReceipt(rh, b, m.ReceiptReceiver, "2023-08-23T15:11:30.42Z")
-	if err != nil {
-		return err
-	}
-	rrr, err := writePair("custody/phase2-return-receipt", returnReceipt, d.Coordinator.KeyID, coordinator)
-	if err != nil {
-		return err
-	}
 	accepted, err := m.VerifyAndAcceptContribution(m.AcceptContributionFilesOptions{Trust: trust, Circuit: circuit, Phase: m.Phase2, Transcript: paths, Phase1SealPath: path(seal.Record), Phase1SealSignaturePath: path(seal.Signature), CandidateDir: candidateDir, CoordinatorPrivateKeyPath: coordinatorPath, AcceptedAt: "2023-08-23T15:11:30.5Z"})
 	if err != nil {
 		return err
@@ -113,34 +70,11 @@ func runCheckpointV4Final(output, root string, trust m.TrustPaths, circuit *m.Co
 	}
 	last := chain.Records[0]
 	files = []m.ArtifactRef{last.Attestation, last.AttestationSignature, last.OutputPayload, last.Erasure, last.ErasureSignature}
-	returns := []m.ArtifactRef{}
-	for i, pair := range []m.SignedArtifactRefs{rhr, rrr} {
-		base := "return-handoff"
-		if i == 1 {
-			base = "return-receipt"
-		}
-		for j, r := range []m.ArtifactRef{pair.Record, pair.Signature} {
-			ext := ".json"
-			if j == 1 {
-				ext = ".sig"
-			}
-			b, err := os.ReadFile(path(r))
-			if err != nil {
-				return err
-			}
-			name := "phase2/contributions/0001/" + base + ext
-			if err = os.WriteFile(filepath.Join(root, name), b, 0600); err != nil {
-				return err
-			}
-			returns = append(returns, m.ArtifactRef{Name: name, Digest: m.NewDigest(b)})
-		}
-	}
-	files = append(files, returns[:2]...)
 	inv := m.CandidateInventory{Schema: m.CandidateInventorySchemaV1, Scope: scope, Files: append([]m.ArtifactRef{}, files...)}
 	for i := range inv.Files {
 		inv.Files[i].Name = filepath.Base(inv.Files[i].Name)
 	}
-	evidence := append(append([]m.ArtifactRef{}, files...), returns[2:]...)
+	evidence := append([]m.ArtifactRef{}, files...)
 	evidence = append(evidence, last.Verification)
 	next(m.CheckpointTransitionV4{Kind: m.CheckpointPhase2CandidateAccepted, Scope: &scope, AttemptID: candidateAttempt, Record: &chainRefs, Evidence: sorted(evidence), Contribution: &inv})
 	c.Deliveries, err = m.AdvanceDeliveryV2(c.Deliveries, candidateAttempt, m.DeliveryAccepted, &inv)
@@ -383,7 +317,7 @@ func runCheckpointV4Final(output, root string, trust m.TrustPaths, circuit *m.Co
 	if extraErr == nil {
 		return fmt.Errorf("final candidate accepted an extra file")
 	}
-	fmt.Println("V4 phase2 and final candidate passed: real contribution, custody, optional observers, second drand round, coordinator full replay, exact final inventory")
+	fmt.Println("V4 phase2 and final candidate passed: real contribution, cleanup, optional observers, second drand round, coordinator full replay, exact final inventory")
 	if d.AssurancePolicy.PassingCeremonyAudits > 0 {
 		db, err := os.ReadFile(trust.DefinitionPath)
 		if err != nil {
@@ -548,7 +482,7 @@ func runCheckpointV4Final(output, root string, trust m.TrustPaths, circuit *m.Co
 	if err = commit(); err != nil {
 		return err
 	}
-	checkpoint, err := headRefs()
+	checkpoint, err = headRefs()
 	if err != nil {
 		return err
 	}
@@ -574,7 +508,7 @@ func runCheckpointV4Final(output, root string, trust m.TrustPaths, circuit *m.Co
 	if !bytes.Equal(preparedBytes, againBytes) || prepared.SourceCheckpoint != checkpoint {
 		return fmt.Errorf("bundle derivation was not byte-identical for the same checkpoint and time")
 	}
-	for _, target := range []string{prepared.Bundle.Phase1.AcceptedHeads[0].ReturnReceipt.Record.Name, prepared.Bundle.Phase2.AcceptedHeads[0].AcceptedChainPrefix.Record.Name, prepared.Bundle.Phase2.RawBeaconResponses[0].Name} {
+	for _, target := range []string{prepared.Bundle.Phase1.AcceptedHeads[0].AcceptedChainPrefix.Record.Name, prepared.Bundle.Phase2.AcceptedHeads[0].AcceptedChainPrefix.Record.Name, prepared.Bundle.Phase2.RawBeaconResponses[0].Name} {
 		original, err := os.ReadFile(filepath.Join(root, target))
 		if err != nil {
 			return err

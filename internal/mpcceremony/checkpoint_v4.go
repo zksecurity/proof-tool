@@ -8,20 +8,22 @@ import (
 )
 
 const (
-	CheckpointSchemaV4                                        = "proof-tool-mpc-checkpoint-v4"
-	StorageFirstWorkflowV2                                    = "storage-first-v2"
-	MaxCheckpointSequenceV4                                   = 16384
-	CheckpointDeliveryRetired        CheckpointTransitionKind = "delivery-retired"
-	CheckpointContributionRejected   CheckpointTransitionKind = "contribution-rejected"
-	CheckpointDeliveryReallocated    CheckpointTransitionKind = "delivery-reallocated"
-	CheckpointEnrollmentRecorded     CheckpointTransitionKind = "enrollment-recorded"
-	CheckpointMirrorRecorded         CheckpointTransitionKind = "mirror-recorded"
-	CheckpointWitnessRecorded        CheckpointTransitionKind = "witness-recorded"
-	CheckpointBeaconEvidenceRecorded CheckpointTransitionKind = "beacon-evidence-recorded"
-	CheckpointAuditRecorded          CheckpointTransitionKind = "audit-recorded"
-	CheckpointIncidentRecorded       CheckpointTransitionKind = "incident-recorded"
-	CheckpointAborted                CheckpointTransitionKind = "ceremony-aborted"
-	CheckpointRestarted              CheckpointTransitionKind = "ceremony-restarted"
+	CheckpointSchemaV4                                          = "proof-tool-mpc-checkpoint-v4"
+	StorageFirstWorkflowV2                                      = "storage-first-v2"
+	MaxCheckpointSequenceV4                                     = 16384
+	CheckpointPhase1CandidateAllocated CheckpointTransitionKind = "phase1-candidate-allocated"
+	CheckpointPhase2CandidateAllocated CheckpointTransitionKind = "phase2-candidate-allocated"
+	CheckpointDeliveryRetired          CheckpointTransitionKind = "delivery-retired"
+	CheckpointContributionRejected     CheckpointTransitionKind = "contribution-rejected"
+	CheckpointDeliveryReallocated      CheckpointTransitionKind = "delivery-reallocated"
+	CheckpointEnrollmentRecorded       CheckpointTransitionKind = "enrollment-recorded"
+	CheckpointMirrorRecorded           CheckpointTransitionKind = "mirror-recorded"
+	CheckpointWitnessRecorded          CheckpointTransitionKind = "witness-recorded"
+	CheckpointBeaconEvidenceRecorded   CheckpointTransitionKind = "beacon-evidence-recorded"
+	CheckpointAuditRecorded            CheckpointTransitionKind = "audit-recorded"
+	CheckpointIncidentRecorded         CheckpointTransitionKind = "incident-recorded"
+	CheckpointAborted                  CheckpointTransitionKind = "ceremony-aborted"
+	CheckpointRestarted                CheckpointTransitionKind = "ceremony-restarted"
 )
 
 // CheckpointProgressV4 is the protocol projection used for guidance. It is not
@@ -52,6 +54,7 @@ type CheckpointTransitionV4 struct {
 	Scope              *ContributionScope              `json:"scope,omitempty"`
 	AttemptID          string                          `json:"attempt_id,omitempty"`
 	NextAttemptID      string                          `json:"next_attempt_id,omitempty"`
+	AllocatedAt        string                          `json:"allocated_at,omitempty"`
 	Record             *SignedArtifactRefs             `json:"record,omitempty"`
 	Evidence           []ArtifactRef                   `json:"evidence"`
 	Contribution       *CandidateInventory             `json:"contribution,omitempty"`
@@ -149,6 +152,11 @@ func (c CheckpointV4) Validate() error {
 	if err := ValidateDeliveryHistoryV2(c.Deliveries); err != nil {
 		return err
 	}
+	for _, slot := range c.Deliveries {
+		if slot.Kind != CheckpointSubmissionCandidate {
+			return errors.New("checkpoint v4 supports candidate delivery attempts only")
+		}
+	}
 	if err := c.Transition.Validate(); err != nil {
 		return err
 	}
@@ -244,12 +252,12 @@ func (t CheckpointTransitionV4) Validate() error {
 		return err
 	}
 	if t.Kind == CheckpointInitial {
-		if t.Scope != nil || t.AttemptID != "" || t.NextAttemptID != "" || t.Record != nil || t.Contribution != nil || len(t.Evidence) != 0 {
+		if t.Scope != nil || t.AttemptID != "" || t.NextAttemptID != "" || t.AllocatedAt != "" || t.Record != nil || t.Contribution != nil || len(t.Evidence) != 0 {
 			return errors.New("initial transition has extra fields")
 		}
 		return nil
 	}
-	turn := t.Kind == CheckpointPhase1OutboundPublished || t.Kind == CheckpointPhase2OutboundPublished || t.Kind == CheckpointPhase1ReceiptAccepted || t.Kind == CheckpointPhase2ReceiptAccepted || t.Kind == CheckpointPhase1CandidateAccepted || t.Kind == CheckpointPhase2CandidateAccepted || t.Kind == CheckpointDeliveryRetired || t.Kind == CheckpointContributionRejected || t.Kind == CheckpointDeliveryReallocated
+	turn := t.Kind == CheckpointPhase1CandidateAllocated || t.Kind == CheckpointPhase2CandidateAllocated || t.Kind == CheckpointPhase1CandidateAccepted || t.Kind == CheckpointPhase2CandidateAccepted || t.Kind == CheckpointDeliveryRetired || t.Kind == CheckpointContributionRejected || t.Kind == CheckpointDeliveryReallocated
 	if turn {
 		if t.Scope == nil {
 			return errors.New("turn transition requires contribution scope")
@@ -261,13 +269,13 @@ func (t CheckpointTransitionV4) Validate() error {
 			return err
 		}
 		wantPhase := Phase1
-		if t.Kind == CheckpointPhase2OutboundPublished || t.Kind == CheckpointPhase2ReceiptAccepted || t.Kind == CheckpointPhase2CandidateAccepted {
+		if t.Kind == CheckpointPhase2CandidateAllocated || t.Kind == CheckpointPhase2CandidateAccepted {
 			wantPhase = Phase2
 		}
 		if t.Kind != CheckpointDeliveryRetired && t.Kind != CheckpointContributionRejected && t.Kind != CheckpointDeliveryReallocated && t.Scope.Phase != wantPhase {
 			return errors.New("transition kind and phase disagree")
 		}
-		replacement := t.Kind == CheckpointPhase1ReceiptAccepted || t.Kind == CheckpointPhase2ReceiptAccepted || t.Kind == CheckpointDeliveryReallocated || ((t.Kind == CheckpointDeliveryRetired || t.Kind == CheckpointContributionRejected) && t.NextAttemptID != "")
+		replacement := t.Kind == CheckpointDeliveryReallocated || ((t.Kind == CheckpointDeliveryRetired || t.Kind == CheckpointContributionRejected) && t.NextAttemptID != "")
 		if replacement {
 			if err := validateHex(t.NextAttemptID, 16); err != nil {
 				return err
@@ -290,6 +298,20 @@ func (t CheckpointTransitionV4) Validate() error {
 				return errors.New("transition inventory scope differs")
 			}
 		}
+		allocated := t.Kind == CheckpointPhase1CandidateAllocated || t.Kind == CheckpointPhase2CandidateAllocated
+		if allocated {
+			if err := validateTimestamp("allocated_at", t.AllocatedAt); err != nil {
+				return err
+			}
+		} else if t.AllocatedAt != "" {
+			return errors.New("only candidate allocation records allocated_at")
+		}
+		if allocated {
+			if t.Record != nil || len(t.Evidence) != 0 {
+				return errors.New("candidate allocation is authorized by the checkpoint itself and adds no evidence")
+			}
+			return nil
+		}
 		if t.Kind == CheckpointDeliveryRetired || t.Kind == CheckpointContributionRejected || t.Kind == CheckpointDeliveryReallocated {
 			if t.Record != nil || len(t.Evidence) != 0 {
 				return errors.New("delivery-only changes must not publish payloads as accepted evidence")
@@ -297,7 +319,7 @@ func (t CheckpointTransitionV4) Validate() error {
 			return nil
 		}
 	} else {
-		if t.Scope != nil || t.AttemptID != "" || t.NextAttemptID != "" || t.Contribution != nil {
+		if t.Scope != nil || t.AttemptID != "" || t.NextAttemptID != "" || t.AllocatedAt != "" || t.Contribution != nil {
 			return errors.New("lifecycle transition must not contain turn fields")
 		}
 		switch t.Kind {
@@ -594,30 +616,16 @@ func validateV4TurnTransition(previous, next CheckpointV4) error {
 		return errors.New("transition does not identify its exact active delivery")
 	}
 	switch t.Kind {
-	case CheckpointPhase1OutboundPublished, CheckpointPhase2OutboundPublished:
-		if len(t.Evidence) != 0 {
-			return errors.New("outbound edge adds only its signed handoff")
-		}
+	case CheckpointPhase1CandidateAllocated, CheckpointPhase2CandidateAllocated:
 		for _, slot := range previous.Deliveries {
 			if slot.Status == DeliveryAllocated {
 				return errors.New("another delivery is still active")
 			}
 		}
-		want, err = AllocateDeliveryV2(previous.Deliveries, scope, CheckpointSubmissionReceipt, t.AttemptID)
-	case CheckpointPhase1ReceiptAccepted, CheckpointPhase2ReceiptAccepted:
-		if len(t.Evidence) != 0 {
-			return errors.New("receipt edge adds only its signed receipt")
-		}
-		if err = findActive(CheckpointSubmissionReceipt); err != nil {
-			return err
-		}
-		want, err = AdvanceDeliveryV2(previous.Deliveries, t.AttemptID, DeliveryAccepted, nil)
-		if err == nil {
-			want, err = AllocateDeliveryV2(want, scope, CheckpointSubmissionCandidate, t.NextAttemptID)
-		}
+		want, err = AllocateDeliveryV2(previous.Deliveries, scope, CheckpointSubmissionCandidate, t.AttemptID)
 	case CheckpointPhase1CandidateAccepted, CheckpointPhase2CandidateAccepted:
-		if len(t.Contribution.Files) != 7 {
-			return errors.New("candidate acceptance requires the signed return handoff")
+		if len(t.Contribution.Files) != 5 {
+			return errors.New("candidate acceptance requires the fixed five-file inventory")
 		}
 		if err = findActive(CheckpointSubmissionCandidate); err != nil {
 			return err
@@ -634,8 +642,8 @@ func validateV4TurnTransition(previous, next CheckpointV4) error {
 			return errors.New("candidate acceptance must advance exactly one signed head")
 		}
 		base := fmt.Sprintf("%s/contributions/%04d/", scope.Phase, scope.Index)
-		if len(t.Evidence) != len(t.Contribution.Files)+3 {
-			return errors.New("candidate acceptance requires complete candidate, verification and signed return receipt")
+		if len(t.Evidence) != len(t.Contribution.Files)+1 {
+			return errors.New("candidate acceptance requires the complete candidate and coordinator verification")
 		}
 		for _, ref := range t.Contribution.Files {
 			logical := ArtifactRef{Name: base + ref.Name, Digest: ref.Digest}
@@ -649,24 +657,13 @@ func validateV4TurnTransition(previous, next CheckpointV4) error {
 		if !slices.ContainsFunc(t.Evidence, func(ref ArtifactRef) bool { return ref.Name == base+"verification.json" }) {
 			return errors.New("candidate acceptance lacks coordinator verification record")
 		}
-		for _, name := range []string{"return-receipt.json", "return-receipt.sig"} {
-			if !slices.ContainsFunc(t.Evidence, func(ref ArtifactRef) bool { return ref.Name == base+name }) {
-				return errors.New("candidate acceptance lacks signed return receipt")
-			}
-		}
 		if scope.Phase == Phase1 {
 			wantProgress.Phase1 = state
 		} else {
 			wantProgress.Phase2 = &state
 		}
 	case CheckpointDeliveryRetired, CheckpointContributionRejected:
-		kind := CheckpointSubmissionCandidate
-		for _, slot := range previous.Deliveries {
-			if slot.AttemptID == t.AttemptID {
-				kind = slot.Kind
-			}
-		}
-		if err = findActive(kind); err != nil {
+		if err = findActive(CheckpointSubmissionCandidate); err != nil {
 			return err
 		}
 		status := DeliveryRetired
@@ -675,7 +672,7 @@ func validateV4TurnTransition(previous, next CheckpointV4) error {
 		}
 		want, err = AdvanceDeliveryV2(previous.Deliveries, t.AttemptID, status, t.Contribution)
 		if err == nil && t.NextAttemptID != "" {
-			want, err = AllocateDeliveryV2(want, scope, kind, t.NextAttemptID)
+			want, err = AllocateDeliveryV2(want, scope, CheckpointSubmissionCandidate, t.NextAttemptID)
 		}
 	case CheckpointDeliveryReallocated:
 		index := -1
@@ -696,7 +693,7 @@ func validateV4TurnTransition(previous, next CheckpointV4) error {
 				return errors.New("replacement must follow the most recent delivery for this submission")
 			}
 		}
-		want, err = AllocateDeliveryV2(previous.Deliveries, scope, old.Kind, t.NextAttemptID)
+		want, err = AllocateDeliveryV2(previous.Deliveries, scope, CheckpointSubmissionCandidate, t.NextAttemptID)
 	default:
 		return errors.New("unsupported turn transition")
 	}

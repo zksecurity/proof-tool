@@ -118,15 +118,16 @@ and execute cleanup signing as a separate operation. The controller must verify
 the original container is absent before making that recovery decision.
 
 `inspect contribution-inventory-v4` reconstructs a retained contribution from
-its exact signed predecessor and expected turn. It returns a five-file inventory
-after computation and cleanup attestation, and a distinct seven-file inventory
-after the signed return packet is complete. Partial or inconsistent return
-packets are errors; they must not trigger another computation. Only the final
-seven-file identity is used for candidate delivery/acceptance comparisons.
+its exact signed predecessor and expected turn. It returns the fixed five-file
+inventory after computation and cleanup attestation. V4 has no signed return
+packet or participant transport envelope. Partial or inconsistent candidates
+are errors and must not trigger another computation.
 
 This read-only inspection checks signatures, file hashes and locally checkable
 chronology—not contribution mathematics, backend freshness, physical erasure or
-acceptance. Uploaders must recheck the returned file hashes. Extra local files
+acceptance. `checkpoint allocate-v4` and the V4 contribution flags bind the turn
+to the exact authenticated checkpoint before randomness is generated.
+Uploaders must recheck the returned file hashes. Extra local files
 are not part of the upload inventory. Existing ceremony formats retain their
 existing commands and verification requirements; V4 remains explicit opt-in
 while the downstream workflow is being completed.

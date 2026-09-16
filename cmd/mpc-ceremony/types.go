@@ -64,40 +64,19 @@ const (
 	CommandInspectCheckpointTransition      Command = "inspect checkpoint-transition"
 	CommandInspectSubmission                Command = "inspect submission"
 	CommandInspectSubmissionAcknowledgement Command = "inspect submission-acknowledgement"
-	CommandSubmissionSign                   Command = "submission sign"
-	CommandSubmissionAccept                 Command = "submission accept"
 	CommandCheckpointPrepare                Command = "checkpoint prepare"
 	CommandCheckpointSign                   Command = "checkpoint sign"
 	CommandCheckpointVerify                 Command = "checkpoint verify"
 	CommandCheckpointVerifyStored           Command = "checkpoint verify-stored"
 	CommandCheckpointPrepareV4              Command = "checkpoint prepare-v4"
 	CommandCheckpointSignV4                 Command = "checkpoint sign-v4"
+	CommandCheckpointAllocateV4             Command = "checkpoint allocate-v4"
+	CommandCheckpointAcceptCandidateV4      Command = "checkpoint accept-candidate-v4"
 	CommandCheckpointVerifyStoredV4         Command = "checkpoint verify-stored-v4"
 	CommandCheckpointInspectSignedV4        Command = "checkpoint inspect-signed-v4"
 	CommandCheckpointInspectEnrollmentsV4   Command = "checkpoint inspect-enrollments-v4"
 	CommandCheckpointVerifyReleaseV4        Command = "checkpoint verify-release-v4"
 )
-
-type SubmissionSignOptions struct {
-	CeremonyPath             string
-	CeremonySignaturePath    string
-	CoordinatorPublicKeyFile string
-	ArtifactRoot             string
-	CheckpointPath           string
-	CheckpointSignaturePath  string
-	AttemptID                string
-	ParticipantSigningKey    string
-	ReceiptPath              string
-	ReceiptSignaturePath     string
-	CandidateDir             string
-	OutDir                   string
-}
-
-type SubmissionAcceptOptions struct {
-	CheckpointEvidenceOptions
-	CoordinatorSigningKey string
-	OutDir                string
-}
 
 type GlobalOptions struct {
 	Format string
@@ -153,6 +132,10 @@ type ContributeOptions struct {
 	EnvironmentPath          string
 	ContributedAt            string
 	OutDir                   string
+	ArtifactRoot             string
+	CheckpointPath           string
+	CheckpointSignaturePath  string
+	AttemptID                string
 }
 
 type VerifyContributionOptions struct {

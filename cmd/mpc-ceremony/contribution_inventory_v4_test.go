@@ -91,21 +91,8 @@ func checkContributionInventoryExecutableV4(t *testing.T, executable, root strin
 	}
 	sign("erasure", e, p.KeyID, key)
 	five := runCheckpointCommandExecutable(t, executable, args).ContributionInventoryV4
-	if five == nil || five.Inventory.Complete != nil || five.MathematicsReplayed || five.GlobalFreshnessVerified || five.PhysicalErasureVerified || !five.SignaturesVerified || !five.PayloadDigestVerified {
+	if five == nil || five.Inventory.Complete == nil || five.Inventory.ComputedCandidateID == "" || five.Inventory.CandidateResultID != five.Inventory.ComputedCandidateID || five.MathematicsReplayed || five.GlobalFreshnessVerified || five.PhysicalErasureVerified || !five.SignaturesVerified || !five.PayloadDigestVerified {
 		t.Fatalf("wrong CLI boundary %+v", five)
-	}
-	files := append([]m.ArtifactRef{}, five.Inventory.Computed.Files...)
-	for i := range files {
-		files[i].Name = "phase1/contributions/0001/" + files[i].Name
-	}
-	h, err := m.NewTransferHandoff(d, m.Phase1, 1, head, files, p, d.Coordinator, "2026-09-16T00:03:00Z", "2026-09-16T01:03:00Z")
-	if err != nil {
-		t.Fatal(err)
-	}
-	sign("return-handoff", h, p.KeyID, key)
-	seven := runCheckpointCommandExecutable(t, executable, args).ContributionInventoryV4
-	if seven == nil || seven.Inventory.Complete == nil || seven.Inventory.ComputedCandidateID != five.Inventory.ComputedCandidateID || seven.Inventory.CandidateResultID == five.Inventory.ComputedCandidateID {
-		t.Fatalf("wrong complete CLI inventory %+v", seven)
 	}
 	bad := d
 	bad.Software.ToolBinary = m.NewDigest([]byte("unapproved executable"))

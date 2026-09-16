@@ -60,8 +60,8 @@ func TestContributionResultIDBindsCompleteScopedInventory(t *testing.T) {
 	withReturn := original
 	withReturn.Files = append(append([]ArtifactRef{}, original.Files...),
 		inventoryTestRef("return-handoff.json", []byte("return record")), inventoryTestRef("return-handoff.sig", []byte("return signature")))
-	if got, err := withReturn.ID(); err != nil || got == want {
-		t.Fatalf("return custody not bound: %s %v", got, err)
+	if got, err := withReturn.ID(); err == nil {
+		t.Fatalf("unexpected custody files accepted: %s", got)
 	}
 	// Delivery metadata cannot become part of the semantic identity.
 	for _, attempt := range []string{strings.Repeat("1", 32), strings.Repeat("2", 32)} {

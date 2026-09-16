@@ -141,77 +141,40 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 		return err
 	}
 	scope := m.ContributionScope{CeremonyID: d.CeremonyID, Phase: m.Phase1, Index: 1, ParticipantID: p.ID, ParentHeadID: head}
-	handoff, err := m.NewTransferHandoff(d, m.Phase1, 1, head, []m.ArtifactRef{payload}, d.Coordinator, p, "2023-08-23T15:01:00Z", "2023-08-23T16:01:00Z")
-	if err != nil {
-		return err
-	}
-	handoffRefs, err := writePair("custody/outbound", handoff, d.Coordinator.KeyID, coordinator)
-	if err != nil {
-		return err
-	}
-	const first = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	const second = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	const candidateAttempt = "cccccccccccccccccccccccccccccccc"
-	next(m.CheckpointTransitionV4{Kind: m.CheckpointPhase1OutboundPublished, Scope: &scope, AttemptID: first, Record: &handoffRefs, Evidence: []m.ArtifactRef{}})
-	c.Deliveries, err = m.AllocateDeliveryV2(c.Deliveries, scope, m.CheckpointSubmissionReceipt, first)
+	next(m.CheckpointTransitionV4{Kind: m.CheckpointPhase1CandidateAllocated, Scope: &scope, AttemptID: candidateAttempt, AllocatedAt: "2023-08-23T15:01:00Z", Evidence: []m.ArtifactRef{}})
+	c.Deliveries, err = m.AllocateDeliveryV2(c.Deliveries, scope, m.CheckpointSubmissionCandidate, candidateAttempt)
 	if err != nil {
 		return err
 	}
 	missingEnrollment := c
 	missingEnrollment.Sequence = beforeEnrollment.Sequence + 1
 	missingEnrollment.PreviousCheckpoint = &beforeEnrollmentRefs
-	missingEnrollment.AcceptedArtifacts = sorted(append(append([]m.ArtifactRef{}, beforeEnrollment.AcceptedArtifacts...), handoffRefs.Record, handoffRefs.Signature))
+	missingEnrollment.AcceptedArtifacts = append([]m.ArtifactRef{}, beforeEnrollment.AcceptedArtifacts...)
 	if _, err := m.PrepareCheckpointV4(m.CheckpointPreparationV4{Trust: trust, ArtifactRoot: root, Proposal: missingEnrollment, Circuit: circuit}); err == nil || !strings.Contains(err.Error(), "enrollment") {
-		return fmt.Errorf("outbound without committed enrollment: %v", err)
+		return fmt.Errorf("allocation without committed enrollment: %v", err)
 	}
-	if err = commit(); err != nil {
-		return err
-	}
-	// Retire without replacement, then reallocate. The receipt still binds the
-	// original signed handoff, not a transport-attempt envelope.
-	next(m.CheckpointTransitionV4{Kind: m.CheckpointDeliveryRetired, Scope: &scope, AttemptID: first, Evidence: []m.ArtifactRef{}})
-	c.Deliveries, err = m.AdvanceDeliveryV2(c.Deliveries, first, m.DeliveryRetired, nil)
+	allocated, err := m.PrepareCandidateAllocationCheckpointV4(m.CandidateAllocationCheckpointV4Options{Trust: trust, ArtifactRoot: root, Checkpoint: committed, AttemptID: candidateAttempt, AllocatedAt: "2023-08-23T15:01:00Z"})
 	if err != nil {
 		return err
 	}
-	if err = commit(); err != nil {
-		return err
+	if allocated.Scope != scope {
+		return errors.New("derived allocation scope differs from signed schedule")
 	}
-	next(m.CheckpointTransitionV4{Kind: m.CheckpointDeliveryReallocated, Scope: &scope, AttemptID: first, NextAttemptID: second, Evidence: []m.ArtifactRef{}})
-	c.Deliveries, err = m.AllocateDeliveryV2(c.Deliveries, scope, m.CheckpointSubmissionReceipt, second)
-	if err != nil {
-		return err
-	}
-	if err = commit(); err != nil {
-		return err
-	}
-	hb, err := os.ReadFile(filepath.Join(root, handoffRefs.Record.Name))
-	if err != nil {
-		return err
-	}
-	receipt, err := m.NewTransferReceipt(handoff, hb, m.ReceiptReceiver, "2023-08-23T15:02:00Z")
-	if err != nil {
-		return err
-	}
-	receiptRefs, err := writePair("custody/receipt", receipt, p.KeyID, participant)
-	if err != nil {
-		return err
-	}
-	next(m.CheckpointTransitionV4{Kind: m.CheckpointPhase1ReceiptAccepted, Scope: &scope, AttemptID: second, NextAttemptID: candidateAttempt, Record: &receiptRefs, Evidence: []m.ArtifactRef{}})
-	c.Deliveries, err = m.AdvanceDeliveryV2(c.Deliveries, second, m.DeliveryAccepted, nil)
-	if err != nil {
-		return err
-	}
-	c.Deliveries, err = m.AllocateDeliveryV2(c.Deliveries, scope, m.CheckpointSubmissionCandidate, candidateAttempt)
-	if err != nil {
-		return err
-	}
+	c = allocated.Checkpoint
 	if err = commit(); err != nil {
 		return err
 	}
 	candidateDir := filepath.Join(output, "candidates/v4-turn")
 	environment := m.ContributionEnvironment{OS: runtime.GOOS, Architecture: runtime.GOARCH, EntropySource: "operating-system-csprng", ContributorSwapDisabled: true, ContributorCrashDumpsDisabled: true, ContributorTelemetryDisabled: true, EphemeralEnvironment: true, EphemeralCleanupRequired: true, HostRemnantsNotExcluded: true}
-	if _, err = m.CreateContributionCandidate(m.ContributionFilesOptions{Trust: trust, Circuit: circuit, Phase: m.Phase1, Transcript: paths, ParticipantID: p.ID, ParticipantPrivateKeyPath: participantPath, Environment: environment, ContributedAt: "2023-08-23T15:03:00Z", CandidateDir: candidateDir}); err != nil {
+	wrongCandidateDir := candidateDir + "-wrong-attempt"
+	if _, wrongErr := m.CreateAllocatedContributionCandidateV4(m.AllocatedContributionFilesV4Options{Trust: trust, Circuit: circuit, ArtifactRoot: root, Checkpoint: committed, AttemptID: "dddddddddddddddddddddddddddddddd", ParticipantPrivateKeyPath: participantPath, Environment: environment, ContributedAt: "2023-08-23T15:03:00Z", CandidateDir: wrongCandidateDir}); wrongErr == nil {
+		return errors.New("unallocated candidate attempt was accepted")
+	}
+	if _, statErr := os.Lstat(wrongCandidateDir); !errors.Is(statErr, os.ErrNotExist) {
+		return fmt.Errorf("rejected allocation wrote candidate output: %v", statErr)
+	}
+	if _, err = m.CreateAllocatedContributionCandidateV4(m.AllocatedContributionFilesV4Options{Trust: trust, Circuit: circuit, ArtifactRoot: root, Checkpoint: committed, AttemptID: candidateAttempt, ParticipantPrivateKeyPath: participantPath, Environment: environment, ContributedAt: "2023-08-23T15:03:00Z", CandidateDir: candidateDir}); err != nil {
 		return err
 	}
 	generated, err := m.InspectComputationOutputV4(trust, paths, scope, candidateDir)
@@ -224,61 +187,18 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 	if _, err = m.CreateErasureAttestationFiles(m.CreateErasureAttestationFilesOptions{Trust: trust, ParticipantID: p.ID, ParticipantPrivateKeyPath: participantPath, CandidateDir: candidateDir, DestroyedAt: "2023-08-23T15:04:00Z"}); err != nil {
 		return err
 	}
-	returnFiles := []m.ArtifactRef{}
 	computedInventory, err := m.InspectContributionInventoryV4(trust, paths, scope, candidateDir)
 	if err != nil {
 		return err
 	}
-	if computedInventory.Complete != nil || computedInventory.ComputedCandidateID == "" {
+	if computedInventory.Complete == nil || computedInventory.ComputedCandidateID == "" || computedInventory.CandidateResultID != computedInventory.ComputedCandidateID {
 		return errors.New("computed inventory reconstruction failed")
 	}
-	for _, name := range []string{"attestation.json", "attestation.sig", "contribution.bin", "erasure.json", "erasure.sig"} {
-		b, err := os.ReadFile(filepath.Join(candidateDir, name))
-		if err != nil {
-			return err
-		}
-		returnFiles = append(returnFiles, m.ArtifactRef{Name: "phase1/contributions/0001/" + name, Digest: m.NewDigest(b)})
-	}
-	returnHandoff, err := m.NewTransferHandoff(d, m.Phase1, 1, scope.ParentHeadID, returnFiles, p, d.Coordinator, "2023-08-23T15:04:10Z", "2023-08-23T16:04:10Z")
+	acceptedCheckpoint, err := m.VerifyAndAcceptAllocatedCandidateV4(m.AcceptAllocatedCandidateV4Options{Trust: trust, Circuit: circuit, ArtifactRoot: root, Checkpoint: committed, AttemptID: candidateAttempt, CandidateDir: candidateDir, CoordinatorPrivateKeyPath: coordinatorPath, AcceptedAt: "2023-08-23T15:05:00Z"})
 	if err != nil {
 		return err
 	}
-	returnRefs, err := writePair("custody/return-handoff", returnHandoff, p.KeyID, participant)
-	if err != nil {
-		return err
-	}
-	rhBytes, err := os.ReadFile(filepath.Join(root, returnRefs.Record.Name))
-	if err != nil {
-		return err
-	}
-	returnReceipt, err := m.NewTransferReceipt(returnHandoff, rhBytes, m.ReceiptReceiver, "2023-08-23T15:04:20Z")
-	if err != nil {
-		return err
-	}
-	returnReceiptRefs, err := writePair("custody/return-receipt", returnReceipt, d.Coordinator.KeyID, coordinator)
-	if err != nil {
-		return err
-	}
-	for _, ref := range []m.ArtifactRef{returnRefs.Record, returnRefs.Signature} {
-		b, err := os.ReadFile(filepath.Join(root, ref.Name))
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(filepath.Join(candidateDir, filepath.Base(ref.Name)), b, 0600); err != nil {
-			return err
-		}
-	}
-	completeInventory, err := m.InspectContributionInventoryV4(trust, paths, scope, candidateDir)
-	if err != nil {
-		return err
-	}
-	if completeInventory.Complete == nil || completeInventory.ComputedCandidateID != computedInventory.ComputedCandidateID || completeInventory.CandidateResultID == computedInventory.ComputedCandidateID {
-		return errors.New("complete inventory reconstruction failed")
-	}
-	accepted, err := m.VerifyAndAcceptContribution(m.AcceptContributionFilesOptions{Trust: trust, Circuit: circuit, Phase: m.Phase1, Transcript: paths, CandidateDir: candidateDir, CoordinatorPrivateKeyPath: coordinatorPath, AcceptedAt: "2023-08-23T15:05:00Z"})
-	if err != nil {
-		return err
-	}
+	accepted := acceptedCheckpoint.Accepted
 	paths.ChainPath = accepted.ChainPath
 	paths.ChainSignaturePath = accepted.ChainSignaturePath
 	chain, chainRefs, err = m.VerifyAcceptedPhase1Chain(trust, circuit, paths)
@@ -287,34 +207,19 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 	}
 	last := chain.Records[0]
 	files := []m.ArtifactRef{last.Attestation, last.AttestationSignature, last.OutputPayload, last.Erasure, last.ErasureSignature}
-	returnEvidence := []m.ArtifactRef{}
-	for _, pair := range []m.SignedArtifactRefs{returnRefs, returnReceiptRefs} {
-		for _, original := range []m.ArtifactRef{pair.Record, pair.Signature} {
-			b, err := os.ReadFile(filepath.Join(root, original.Name))
-			if err != nil {
-				return err
-			}
-			name := "phase1/contributions/0001/" + filepath.Base(original.Name)
-			if err = os.WriteFile(filepath.Join(root, name), b, 0600); err != nil {
-				return err
-			}
-			returnEvidence = append(returnEvidence, m.ArtifactRef{Name: name, Digest: m.NewDigest(b)})
-		}
-	}
-	files = append(files, returnEvidence[:2]...)
 	inventory := m.CandidateInventory{Schema: m.CandidateInventorySchemaV1, Scope: scope, Files: append([]m.ArtifactRef{}, files...)}
 	for i := range inventory.Files {
 		inventory.Files[i].Name = filepath.Base(inventory.Files[i].Name)
 	}
-	if id, err := inventory.ID(); err != nil || id != completeInventory.CandidateResultID {
+	if id, err := inventory.ID(); err != nil || id != computedInventory.CandidateResultID {
 		return errors.New("accepted inventory differs from inspected candidate")
 	}
-	evidence := append(append([]m.ArtifactRef{}, files...), returnEvidence[2:]...)
-	evidence = append(evidence, last.Verification)
-	next(m.CheckpointTransitionV4{Kind: m.CheckpointPhase1CandidateAccepted, Scope: &scope, AttemptID: candidateAttempt, Record: &chainRefs, Evidence: sorted(evidence), Contribution: &inventory})
-	c.Deliveries, err = m.AdvanceDeliveryV2(c.Deliveries, candidateAttempt, m.DeliveryAccepted, &inventory)
+	acceptedInventoryID, err := acceptedCheckpoint.Candidate.ID()
 	if err != nil {
 		return err
+	}
+	if acceptedCheckpoint.Scope != scope || acceptedInventoryID != computedInventory.CandidateResultID {
+		return errors.New("derived acceptance differs from verified candidate")
 	}
 	head, err = chain.HeadRecordID()
 	if err != nil {
@@ -324,35 +229,7 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 	if err != nil {
 		return err
 	}
-	c.Progress.Phase1 = m.CheckpointPhaseState{Phase: m.Phase1, AcceptedCount: 1, HeadRecordID: head, HeadPayload: payload, Chain: chainRefs}
-	lateReceipt := returnReceipt
-	lateReceipt.ReceivedAt = "2023-08-23T15:06:00Z"
-	lateRefs, err := writePair("phase1/contributions/0001/return-receipt", lateReceipt, d.Coordinator.KeyID, coordinator)
-	if err != nil {
-		return err
-	}
-	bad := c
-	bad.Transition.Evidence = append([]m.ArtifactRef{}, c.Transition.Evidence...)
-	bad.AcceptedArtifacts = append([]m.ArtifactRef{}, c.AcceptedArtifacts...)
-	for _, replacement := range []m.ArtifactRef{lateRefs.Record, lateRefs.Signature} {
-		for i := range bad.Transition.Evidence {
-			if bad.Transition.Evidence[i].Name == replacement.Name {
-				bad.Transition.Evidence[i] = replacement
-			}
-		}
-		for i := range bad.AcceptedArtifacts {
-			if bad.AcceptedArtifacts[i].Name == replacement.Name {
-				bad.AcceptedArtifacts[i] = replacement
-			}
-		}
-	}
-	_, lateErr := m.PrepareCheckpointV4(m.CheckpointPreparationV4{Trust: trust, ArtifactRoot: root, Proposal: bad, Circuit: circuit})
-	if lateErr == nil || !strings.Contains(lateErr.Error(), "timestamps") {
-		return fmt.Errorf("late signed return receipt: expected custody chronology rejection, got %v", lateErr)
-	}
-	if _, err = writePair("phase1/contributions/0001/return-receipt", returnReceipt, d.Coordinator.KeyID, coordinator); err != nil {
-		return err
-	}
+	c = acceptedCheckpoint.Checkpoint
 	if err = commit(); err != nil {
 		return err
 	}
@@ -603,6 +480,6 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 	if err = commit(); err != nil {
 		return err
 	}
-	fmt.Println("V4 real phase1 turn passed: initial, outbound, retirement, reallocation, receipt, contribution, cleanup, full replay, exact acceptance, corruption rejected, closure, drand, seal, phase2 genesis")
+	fmt.Println("V4 real phase1 turn passed: initial, allocation, contribution, cleanup, full replay, exact acceptance, corruption rejected, closure, drand, seal, phase2 genesis")
 	return runCheckpointV4Final(output, root, trust, circuit, d, coordinator, coordinatorPath, participant, participantPath, &c, next, commit, writePair, ref, sorted)
 }

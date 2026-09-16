@@ -75,11 +75,8 @@ func (c CandidateInventory) Validate() error {
 		return err
 	}
 	expected := []string{"attestation.json", "attestation.sig", "contribution.bin", "erasure.json", "erasure.sig"}
-	if len(c.Files) == 7 {
-		expected = append(expected, "return-handoff.json", "return-handoff.sig")
-	}
 	if len(c.Files) != len(expected) {
-		return errors.New("candidate requires contribution, signed attestation, signed cleanup, and either both return-handoff files or neither")
+		return errors.New("candidate requires exactly the contribution, signed attestation and signed cleanup files")
 	}
 	for i, ref := range c.Files {
 		if err := ref.Validate(); err != nil {
@@ -91,7 +88,7 @@ func (c CandidateInventory) Validate() error {
 		limit := int64(maxSignedRecordBytes)
 		if ref.Name == "contribution.bin" {
 			limit = MaxArtifactSize
-		} else if ref.Name == "attestation.sig" || ref.Name == "erasure.sig" || ref.Name == "return-handoff.sig" {
+		} else if ref.Name == "attestation.sig" || ref.Name == "erasure.sig" {
 			limit = 4096
 		}
 		if ref.Digest.Size <= 0 || ref.Digest.Size > limit {

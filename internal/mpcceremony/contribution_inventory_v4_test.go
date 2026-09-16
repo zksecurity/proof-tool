@@ -90,21 +90,7 @@ func (f inventoryFixtureV4) inspect() (ContributionInventoryInspectionV4, error)
 	return InspectContributionInventoryV4(f.trust, f.paths, f.scope, f.dir)
 }
 
-func (f inventoryFixtureV4) returnPair(t *testing.T, inventory CandidateInventory) SignedArtifactRefs {
-	t.Helper()
-	files := append([]ArtifactRef{}, inventory.Files...)
-	for i := range files {
-		files[i].Name = fmt.Sprintf("%s/contributions/%04d/%s", f.scope.Phase, f.scope.Index, files[i].Name)
-	}
-	p := f.d.Roster[int(f.scope.Index)-1].Identity
-	h, err := NewTransferHandoff(f.d, f.scope.Phase, f.scope.Index, f.scope.ParentHeadID, files, p, f.d.Coordinator, "2026-07-23T12:03:00Z", "2026-07-23T13:03:00Z")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return putCheckpointTestPairV4(t, f.dir, "return-handoff", h, p.KeyID, adversarialPrivateKey(0x10+f.scope.Index))
-}
-
-func TestContributionInventoryV4ReconstructsFiveAndSevenFiles(t *testing.T) {
+func TestContributionInventoryV4ReconstructsFixedFiveFiles(t *testing.T) {
 	for _, phase := range []Phase{Phase1, Phase2} {
 		t.Run(string(phase), func(t *testing.T) {
 			f := localInventoryFixtureV4(t, phase)
@@ -112,20 +98,12 @@ func TestContributionInventoryV4ReconstructsFiveAndSevenFiles(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(five.Computed.Files) != 5 || five.ComputedCandidateID == "" || five.Complete != nil || five.CandidateResultID != "" || five.Scope != f.scope {
+			if len(five.Computed.Files) != 5 || five.ComputedCandidateID == "" || five.Complete == nil || five.CandidateResultID != five.ComputedCandidateID || five.Scope != f.scope {
 				t.Fatalf("bad computed result %+v", five)
-			}
-			f.returnPair(t, five.Computed)
-			seven, err := f.inspect()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if seven.Complete == nil || len(seven.Complete.Files) != 7 || seven.ComputedCandidateID != five.ComputedCandidateID || seven.CandidateResultID == "" || seven.CandidateResultID == five.ComputedCandidateID {
-				t.Fatalf("bad complete result %+v", seven)
 			}
 			putCheckpointTestFileV4(t, f.dir, "local-metadata.json", []byte("not uploaded"))
 			again, err := f.inspect()
-			if err != nil || again.CandidateResultID != seven.CandidateResultID {
+			if err != nil || again.CandidateResultID != five.CandidateResultID {
 				t.Fatal("extra file changed inventory", err)
 			}
 		})
@@ -133,10 +111,10 @@ func TestContributionInventoryV4ReconstructsFiveAndSevenFiles(t *testing.T) {
 }
 
 func TestContributionInventoryV4RejectsPartialChangedAndUnboundWork(t *testing.T) {
-	for _, test := range []string{"scope", "phase", "participant", "software", "time", "payload", "partial", "return-signature", "changed-five", "symlink", "oversize"} {
+	for _, test := range []string{"scope", "phase", "participant", "software", "time", "payload", "symlink", "oversize"} {
 		t.Run(test, func(t *testing.T) {
 			f := localInventoryFixtureV4(t, Phase1)
-			five, err := f.inspect()
+			_, err := f.inspect()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -157,16 +135,6 @@ func TestContributionInventoryV4RejectsPartialChangedAndUnboundWork(t *testing.T
 				f.sign(t, a)
 			case "payload":
 				putCheckpointTestFileV4(t, f.dir, "contribution.bin", []byte("changed"))
-			case "partial":
-				putCheckpointTestFileV4(t, f.dir, "return-handoff.json", []byte("{}"))
-			case "return-signature":
-				f.returnPair(t, five.Computed)
-				putCheckpointTestFileV4(t, f.dir, "return-handoff.sig", []byte("{}"))
-			case "changed-five":
-				f.returnPair(t, five.Computed)
-				a := f.a
-				a.ContributedAt = "2026-07-23T12:01:01Z"
-				f.sign(t, a)
 			case "symlink":
 				if err := os.Rename(filepath.Join(f.dir, "attestation.json"), filepath.Join(f.dir, "other.json")); err != nil {
 					t.Fatal(err)
@@ -190,45 +158,6 @@ func TestContributionInventoryV4RejectsPartialChangedAndUnboundWork(t *testing.T
 				t.Fatalf("accepted %s or leaked partial success: %+v %v", test, got, err)
 			}
 		})
-	}
-}
-
-func TestReturnHandoffV4RejectsFiveFileInventoryWithoutPanic(t *testing.T) {
-	f := localInventoryFixtureV4(t, Phase1)
-	i, err := f.inspect()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := verifyReturnHandoffBytesV4(f.d, f.scope, i.Computed, nil, nil); err == nil {
-		t.Fatal("accepted incomplete inventory")
-	}
-}
-
-func TestContributionInventoryV4ReturnMustFollowCleanup(t *testing.T) {
-	for _, phase := range []Phase{Phase1, Phase2} {
-		for _, created := range []string{"2026-07-23T12:01:59Z", "2026-07-23T12:02:00Z"} {
-			t.Run(string(phase)+created, func(t *testing.T) {
-				f := localInventoryFixtureV4(t, phase)
-				five, err := f.inspect()
-				if err != nil {
-					t.Fatal(err)
-				}
-				pair := f.returnPair(t, five.Computed)
-				b, err := os.ReadFile(filepath.Join(f.dir, pair.Record.Name))
-				if err != nil {
-					t.Fatal(err)
-				}
-				var h TransferHandoff
-				if err := UnmarshalCanonical(b, &h); err != nil {
-					t.Fatal(err)
-				}
-				h.CreatedAt = created
-				putCheckpointTestPairV4(t, f.dir, "return-handoff", h, f.d.Roster[0].Identity.KeyID, adversarialPrivateKey(0x11))
-				if _, err := f.inspect(); err == nil || !strings.Contains(err.Error(), "strictly after cleanup") {
-					t.Fatal(err)
-				}
-			})
-		}
 	}
 }
 
@@ -271,9 +200,8 @@ func TestContributionInventoryV4LaterTurnAndPredecessorTime(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			f.returnPair(t, i.Computed)
-			if _, err := f.inspect(); err != nil {
-				t.Fatal(err)
+			if i.CandidateResultID == "" {
+				t.Fatal("complete candidate result ID missing")
 			}
 			f.a.ContributedAt = record.AcceptedAt
 			f.sign(t, f.a)

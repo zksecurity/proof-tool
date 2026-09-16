@@ -76,36 +76,23 @@ func checkpointTurnV4(t *testing.T, d CeremonyDefinition, start CheckpointV4, ph
 	t.Helper()
 	state := start.Progress.Phase1
 	participant := d.Phase1Policy.Participants[0]
-	outbound, receipt, accept := CheckpointPhase1OutboundPublished, CheckpointPhase1ReceiptAccepted, CheckpointPhase1CandidateAccepted
+	allocate, accept := CheckpointPhase1CandidateAllocated, CheckpointPhase1CandidateAccepted
 	if phase == Phase2 {
 		state = *start.Progress.Phase2
 		participant = d.Phase2Policy.Participants[0]
-		outbound = CheckpointPhase2OutboundPublished
-		receipt = CheckpointPhase2ReceiptAccepted
+		allocate = CheckpointPhase2CandidateAllocated
 		accept = CheckpointPhase2CandidateAccepted
 	}
 	scope := ContributionScope{CeremonyID: d.CeremonyID, Phase: phase, Index: state.AcceptedCount + 1, ParticipantID: participant, ParentHeadID: state.HeadRecordID}
-	id1, id2 := fmt.Sprintf("%032x", start.Sequence+100), fmt.Sprintf("%032x", start.Sequence+101)
-	handoff := checkpointSigned(string(phase) + "/outbound")
-	c1 := nextCheckpointV4(t, start, CheckpointTransitionV4{Kind: outbound, Scope: &scope, AttemptID: id1, Record: &handoff, Evidence: []ArtifactRef{}})
+	id := fmt.Sprintf("%032x", start.Sequence+100)
+	c1 := nextCheckpointV4(t, start, CheckpointTransitionV4{Kind: allocate, Scope: &scope, AttemptID: id, AllocatedAt: "2026-01-01T00:01:00Z", Evidence: []ArtifactRef{}})
 	var err error
-	c1.Deliveries, err = AllocateDeliveryV2(start.Deliveries, scope, CheckpointSubmissionReceipt, id1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	r := checkpointSigned(string(phase) + "/receipt")
-	c2 := nextCheckpointV4(t, c1, CheckpointTransitionV4{Kind: receipt, Scope: &scope, AttemptID: id1, NextAttemptID: id2, Record: &r, Evidence: []ArtifactRef{}})
-	c2.Deliveries, err = AdvanceDeliveryV2(c1.Deliveries, id1, DeliveryAccepted, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	c2.Deliveries, err = AllocateDeliveryV2(c2.Deliveries, scope, CheckpointSubmissionCandidate, id2)
+	c1.Deliveries, err = AllocateDeliveryV2(start.Deliveries, scope, CheckpointSubmissionCandidate, id)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, inventory := candidateInventoryFixture(t)
 	inventory.Scope = scope
-	inventory.Files = append(inventory.Files, inventoryTestRef("return-handoff.json", []byte("handoff")), inventoryTestRef("return-handoff.sig", []byte("handoff signature")))
 	chain := checkpointSigned(fmt.Sprintf("%s/chain-%04d", phase, scope.Index))
 	evidence := []ArtifactRef{}
 	for _, ref := range inventory.Files {
@@ -113,19 +100,18 @@ func checkpointTurnV4(t *testing.T, d CeremonyDefinition, start CheckpointV4, ph
 		evidence = append(evidence, ref)
 	}
 	evidence = checkpointArtifacts(append(evidence, checkpointArtifact(fmt.Sprintf("%s/contributions/%04d/verification.json", phase, scope.Index), "verification"))...)
-	evidence = checkpointArtifacts(append(evidence, checkpointArtifact(fmt.Sprintf("%s/contributions/%04d/return-receipt.json", phase, scope.Index), "receipt"), checkpointArtifact(fmt.Sprintf("%s/contributions/%04d/return-receipt.sig", phase, scope.Index), "receipt signature"))...)
-	c3 := nextCheckpointV4(t, c2, CheckpointTransitionV4{Kind: accept, Scope: &scope, AttemptID: id2, Record: &chain, Evidence: evidence, Contribution: &inventory})
-	c3.Deliveries, err = AdvanceDeliveryV2(c2.Deliveries, id2, DeliveryAccepted, &inventory)
+	c2 := nextCheckpointV4(t, c1, CheckpointTransitionV4{Kind: accept, Scope: &scope, AttemptID: id, Record: &chain, Evidence: evidence, Contribution: &inventory})
+	c2.Deliveries, err = AdvanceDeliveryV2(c1.Deliveries, id, DeliveryAccepted, &inventory)
 	if err != nil {
 		t.Fatal(err)
 	}
 	nextState := CheckpointPhaseState{Phase: phase, AcceptedCount: scope.Index, HeadRecordID: NewDigest([]byte(string(phase) + "accepted-head")).SHA256, HeadPayload: evidence[2], Chain: chain}
 	if phase == Phase1 {
-		c3.Progress.Phase1 = nextState
+		c2.Progress.Phase1 = nextState
 	} else {
-		c3.Progress.Phase2 = &nextState
+		c2.Progress.Phase2 = &nextState
 	}
-	sequence := []CheckpointV4{start, c1, c2, c3}
+	sequence := []CheckpointV4{start, c1, c2}
 	for i := 1; i < len(sequence); i++ {
 		if err := ValidateCheckpointTransitionV4(sequence[i-1], sequence[i]); err != nil {
 			t.Fatalf("%s edge %d: %v", phase, i, err)
@@ -225,13 +211,15 @@ func TestCheckpointV4RejectsSkippedOrAlteredTurnEdges(t *testing.T) {
 		"hidden extra file": func(n *CheckpointV4) {
 			n.AcceptedArtifacts = appendCheckpointArtifacts(n.AcceptedArtifacts, checkpointArtifact("unexpected.json", "extra"))
 		},
-		"wrong slot":          func(n *CheckpointV4) { n.Transition.AttemptID = strings.Repeat("e", 32) },
-		"skipped count":       func(n *CheckpointV4) { n.Progress.Phase1.AcceptedCount++ },
-		"changed result":      func(n *CheckpointV4) { n.Transition.Contribution.Files[0].Digest = NewDigest([]byte("changed")) },
-		"five file candidate": func(n *CheckpointV4) { n.Transition.Contribution.Files = n.Transition.Contribution.Files[:5] },
-		"missing return receipt": func(n *CheckpointV4) {
+		"wrong slot":     func(n *CheckpointV4) { n.Transition.AttemptID = strings.Repeat("e", 32) },
+		"skipped count":  func(n *CheckpointV4) { n.Progress.Phase1.AcceptedCount++ },
+		"changed result": func(n *CheckpointV4) { n.Transition.Contribution.Files[0].Digest = NewDigest([]byte("changed")) },
+		"extra candidate file": func(n *CheckpointV4) {
+			n.Transition.Contribution.Files = append(n.Transition.Contribution.Files, checkpointArtifact("extra.json", "extra"))
+		},
+		"missing verification": func(n *CheckpointV4) {
 			for i, ref := range n.Transition.Evidence {
-				if strings.HasSuffix(ref.Name, "return-receipt.sig") {
+				if strings.HasSuffix(ref.Name, "verification.json") {
 					n.Transition.Evidence = append(n.Transition.Evidence[:i], n.Transition.Evidence[i+1:]...)
 					break
 				}
@@ -241,23 +229,22 @@ func TestCheckpointV4RejectsSkippedOrAlteredTurnEdges(t *testing.T) {
 		"advance another phase": func(n *CheckpointV4) { n.Progress.Phase2 = &n.Progress.Phase1 },
 	} {
 		t.Run(name, func(t *testing.T) {
-			n := cloneCheckpointV4(t, turn[3])
+			n := cloneCheckpointV4(t, turn[2])
 			mutate(&n)
-			if err := ValidateCheckpointTransitionV4(turn[2], n); err == nil {
+			if err := ValidateCheckpointTransitionV4(turn[1], n); err == nil {
 				t.Fatal("invalid edge accepted")
 			}
 		})
 	}
-	if err := ValidateCheckpointTransitionV4(turn[1], turn[3]); err == nil {
-		t.Fatal("receipt step skipped")
+	if err := ValidateCheckpointTransitionV4(turn[0], turn[2]); err == nil {
+		t.Fatal("allocation step skipped")
 	}
-	// A receipt allocation cannot be treated as an accepted candidate allocation.
-	n := cloneCheckpointV4(t, turn[3])
-	n.Sequence = turn[1].Sequence + 1
-	raw, _ := MarshalCanonical(turn[1])
+	n := cloneCheckpointV4(t, turn[2])
+	n.Sequence = turn[0].Sequence + 1
+	raw, _ := MarshalCanonical(turn[0])
 	n.PreviousCheckpoint.Record.Digest = NewDigest(raw)
-	if err := ValidateCheckpointTransitionV4(turn[1], n); err == nil {
-		t.Fatal("candidate accepted before receipt")
+	if err := ValidateCheckpointTransitionV4(turn[0], n); err == nil {
+		t.Fatal("candidate accepted before allocation")
 	}
 }
 
@@ -316,14 +303,14 @@ func TestCheckpointV4RejectsOverlappingArtifactNames(t *testing.T) {
 func TestCheckpointV4DeliveryRetryAndRejectionEdges(t *testing.T) {
 	d, initial, _, _ := checkpointFixtureV4(t)
 	turn := checkpointTurnV4(t, d, initial, Phase1)
-	previous := turn[2]
+	previous := turn[1]
 	for _, kind := range []CheckpointTransitionKind{CheckpointDeliveryRetired, CheckpointContributionRejected} {
 		t.Run(string(kind), func(t *testing.T) {
-			transition := CheckpointTransitionV4{Kind: kind, Scope: turn[3].Transition.Scope, AttemptID: turn[3].Transition.AttemptID, NextAttemptID: strings.Repeat("e", 32), Evidence: []ArtifactRef{}}
+			transition := CheckpointTransitionV4{Kind: kind, Scope: turn[2].Transition.Scope, AttemptID: turn[2].Transition.AttemptID, NextAttemptID: strings.Repeat("e", 32), Evidence: []ArtifactRef{}}
 			status := DeliveryRetired
 			if kind == CheckpointContributionRejected {
 				status = DeliveryRejected
-				transition.Contribution = turn[3].Transition.Contribution
+				transition.Contribution = turn[2].Transition.Contribution
 			}
 			next := nextCheckpointV4(t, previous, transition)
 			var err error
@@ -346,10 +333,10 @@ func TestCheckpointV4DeliveryRetryAndRejectionEdges(t *testing.T) {
 					t.Fatal("rejection silently retired")
 				}
 			}
-			accept := turn[3].Transition
+			accept := turn[2].Transition
 			accept.AttemptID = transition.NextAttemptID
 			final := nextCheckpointV4(t, next, accept)
-			final.Progress = turn[3].Progress
+			final.Progress = turn[2].Progress
 			final.Deliveries, err = AdvanceDeliveryV2(next.Deliveries, accept.AttemptID, DeliveryAccepted, accept.Contribution)
 			if kind == CheckpointContributionRejected {
 				if err == nil {
@@ -384,13 +371,12 @@ func TestCheckpointV4DeliveryRetryAndRejectionEdges(t *testing.T) {
 func TestCheckpointV4RetirementAtLimitCanCloseAfterMinimum(t *testing.T) {
 	d, initial, db, ds := checkpointFixtureV4(t)
 	turn := checkpointTurnV4(t, d, initial, Phase1)
-	previous := turn[3]
+	previous := turn[2]
 	scope := ContributionScope{CeremonyID: d.CeremonyID, Phase: Phase1, Index: 2, ParticipantID: d.Phase1Policy.Participants[1], ParentHeadID: previous.Progress.Phase1.HeadRecordID}
 	id := fmt.Sprintf("%032x", 200)
-	handoff := checkpointSigned("phase1/outbound-2")
-	c := nextCheckpointV4(t, previous, CheckpointTransitionV4{Kind: CheckpointPhase1OutboundPublished, Scope: &scope, AttemptID: id, Record: &handoff, Evidence: []ArtifactRef{}})
+	c := nextCheckpointV4(t, previous, CheckpointTransitionV4{Kind: CheckpointPhase1CandidateAllocated, Scope: &scope, AttemptID: id, AllocatedAt: "2026-01-01T00:02:00Z", Evidence: []ArtifactRef{}})
 	var err error
-	c.Deliveries, err = AllocateDeliveryV2(previous.Deliveries, scope, CheckpointSubmissionReceipt, id)
+	c.Deliveries, err = AllocateDeliveryV2(previous.Deliveries, scope, CheckpointSubmissionCandidate, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +397,7 @@ func TestCheckpointV4RetirementAtLimitCanCloseAfterMinimum(t *testing.T) {
 		if i < MaxDeliveryAttemptsPerSubmissionV2-1 {
 			nextID := fmt.Sprintf("%032x", 201+i)
 			n = nextCheckpointV4(t, c, CheckpointTransitionV4{Kind: CheckpointDeliveryReallocated, Scope: &scope, AttemptID: id, NextAttemptID: nextID, Evidence: []ArtifactRef{}})
-			n.Deliveries, err = AllocateDeliveryV2(c.Deliveries, scope, CheckpointSubmissionReceipt, nextID)
+			n.Deliveries, err = AllocateDeliveryV2(c.Deliveries, scope, CheckpointSubmissionCandidate, nextID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -422,7 +408,7 @@ func TestCheckpointV4RetirementAtLimitCanCloseAfterMinimum(t *testing.T) {
 			id = nextID
 		}
 	}
-	if _, err := AllocateDeliveryV2(c.Deliveries, scope, CheckpointSubmissionReceipt, strings.Repeat("f", 32)); err == nil {
+	if _, err := AllocateDeliveryV2(c.Deliveries, scope, CheckpointSubmissionCandidate, strings.Repeat("f", 32)); err == nil {
 		t.Fatal("attempt budget exceeded")
 	}
 	closure := checkpointSigned("phase1/closure")

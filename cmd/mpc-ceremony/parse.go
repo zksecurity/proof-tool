@@ -101,13 +101,6 @@ func parseInvocation(args []string) (Invocation, error) {
 		return parseDecision(invocation, rest[1:])
 	case "checkpoint":
 		return parseCheckpoint(invocation, rest[1:])
-	case "submission":
-		parsed, err := parseSubmission(invocation, rest[1:])
-		topic := []string{"submission"}
-		if len(rest) > 1 {
-			topic = append(topic, rest[1])
-		}
-		return parsed, wrapCommandError(err, topic...)
 	default:
 		return Invocation{}, &usageError{
 			message: fmt.Sprintf("unknown command %q", rest[0]),
@@ -940,6 +933,10 @@ func parseContribute(name string, args []string, phase2 bool) (ContributeOptions
 	fs.StringVar(&options.EnvironmentPath, "environment", "", "canonical contribution environment attestation JSON path")
 	fs.StringVar(&options.ContributedAt, "contributed-at", "", "contribution timestamp in RFC3339")
 	fs.StringVar(&options.OutDir, "out-dir", "", "fresh candidate contribution directory")
+	fs.StringVar(&options.ArtifactRoot, "artifact-root", "", "definition v4 authenticated artifact root")
+	fs.StringVar(&options.CheckpointPath, "checkpoint", "", "definition v4 signed allocation checkpoint")
+	fs.StringVar(&options.CheckpointSignaturePath, "checkpoint-signature", "", "definition v4 detached allocation checkpoint signature")
+	fs.StringVar(&options.AttemptID, "attempt-id", "", "definition v4 preallocated candidate attempt")
 	if err := parseFlags(fs, args); err != nil {
 		return options, err
 	}

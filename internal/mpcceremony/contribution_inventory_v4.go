@@ -2,7 +2,6 @@ package mpcceremony
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"time"
@@ -20,8 +19,8 @@ type ContributionInventoryInspectionV4 struct {
 	CandidateResultID   string              `json:"candidate_result_id,omitempty"`
 }
 
-// InspectContributionInventoryV4 reconstructs the five-file computation and,
-// if present, its seven-file return package together. expected must come from
+// InspectContributionInventoryV4 reconstructs the fixed five-file candidate.
+// expected must come from
 // the caller's authenticated turn (or the exact retained operation on recovery).
 // Extra local files are ignored, never added to either returned inventory.
 func InspectContributionInventoryV4(trust TrustPaths, predecessor PhaseTranscriptPaths, expected ContributionScope, candidateDir string) (ContributionInventoryInspectionV4, error) {
@@ -101,37 +100,7 @@ func inspectContributionInventoryV4(r *checkpointReaderV4, d CeremonyDefinition,
 	if err != nil {
 		return zero, err
 	}
-	result := ContributionInventoryInspectionV4{Scope: scope, Computed: computed, ComputedCandidateID: id}
-	record, recordErr := readLocalInventoryRecordV4(r, "return-handoff.json", maxSignedRecordBytes)
-	sig, sigErr := readLocalInventoryRecordV4(r, "return-handoff.sig", 4096)
-	if errors.Is(recordErr, os.ErrNotExist) && errors.Is(sigErr, os.ErrNotExist) {
-		return result, nil
-	}
-	if recordErr != nil {
-		return zero, fmt.Errorf("return handoff: %w", recordErr)
-	}
-	if sigErr != nil {
-		return zero, fmt.Errorf("return handoff signature: %w", sigErr)
-	}
-	complete := CandidateInventory{Schema: computed.Schema, Scope: scope, Files: append(append([]ArtifactRef{}, computed.Files...), ArtifactRef{Name: "return-handoff.json", Digest: NewDigest(record)}, ArtifactRef{Name: "return-handoff.sig", Digest: NewDigest(sig)})}
-	if err := verifyReturnHandoffBytesV4(d, scope, complete, record, sig); err != nil {
-		return zero, err
-	}
-	var handoff TransferHandoff
-	if err := UnmarshalCanonical(record, &handoff); err != nil {
-		return zero, err
-	}
-	destroyed, _ := time.Parse(time.RFC3339Nano, erasure.DestroyedAt)
-	created, _ := time.Parse(time.RFC3339Nano, handoff.CreatedAt)
-	if !created.After(destroyed) {
-		return zero, errors.New("return handoff must be created strictly after cleanup")
-	}
-	result.CandidateResultID, err = complete.ID()
-	if err != nil {
-		return zero, err
-	}
-	result.Complete = &complete
-	return result, nil
+	return ContributionInventoryInspectionV4{Scope: scope, Computed: computed, ComputedCandidateID: id, Complete: &computed, CandidateResultID: id}, nil
 }
 
 // Only fixed basenames reach this helper. os.Root confines resolution, and

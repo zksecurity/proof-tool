@@ -787,6 +787,10 @@ type ContributionFilesOptions struct {
 	Environment               ContributionEnvironment
 	ContributedAt             string
 	CandidateDir              string
+	// ExpectedScope is set by the V4 allocation-aware entry point. It is
+	// checked after the signed chain is loaded and before contribution
+	// randomness is sampled. Legacy callers leave it nil.
+	ExpectedScope *ContributionScope
 }
 
 type ContributionFilesResult struct {
@@ -880,6 +884,25 @@ func CreateContributionCandidate(options ContributionFilesOptions) (result Contr
 	index := len(chain.Records) + 1
 	if index > len(policy.Participants) || policy.Participants[index-1] != options.ParticipantID {
 		return result, fmt.Errorf("participant %q is not scheduled at contribution index %d", options.ParticipantID, index)
+	}
+	if options.ExpectedScope != nil {
+		if index > 255 {
+			return result, errors.New("contribution index exceeds protocol limit")
+		}
+		head, headErr := chain.HeadRecordID()
+		if headErr != nil {
+			return result, headErr
+		}
+		actual := ContributionScope{
+			CeremonyID:    trusted.Definition.CeremonyID,
+			Phase:         options.Phase,
+			Index:         uint8(index),
+			ParticipantID: options.ParticipantID,
+			ParentHeadID:  head,
+		}
+		if actual != *options.ExpectedScope {
+			return result, errors.New("authenticated allocation does not match the exact contribution input snapshot")
+		}
 	}
 	if _, statErr := os.Lstat(options.CandidateDir); statErr == nil {
 		return result, fmt.Errorf("fresh candidate directory already exists: %w", fs.ErrExist)

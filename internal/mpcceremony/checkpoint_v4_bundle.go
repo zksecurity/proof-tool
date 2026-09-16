@@ -3,7 +3,6 @@ package mpcceremony
 import (
 	"errors"
 	"fmt"
-	"path"
 	"slices"
 	"strings"
 	"time"
@@ -136,7 +135,7 @@ func deriveOperationalBundleV4(reader *checkpointReaderV4, trusted *TrustedCerem
 			raws[r.Phase] = append(raws[r.Phase], ob.RawResponse)
 		}
 	}
-	bundle := OperationalEvidenceBundle{Schema: OperationalEvidenceBundleSchema, CeremonyID: d.CeremonyID, AssurancePolicy: cloneAssurancePolicy(d.AssurancePolicy), Enrollments: sortedSignedRefsV4(a.enrollments), GovernanceRecords: []SignedArtifactRefs{}, CoordinatorID: d.Coordinator.ID, CoordinatorKeyID: d.Coordinator.KeyID, AssembledAt: at.Format(time.RFC3339Nano)}
+	bundle := OperationalEvidenceBundle{Schema: OperationalEvidenceBundleSchemaV4, CeremonyID: d.CeremonyID, AssurancePolicy: cloneAssurancePolicy(d.AssurancePolicy), Enrollments: sortedSignedRefsV4(a.enrollments), GovernanceRecords: []SignedArtifactRefs{}, CoordinatorID: d.Coordinator.ID, CoordinatorKeyID: d.Coordinator.KeyID, AssembledAt: at.Format(time.RFC3339Nano)}
 	used := 0
 	for _, incident := range a.incidents {
 		if _, err := verifyGovernanceRecordV4(reader, d, incident); err != nil {
@@ -175,32 +174,7 @@ func deriveOperationalBundleV4(reader *checkpointReaderV4, trusted *TrustedCerem
 				return OperationalEvidenceBundle{}, fmt.Errorf("%s turn %d lacks its accepted checkpoint", phase, record.Index)
 			}
 			used++
-			receipt, ok := a.receipts[scope]
-			if !ok {
-				return OperationalEvidenceBundle{}, fmt.Errorf("%s turn %d lacks its committed input receipt", phase, record.Index)
-			}
-			var received TransferReceipt
-			if err = read(receipt, &received); err != nil {
-				return OperationalEvidenceBundle{}, err
-			}
-			handoff, ok := a.outbound[received.HandoffSHA256]
-			if !ok {
-				return OperationalEvidenceBundle{}, errors.New("accepted receipt has no committed original handoff")
-			}
-			files := map[string]ArtifactRef{}
-			for _, r := range tx.Evidence {
-				files[r.Name] = r
-			}
-			dir := path.Dir(record.Attestation.Name)
-			returnHandoff := SignedArtifactRefs{Record: files[dir+"/return-handoff.json"], Signature: files[dir+"/return-handoff.sig"]}
-			returnReceipt := SignedArtifactRefs{Record: files[dir+"/return-receipt.json"], Signature: files[dir+"/return-receipt.sig"]}
-			if err = returnHandoff.Validate(); err != nil {
-				return OperationalEvidenceBundle{}, fmt.Errorf("%s turn %d missing committed return handoff: %w", phase, record.Index, err)
-			}
-			if err = returnReceipt.Validate(); err != nil {
-				return OperationalEvidenceBundle{}, fmt.Errorf("%s turn %d missing committed return receipt: %w", phase, record.Index, err)
-			}
-			pe.AcceptedHeads = append(pe.AcceptedHeads, AcceptedHeadOperationalEvidence{Index: record.Index, PredecessorHeadID: record.PreviousRecordID, AcceptedHeadID: record.RecordID, OutboundHandoff: handoff, OutboundReceipt: receipt, ReturnHandoff: returnHandoff, ReturnReceipt: returnReceipt, AcceptedChainPrefix: *tx.Record, MirrorReceipts: sortedSignedRefsV4(mirrors[phase][record.Index])})
+			pe.AcceptedHeads = append(pe.AcceptedHeads, AcceptedHeadOperationalEvidence{Index: record.Index, PredecessorHeadID: record.PreviousRecordID, AcceptedHeadID: record.RecordID, AcceptedChainPrefix: *tx.Record, MirrorReceipts: sortedSignedRefsV4(mirrors[phase][record.Index])})
 		}
 		if phase == Phase1 {
 			bundle.Phase1 = pe

@@ -123,13 +123,9 @@ func (workflowExecutor) Execute(ctx context.Context, invocation Invocation) (Com
 		return executeInspectSubmission(invocation.Options.(InspectSubmissionOptions))
 	case CommandInspectSubmissionAcknowledgement:
 		return executeInspectSubmissionAcknowledgement(invocation.Options.(InspectSubmissionAcknowledgementOptions))
-	case CommandSubmissionSign:
-		return executeSubmissionSign(invocation.Options.(SubmissionSignOptions))
-	case CommandSubmissionAccept:
-		return executeSubmissionAccept(invocation.Options.(SubmissionAcceptOptions))
 	case CommandCheckpointPrepare:
 		return executeCheckpointPrepare(invocation.Options.(CheckpointPrepareOptions))
-	case CommandCheckpointPrepareV4, CommandCheckpointSignV4, CommandCheckpointVerifyStoredV4, CommandCheckpointInspectSignedV4, CommandCheckpointInspectEnrollmentsV4:
+	case CommandCheckpointPrepareV4, CommandCheckpointSignV4, CommandCheckpointAllocateV4, CommandCheckpointAcceptCandidateV4, CommandCheckpointVerifyStoredV4, CommandCheckpointInspectSignedV4, CommandCheckpointInspectEnrollmentsV4:
 		return executeCheckpointV4(invocation.Command, invocation.Options.(CheckpointOptionsV4))
 	case CommandCheckpointSign:
 		return executeCheckpointSign(invocation.Options.(CheckpointSignOptions))
@@ -241,7 +237,23 @@ func executeContribution(phase mpcceremony.Phase, options ContributeOptions) (Co
 	if err := verifyRunningTrust(trust); err != nil {
 		return CommandResult{}, err
 	}
-	circuit, err := loadOperationalCircuit(trust, options.TranscriptDir)
+	trusted, err := mpcceremony.LoadSignedDefinition(trust)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	circuitRoot := options.TranscriptDir
+	if trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+		if err := requireValues(
+			pathValue("--artifact-root", options.ArtifactRoot),
+			pathValue("--checkpoint", options.CheckpointPath),
+			pathValue("--checkpoint-signature", options.CheckpointSignaturePath),
+			value("--attempt-id", options.AttemptID),
+		); err != nil {
+			return CommandResult{}, err
+		}
+		circuitRoot = options.ArtifactRoot
+	}
+	circuit, err := loadOperationalCircuit(trust, circuitRoot)
 	if err != nil {
 		return CommandResult{}, err
 	}
@@ -249,19 +261,33 @@ func executeContribution(phase mpcceremony.Phase, options ContributeOptions) (Co
 	if err != nil {
 		return CommandResult{}, err
 	}
-	result, err := mpcceremony.CreateContributionCandidate(mpcceremony.ContributionFilesOptions{
-		Trust:                     trust,
-		Circuit:                   circuit,
-		Phase:                     phase,
-		Transcript:                transcriptPaths(options.TranscriptDir, options.ChainPath, options.ChainSignaturePath),
-		Phase1SealPath:            options.Phase1SealPath,
-		Phase1SealSignaturePath:   options.Phase1SealSignaturePath,
-		ParticipantID:             options.ParticipantID,
-		ParticipantPrivateKeyPath: options.ParticipantSigningKey,
-		Environment:               environment,
-		ContributedAt:             options.ContributedAt,
-		CandidateDir:              options.OutDir,
-	})
+	var result mpcceremony.ContributionFilesResult
+	if trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+		_, _, checkpoint, refErr := checkpointSignedBytes(options.ArtifactRoot, options.CheckpointPath, options.CheckpointSignaturePath)
+		if refErr != nil {
+			return CommandResult{}, refErr
+		}
+		result, err = mpcceremony.CreateAllocatedContributionCandidateV4(mpcceremony.AllocatedContributionFilesV4Options{
+			Trust: trust, Circuit: circuit, ArtifactRoot: options.ArtifactRoot,
+			Checkpoint: checkpoint, AttemptID: options.AttemptID,
+			ParticipantPrivateKeyPath: options.ParticipantSigningKey,
+			Environment:               environment, ContributedAt: options.ContributedAt, CandidateDir: options.OutDir,
+		})
+	} else {
+		result, err = mpcceremony.CreateContributionCandidate(mpcceremony.ContributionFilesOptions{
+			Trust:                     trust,
+			Circuit:                   circuit,
+			Phase:                     phase,
+			Transcript:                transcriptPaths(options.TranscriptDir, options.ChainPath, options.ChainSignaturePath),
+			Phase1SealPath:            options.Phase1SealPath,
+			Phase1SealSignaturePath:   options.Phase1SealSignaturePath,
+			ParticipantID:             options.ParticipantID,
+			ParticipantPrivateKeyPath: options.ParticipantSigningKey,
+			Environment:               environment,
+			ContributedAt:             options.ContributedAt,
+			CandidateDir:              options.OutDir,
+		})
+	}
 	if err != nil {
 		return CommandResult{}, err
 	}

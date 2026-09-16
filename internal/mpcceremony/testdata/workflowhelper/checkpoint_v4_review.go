@@ -99,7 +99,7 @@ func runCheckpointV4Review(root string, trust m.TrustPaths, d m.CeremonyDefiniti
 	if err := m.UnmarshalCanonical(bundleBytes, &bundleRecord); err != nil {
 		return err
 	}
-	for _, ref := range []m.ArtifactRef{headRefs.Signature, head.Definition.Record, head.Definition.Signature, bundle.Signature, phase1.Records[0].Attestation, phase1.Records[0].Erasure, bundleRecord.Phase1.AcceptedHeads[0].OutboundReceipt.Record, bundleRecord.Phase1.RawBeaconResponses[0]} {
+	for _, ref := range []m.ArtifactRef{headRefs.Signature, head.Definition.Record, head.Definition.Signature, bundle.Signature, phase1.Records[0].Attestation, phase1.Records[0].Erasure, bundleRecord.Phase1.AcceptedHeads[0].AcceptedChainPrefix.Record, bundleRecord.Phase1.RawBeaconResponses[0]} {
 		file := filepath.Join(snapshot, ref.Name)
 		original, err := os.ReadFile(file)
 		if err != nil {

@@ -409,7 +409,7 @@ func TestEvidenceV4CommandsOnRealArtifacts(t *testing.T) {
 	if _, err := execute(CommandOpsSignBundleV4, bad); err == nil || !strings.Contains(err.Error(), "not the authenticated coordinator") {
 		t.Fatal("wrong key accepted", err)
 	}
-	target := filepath.Join(root, bundle.Phase1.AcceptedHeads[0].ReturnReceipt.Record.Name)
+	target := filepath.Join(root, bundle.Phase1.AcceptedHeads[0].AcceptedChainPrefix.Record.Name)
 	saved := read(target)
 	writeDecisionTestFile(t, target, append(bytes.Clone(saved), '\n'), 0600)
 	bad.CoordinatorSigningKey = filepath.Join(root, "MISSING-KEY")
