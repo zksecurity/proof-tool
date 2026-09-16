@@ -124,11 +124,11 @@ func TestCheckpointV4FullStructuralLifecycle(t *testing.T) {
 	d, c, _, _ := checkpointFixtureV4(t)
 	turn := checkpointTurnV4(t, d, c, Phase1)
 	c = turn[len(turn)-1]
-	stages := []CheckpointTransitionKind{CheckpointPhase1Closed, CheckpointPhase1BeaconRecorded, CheckpointPhase1Sealed, CheckpointPhase2Initialized, CheckpointPhase2Closed, CheckpointPhase2BeaconRecorded, CheckpointFinalCandidateRecorded, CheckpointFinalReleaseRecorded}
+	stages := []CheckpointTransitionKind{CheckpointPhase1Closed, CheckpointPhase1BeaconRecorded, CheckpointPhase1Sealed, CheckpointPhase2Initialized, CheckpointPhase2Closed, CheckpointPhase2BeaconRecorded, CheckpointFinalCandidateRecorded, CheckpointReleaseReviewRecorded, CheckpointFinalReleaseRecorded}
 	for _, kind := range stages {
 		record := checkpointSigned("lifecycle/" + string(kind))
 		evidence := []ArtifactRef{}
-		if kind != CheckpointPhase1Closed && kind != CheckpointPhase2Closed {
+		if kind != CheckpointPhase1Closed && kind != CheckpointPhase2Closed && kind != CheckpointReleaseReviewRecorded {
 			evidence = append(evidence, checkpointArtifact("lifecycle/"+string(kind)+".bin", "payload"))
 		}
 		if kind == CheckpointFinalReleaseRecorded {
@@ -166,6 +166,19 @@ func TestCheckpointV4FullStructuralLifecycle(t *testing.T) {
 			bad.Transition.ReplayVerification = nil
 			if err := ValidateCheckpointTransitionV4(c, bad); err == nil {
 				t.Fatal("missing final replay claim accepted")
+			}
+		case CheckpointReleaseReviewRecorded:
+			next.Progress.ReleaseReview = &record
+			lateAudit := checkpointSigned("audits/late")
+			lateIncident := checkpointSigned("governance/late")
+			for _, tx := range []CheckpointTransitionV4{
+				{Kind: CheckpointAuditRecorded, Record: &lateAudit, Evidence: []ArtifactRef{}},
+				{Kind: CheckpointIncidentRecorded, Record: &lateIncident, Evidence: checkpointArtifacts(checkpointArtifact("governance/late.txt", "late"))},
+			} {
+				late := nextCheckpointV4(t, next, tx)
+				if err := ValidateCheckpointTransitionV4(next, late); err == nil {
+					t.Fatalf("%s accepted after release review", tx.Kind)
+				}
 			}
 		case CheckpointFinalReleaseRecorded:
 			next.Progress.FinalRelease = &record

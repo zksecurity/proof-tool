@@ -29,7 +29,7 @@ func recordableCheckpointKindV4(kind CheckpointTransitionKind) bool {
 		CheckpointBeaconEvidenceRecorded, CheckpointAuditRecorded, CheckpointIncidentRecorded,
 		CheckpointPhase1Closed, CheckpointPhase1BeaconRecorded, CheckpointPhase1Sealed,
 		CheckpointPhase2Initialized, CheckpointPhase2Closed, CheckpointPhase2BeaconRecorded,
-		CheckpointFinalCandidateRecorded, CheckpointFinalReleaseRecorded, CheckpointAborted:
+		CheckpointFinalCandidateRecorded, CheckpointReleaseReviewRecorded, CheckpointFinalReleaseRecorded, CheckpointAborted:
 		return true
 	default:
 		return false
@@ -97,6 +97,8 @@ func PrepareRecordedCheckpointV4(options RecordedCheckpointV4Options) (RecordedC
 		}
 		next.Transition.ReplayVerification = &CheckpointReplayVerificationV4{Method: CoordinatorReplayReleaseV1, ToolBinary: running.ToolBinary}
 		next.Progress.FinalCandidate = &options.Record
+	case CheckpointReleaseReviewRecorded:
+		next.Progress.ReleaseReview = &options.Record
 	case CheckpointFinalReleaseRecorded:
 		next.Progress.FinalRelease = &options.Record
 	case CheckpointAborted:

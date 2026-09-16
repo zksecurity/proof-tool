@@ -376,6 +376,36 @@ func PrepareCheckpointV4(options CheckpointPreparationV4) ([]byte, error) {
 		}
 		return MarshalCanonical(c)
 	}
+	if c.Transition.Kind == CheckpointReleaseReviewRecorded {
+		if previous == nil || previous.Progress.FinalCandidate == nil || previous.Progress.ReleaseReview != nil || c.Transition.Record == nil ||
+			c.Transition.Record.Record.Name != OperationalEvidenceBundleFile || c.Transition.Record.Signature.Name != OperationalEvidenceSignatureFile {
+			return nil, errors.New("release review requires the canonical signed operational bundle after one frozen candidate")
+		}
+		bundleBytes, signatureBytes, err := reader.pair(*c.Transition.Record)
+		if err != nil {
+			return nil, err
+		}
+		var bundle OperationalEvidenceBundle
+		if err := VerifySignedRecord(bundleBytes, signatureBytes, &bundle, d.Coordinator.KeyID, trusted.CoordinatorPublicKey); err != nil {
+			return nil, err
+		}
+		assembledAt, err := time.Parse(time.RFC3339Nano, bundle.AssembledAt)
+		if err != nil {
+			return nil, errors.New("operational bundle has an invalid assembly time")
+		}
+		derived, err := deriveOperationalBundleV4(reader, trusted, db, evidenceAncestry, assembledAt)
+		if err != nil {
+			return nil, err
+		}
+		canonical, err := MarshalCanonical(derived)
+		if err != nil {
+			return nil, err
+		}
+		if !bytes.Equal(canonical, bundleBytes) {
+			return nil, errors.New("signed operational bundle differs from the exact final-candidate checkpoint")
+		}
+		return MarshalCanonical(c)
+	}
 	if c.Transition.Kind == CheckpointAuditRecorded || c.Transition.Kind == CheckpointFinalReleaseRecorded {
 		refs := append([]SignedArtifactRefs{}, evidenceAncestry.audits...)
 		if c.Transition.Kind == CheckpointAuditRecorded {

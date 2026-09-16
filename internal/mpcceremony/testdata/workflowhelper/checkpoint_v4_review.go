@@ -226,9 +226,9 @@ func runCheckpointV4Review(root string, trust m.TrustPaths, d m.CeremonyDefiniti
 	if err != nil {
 		return err
 	}
-	if result, err := m.VerifyReleaseReviewV4(trust, root, newHead, bundle, at); err == nil || !strings.Contains(err.Error(), "signed bundle does not match the exact review checkpoint") || result.CeremonyID != "" {
-		return fmt.Errorf("stale bundle review: %v", err)
+	if result, err := m.VerifyReleaseReviewV4(trust, root, newHead, bundle, at); err == nil || !strings.Contains(err.Error(), "cannot add an incident after freezing release review") || result.CeremonyID != "" {
+		return fmt.Errorf("post-review incident accepted: %v", err)
 	}
-	fmt.Println("V4 final review passed: no contribution replay input, deterministic exact binding, stale bundle and changed files rejected")
+	fmt.Println("V4 final review passed: no contribution replay input, deterministic exact binding, changed files and post-review evidence rejected")
 	return nil
 }

@@ -104,8 +104,11 @@ func verifyReleaseReviewV4(trust TrustPaths, artifactRoot string, head, bundleRe
 	if err != nil {
 		return ReleaseReviewV4{}, err
 	}
-	if a.head.Progress.Terminal != nil || a.head.Progress.FinalRelease != nil || a.finalCandidateCheckpoint == nil {
-		return ReleaseReviewV4{}, errors.New("review requires an unreleased, unterminated final candidate")
+	if a.head.Progress.Terminal != nil || a.head.Progress.FinalRelease != nil || a.finalCandidateCheckpoint == nil || a.head.Progress.ReleaseReview == nil {
+		return ReleaseReviewV4{}, errors.New("review requires an unreleased final candidate and its signed operational bundle checkpoint")
+	}
+	if *a.head.Progress.ReleaseReview != bundleRefs {
+		return ReleaseReviewV4{}, errors.New("review bundle differs from the exact signed checkpoint")
 	}
 	raw, sig, err := reader.pair(*a.finalCandidateCheckpoint)
 	if err != nil {

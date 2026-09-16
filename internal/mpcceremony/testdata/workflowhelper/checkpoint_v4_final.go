@@ -549,6 +549,15 @@ func runCheckpointV4Final(output, root string, trust m.TrustPaths, circuit *m.Co
 	if _, err = m.VerifyOperationalEvidenceBundle(m.VerifyOperationalEvidenceOptions{Definition: d, CoordinatorPublicKey: coordinator.Public().(ed25519.PublicKey), EvidenceRoot: root, BundleBytes: bb, BundleSignatureBytes: sig, Phase1Close: first, Phase2Close: second}); err != nil {
 		return err
 	}
+	next(m.CheckpointTransitionV4{Kind: m.CheckpointReleaseReviewRecorded, Record: &brs, Evidence: []m.ArtifactRef{}})
+	c.Progress.ReleaseReview = &brs
+	if err = commit(); err != nil {
+		return err
+	}
+	checkpoint, err = headRefs()
+	if err != nil {
+		return err
+	}
 	fmt.Println("V4 operational bundle passed: deterministic checkpoint-only assembly, all roster enrollments, original bundle verifier, corruption rejected")
 	if err := runCheckpointV4Review(root, trust, d, *c, checkpoint, brs, coordinator); err != nil {
 		return err

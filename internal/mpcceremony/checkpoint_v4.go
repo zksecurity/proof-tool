@@ -21,6 +21,7 @@ const (
 	CheckpointWitnessRecorded          CheckpointTransitionKind = "witness-recorded"
 	CheckpointBeaconEvidenceRecorded   CheckpointTransitionKind = "beacon-evidence-recorded"
 	CheckpointAuditRecorded            CheckpointTransitionKind = "audit-recorded"
+	CheckpointReleaseReviewRecorded    CheckpointTransitionKind = "release-review-recorded"
 	CheckpointIncidentRecorded         CheckpointTransitionKind = "incident-recorded"
 	CheckpointAborted                  CheckpointTransitionKind = "ceremony-aborted"
 	CheckpointRestarted                CheckpointTransitionKind = "ceremony-restarted"
@@ -37,6 +38,7 @@ type CheckpointProgressV4 struct {
 	Phase2Closure  *SignedArtifactRefs   `json:"phase2_closure,omitempty"`
 	Phase2Beacon   *SignedArtifactRefs   `json:"phase2_beacon,omitempty"`
 	FinalCandidate *SignedArtifactRefs   `json:"final_candidate,omitempty"`
+	ReleaseReview  *SignedArtifactRefs   `json:"release_review,omitempty"`
 	FinalRelease   *SignedArtifactRefs   `json:"final_release,omitempty"`
 	Terminal       *CheckpointTerminalV4 `json:"terminal,omitempty"`
 }
@@ -176,7 +178,7 @@ func (c CheckpointV4) Validate() error {
 		}
 		refs = append(refs, c.Progress.Phase2.HeadPayload, c.Progress.Phase2.Chain.Record, c.Progress.Phase2.Chain.Signature)
 	}
-	stages := []*SignedArtifactRefs{c.Progress.Phase1Closure, c.Progress.Phase1Beacon, c.Progress.Phase1Seal, c.Progress.Phase2Closure, c.Progress.Phase2Beacon, c.Progress.FinalCandidate, c.Progress.FinalRelease}
+	stages := []*SignedArtifactRefs{c.Progress.Phase1Closure, c.Progress.Phase1Beacon, c.Progress.Phase1Seal, c.Progress.Phase2Closure, c.Progress.Phase2Beacon, c.Progress.FinalCandidate, c.Progress.ReleaseReview, c.Progress.FinalRelease}
 	missing := false
 	for i, stage := range stages {
 		if stage == nil {
@@ -359,6 +361,10 @@ func (t CheckpointTransitionV4) Validate() error {
 			if len(t.Evidence) == 0 {
 				return errors.New("final transition requires its closed file inventory")
 			}
+		case CheckpointReleaseReviewRecorded:
+			if len(t.Evidence) != 0 {
+				return errors.New("release review transition adds only the signed operational bundle")
+			}
 		default:
 			return errors.New("unsupported v4 checkpoint transition")
 		}
@@ -492,6 +498,9 @@ func ValidateCheckpointTransitionV4(previous, next CheckpointV4) error {
 		if previous.Progress.FinalRelease != nil {
 			return errors.New("cannot record governance after final release")
 		}
+		if previous.Progress.ReleaseReview != nil && t.Kind == CheckpointIncidentRecorded {
+			return errors.New("cannot add an incident after freezing release review; abort or restart instead")
+		}
 		want := previous.Progress
 		if t.Kind != CheckpointIncidentRecorded {
 			want.Terminal = &CheckpointTerminalV4{Kind: governanceKindV4(t.Kind), Record: *t.Record, RestartDefinition: t.RestartDefinition}
@@ -513,6 +522,9 @@ func ValidateCheckpointTransitionV4(previous, next CheckpointV4) error {
 	if t.Kind == CheckpointEnrollmentRecorded || t.Kind == CheckpointMirrorRecorded || t.Kind == CheckpointWitnessRecorded || t.Kind == CheckpointBeaconEvidenceRecorded || t.Kind == CheckpointAuditRecorded {
 		if previous.Progress.FinalRelease != nil {
 			return errors.New("cannot add assurance evidence after final release")
+		}
+		if previous.Progress.ReleaseReview != nil {
+			return errors.New("cannot add assurance evidence after freezing release review")
 		}
 		if t.Kind == CheckpointAuditRecorded && (previous.Progress.FinalCandidate == nil || previous.AssurancePolicy.PassingCeremonyAudits == 0) {
 			return errors.New("audit evidence requires a frozen final candidate and enabled ceremony audits")
@@ -578,14 +590,19 @@ func ValidateCheckpointTransitionV4(previous, next CheckpointV4) error {
 			return errors.New("phase2 beacon requires its closure")
 		}
 		want.Phase2Beacon = t.Record
+	case CheckpointReleaseReviewRecorded:
+		if want.FinalCandidate == nil || want.ReleaseReview != nil || want.FinalRelease != nil {
+			return errors.New("release review requires one frozen candidate before final release")
+		}
+		want.ReleaseReview = t.Record
 	case CheckpointFinalCandidateRecorded:
 		if want.Phase2Beacon == nil || want.FinalCandidate != nil {
 			return errors.New("final candidate requires both completed phases")
 		}
 		want.FinalCandidate = t.Record
 	case CheckpointFinalReleaseRecorded:
-		if want.FinalCandidate == nil || want.FinalRelease != nil {
-			return errors.New("final release requires a frozen final candidate")
+		if want.FinalCandidate == nil || want.ReleaseReview == nil || want.FinalRelease != nil {
+			return errors.New("final release requires a frozen final candidate and signed release review")
 		}
 		want.FinalRelease = t.Record
 	default:

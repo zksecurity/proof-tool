@@ -146,7 +146,7 @@ func checkpointNeedsCircuitV4(kind m.CheckpointTransitionKind) (bool, error) {
 	case m.CheckpointPhase1CandidateAllocated, m.CheckpointPhase2CandidateAllocated,
 		m.CheckpointDeliveryRetired, m.CheckpointDeliveryReallocated, m.CheckpointContributionRejected,
 		m.CheckpointPhase1Closed, m.CheckpointPhase2Closed, m.CheckpointPhase1BeaconRecorded, m.CheckpointPhase2BeaconRecorded,
-		m.CheckpointFinalReleaseRecorded, m.CheckpointEnrollmentRecorded, m.CheckpointMirrorRecorded,
+		m.CheckpointReleaseReviewRecorded, m.CheckpointFinalReleaseRecorded, m.CheckpointEnrollmentRecorded, m.CheckpointMirrorRecorded,
 		m.CheckpointWitnessRecorded, m.CheckpointBeaconEvidenceRecorded, m.CheckpointAuditRecorded,
 		m.CheckpointIncidentRecorded, m.CheckpointAborted, m.CheckpointRestarted:
 		return false, nil

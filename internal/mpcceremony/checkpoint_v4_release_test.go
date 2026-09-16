@@ -119,11 +119,11 @@ func TestFinalReleaseV4SequenceCapacity(t *testing.T) {
 // Synthetic capacity boundary; the real fixture separately checks semantic
 // authoring. Extra references here stand for previously accepted evidence.
 func TestFinalReleaseV4InventoryCapacity(t *testing.T) {
-	d, c, _, _ := checkpointFixtureV4(t)
+	_, c, _, _ := checkpointFixtureV4(t)
 	c.Sequence = 1
 	previous := checkpointSigned("checkpoints/previous")
 	c.PreviousCheckpoint = &previous
-	for _, dst := range []**SignedArtifactRefs{&c.Progress.Phase1Closure, &c.Progress.Phase1Beacon, &c.Progress.Phase1Seal, &c.Progress.Phase2Closure, &c.Progress.Phase2Beacon, &c.Progress.FinalCandidate} {
+	for _, dst := range []**SignedArtifactRefs{&c.Progress.Phase1Closure, &c.Progress.Phase1Beacon, &c.Progress.Phase1Seal, &c.Progress.Phase2Closure, &c.Progress.Phase2Beacon, &c.Progress.FinalCandidate, &c.Progress.ReleaseReview} {
 		pair := checkpointSigned(fmt.Sprintf("stages/%d", len(c.AcceptedArtifacts)))
 		*dst = &pair
 		c.AcceptedArtifacts = appendCheckpointArtifacts(c.AcceptedArtifacts, pair.Record, pair.Signature)
@@ -132,7 +132,7 @@ func TestFinalReleaseV4InventoryCapacity(t *testing.T) {
 	payload := checkpointArtifact("phase2/payload.bin", "payload")
 	c.Progress.Phase2 = &CheckpointPhaseState{Phase: Phase2, HeadRecordID: NewDigest([]byte("p2")).SHA256, HeadPayload: payload, Chain: p2}
 	c.AcceptedArtifacts = appendCheckpointArtifacts(c.AcceptedArtifacts, p2.Record, p2.Signature, payload)
-	c.Transition = CheckpointTransitionV4{Kind: CheckpointFinalCandidateRecorded, Record: c.Progress.FinalCandidate, Evidence: []ArtifactRef{payload}, ReplayVerification: &CheckpointReplayVerificationV4{Method: CoordinatorReplayReleaseV1, ToolBinary: d.Software.ToolBinary}}
+	c.Transition = CheckpointTransitionV4{Kind: CheckpointReleaseReviewRecorded, Record: c.Progress.ReleaseReview, Evidence: []ArtifactRef{}}
 	for len(c.AcceptedArtifacts) < MaxCheckpointArtifacts {
 		c.AcceptedArtifacts = append(c.AcceptedArtifacts, checkpointArtifact(fmt.Sprintf("padding/%05d", len(c.AcceptedArtifacts)), "evidence"))
 	}
