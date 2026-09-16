@@ -144,7 +144,7 @@ func TestCheckpointV4CLIInitialPrepareSignInspectAndMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	refs := []m.ArtifactRef{definition.Record, definition.Signature, chainRefs.Record, chainRefs.Signature, payload}
+	refs := []m.ArtifactRef{definition.Record, definition.Signature, d.Circuit.R1CS, chainRefs.Record, chainRefs.Signature, payload}
 	slices.SortFunc(refs, func(a, b m.ArtifactRef) int { return strings.Compare(a.Name, b.Name) })
 	proposal := m.CheckpointV4{Schema: m.CheckpointSchemaV4, Workflow: m.StorageFirstWorkflowV2, CeremonyID: d.CeremonyID, Definition: definition, AssurancePolicy: d.AssurancePolicy, ReleaseVerification: m.CoordinatorReplayReleaseV1,
 		Transition: m.CheckpointTransitionV4{Kind: m.CheckpointInitial, Evidence: []m.ArtifactRef{}}, Progress: m.CheckpointProgressV4{Phase1: m.CheckpointPhaseState{Phase: m.Phase1, HeadRecordID: head, HeadPayload: payload, Chain: chainRefs}}, AcceptedArtifacts: refs, Deliveries: []m.DeliverySlotV2{}}

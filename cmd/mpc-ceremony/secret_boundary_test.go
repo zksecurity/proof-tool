@@ -45,7 +45,10 @@ func TestProductionCeremonySourceAndBinaryExcludeWalletSecretAPIs(t *testing.T) 
 	}
 
 	binary := filepath.Join(t.TempDir(), "mpc-ceremony")
-	build := exec.Command("go", "build", "-mod=vendor", "-trimpath", "-o", binary, "./cmd/mpc-ceremony")
+	// This test inspects the compiled binary's secret boundary; it is not a
+	// vendoring check. Use module mode so the assertion remains portable when a
+	// source export intentionally omits a synchronized vendor tree.
+	build := exec.Command("go", "build", "-mod=mod", "-trimpath", "-o", binary, "./cmd/mpc-ceremony")
 	build.Dir = root
 	build.Env = append(os.Environ(), "GOWORK=off")
 	if output, err := build.CombinedOutput(); err != nil {

@@ -344,10 +344,14 @@ func TestEvidenceV4CommandsOnRealArtifacts(t *testing.T) {
 	if !bytes.Equal(read(finalCandidateCheckpoint), read(publicationCopy)) {
 		t.Fatal("cross-platform publication verification changed checkpoint bytes")
 	}
-	signingArgs := append([]string{}, publicationArgs...)
+	// Rebuild the signing invocation explicitly. Reusing publicationArgs used to
+	// overwrite the coordinator-key value instead of its old --out destination,
+	// leaving this cross-platform boundary test unable to exercise signing.
+	signingArgs := append([]string{}, publicationArgs[:len(publicationArgs)-2]...)
 	signingArgs[3] = "sign-v4"
-	signingArgs = append(signingArgs, "--coordinator-signing-key", filepath.Join(runRoot, "identity-keys/coordinator.ed25519.private.hex"))
-	signingArgs[len(signingArgs)-3] = filepath.Join(t.TempDir(), "checkpoint.sig")
+	signingArgs = append(signingArgs,
+		"--coordinator-signing-key", filepath.Join(runRoot, "identity-keys/coordinator.ed25519.private.hex"),
+		"--out", filepath.Join(t.TempDir(), "checkpoint.sig"))
 	if b, err := exec.Command(cli, signingArgs...).CombinedOutput(); err == nil || !bytes.Contains(b, []byte("executable performing this replay")) {
 		t.Fatalf("cross-platform executable re-signed another executable's replay claim: %v %s", err, b)
 	}
