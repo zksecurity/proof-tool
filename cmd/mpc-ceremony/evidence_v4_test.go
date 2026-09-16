@@ -352,8 +352,17 @@ func TestEvidenceV4CommandsOnRealArtifacts(t *testing.T) {
 	signingArgs = append(signingArgs,
 		"--coordinator-signing-key", filepath.Join(runRoot, "identity-keys/coordinator.ed25519.private.hex"),
 		"--out", filepath.Join(t.TempDir(), "checkpoint.sig"))
-	if b, err := exec.Command(cli, signingArgs...).CombinedOutput(); err == nil || !bytes.Contains(b, []byte("executable performing this replay")) {
-		t.Fatalf("cross-platform executable re-signed another executable's replay claim: %v %s", err, b)
+	var signedProposal m.CheckpointV4
+	if err := m.UnmarshalCanonical(read(finalCandidateCheckpoint), &signedProposal); err != nil {
+		t.Fatal(err)
+	}
+	b, err := exec.Command(cli, signingArgs...).CombinedOutput()
+	if signedProposal.Transition.Kind == m.CheckpointFinalCandidateRecorded {
+		if err == nil || !bytes.Contains(b, []byte("executable performing this replay")) {
+			t.Fatalf("cross-platform executable re-signed another executable's replay claim: %v %s", err, b)
+		}
+	} else if err != nil {
+		t.Fatalf("cross-platform signing of non-replay checkpoint: %v %s", err, b)
 	}
 	metadataResult, err := execute(CommandCheckpointInspectEnrollmentsV4, o)
 	if err != nil {
