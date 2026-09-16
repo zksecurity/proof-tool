@@ -3,8 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
+	"os"
 	"testing"
+
+	"golang.org/x/crypto/blake2b"
 
 	m "proof-tool/internal/mpcceremony"
 )
@@ -46,6 +51,25 @@ func TestDefinitionProtocolAuthenticatedDispatch(t *testing.T) {
 		}
 		if p == nil || p.DefinitionSchema != d.Schema || p.StorageWorkflow != want || p.ReleaseVerification != d.ReleaseVerification || p.Definition.CeremonyID != d.CeremonyID || result.DefinitionInspection != nil {
 			t.Fatalf("unexpected projection: %+v", result)
+		}
+		for flag, ref := range map[string]m.ArtifactRef{"--ceremony": p.DefinitionRefs.Record, "--ceremony-signature": p.DefinitionRefs.Signature} {
+			var path string
+			for i := range args {
+				if args[i] == flag {
+					path = args[i+1]
+				}
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantName := "ceremony.json"
+			if flag == "--ceremony-signature" {
+				wantName = "ceremony.sig"
+			}
+			if ref.Name != wantName || ref.Digest.Size != int64(len(data)) || ref.Digest.SHA256 != fmt.Sprintf("sha256:%x", sha256.Sum256(data)) || ref.Digest.Blake2b256 != fmt.Sprintf("blake2b256:%x", blake2b.Sum256(data)) {
+				t.Fatalf("reference does not bind exact authenticated bytes: %+v", ref)
+			}
 		}
 		out.Reset()
 		stderr.Reset()

@@ -53,6 +53,7 @@ type TrustPaths struct {
 // externally supplied coordinator trust anchor.
 type TrustedCeremony struct {
 	Definition           CeremonyDefinition
+	DefinitionRefs       SignedArtifactRefs
 	CoordinatorPublicKey ed25519.PublicKey
 	RunningSoftware      SoftwareBinding
 }
@@ -276,7 +277,11 @@ func LoadSignedDefinition(paths TrustPaths) (*TrustedCeremony, error) {
 		return nil, errors.New("external coordinator public key does not match the signed coordinator identity")
 	}
 	return &TrustedCeremony{
-		Definition:           definition,
+		Definition: definition,
+		DefinitionRefs: SignedArtifactRefs{
+			Record:    ArtifactRef{Name: "ceremony.json", Digest: modelDigest(artifactDigestBytes(definitionBytes))},
+			Signature: ArtifactRef{Name: "ceremony.sig", Digest: modelDigest(artifactDigestBytes(signatureBytes))},
+		},
 		CoordinatorPublicKey: bytes.Clone(publicKey),
 	}, nil
 }

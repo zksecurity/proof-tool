@@ -11,6 +11,7 @@ type DefinitionProtocolInspection struct {
 	StorageWorkflow     string               `json:"storage_workflow"`
 	ReleaseVerification string               `json:"release_verification"`
 	Definition          DefinitionInspection `json:"definition"`
+	DefinitionRefs      m.SignedArtifactRefs `json:"definition_refs"`
 }
 
 func executeInspectDefinitionProtocol(o InspectDefinitionOptions) (CommandResult, error) {
@@ -27,6 +28,7 @@ func executeInspectDefinitionProtocol(o InspectDefinitionOptions) (CommandResult
 		Schema:           "proof-tool-mpc-definition-protocol-inspection-v1",
 		DefinitionSchema: d.Schema, StorageWorkflow: workflow,
 		ReleaseVerification: d.ReleaseVerification, Definition: inspectDefinition(d),
+		DefinitionRefs: trusted.DefinitionRefs,
 	}
 	return CommandResult{CeremonyID: d.CeremonyID, Summary: "Authenticated definition protocol and schedules; no backend state or contribution mathematics verified.", DefinitionProtocolInspection: &inspection}, nil
 }
