@@ -42,6 +42,7 @@ const (
 	CommandReleaseReviewV4                  Command = "release review-v4"
 	CommandOpsPrepareMirrorReceipt          Command = "ops prepare-mirror-receipt"
 	CommandOpsPreparePublicWitnessReceipt   Command = "ops prepare-public-witness-receipt"
+	CommandOpsPrepareBeaconEvidence         Command = "ops prepare-beacon-evidence"
 	CommandOpsExportSigning                 Command = "ops export-signing"
 	CommandOpsPrepareEnrollment             Command = "ops prepare-enrollment"
 	CommandOpsPrepareBundle                 Command = "ops prepare-bundle"
@@ -310,6 +311,18 @@ type OpsPreparePublicWitnessReceiptOptions struct {
 	PublicationLocation            string
 	ObservedAt                     string
 	OutDir                         string
+}
+
+type OpsPrepareBeaconEvidenceOptions struct {
+	CeremonyPath             string
+	CeremonySignaturePath    string
+	CoordinatorPublicKeyFile string
+	TranscriptRoot           string
+	ClosurePath              string
+	ClosureSignaturePath     string
+	ObservationsPath         string
+	RecordedAt               string
+	OutDir                   string
 }
 
 type OpsImportSignatureOptions struct {

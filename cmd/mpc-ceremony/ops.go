@@ -4,19 +4,41 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
+	"time"
 
 	"proof-tool/internal/mpcceremony"
 )
 
 const maxOperationalRecordBytes = 16 << 20
+
+const beaconObservationInputSchema = "proof-tool-mpc-beacon-observation-input-v1"
+
+type beaconObservationInput struct {
+	RelayID         string `json:"relay_id"`
+	OperatorID      string `json:"operator_id"`
+	Endpoint        string `json:"endpoint"`
+	RawResponseName string `json:"raw_response_name"`
+	RetrievedAt     string `json:"retrieved_at"`
+}
+
+type beaconObservationInputSet struct {
+	Schema       string                   `json:"schema"`
+	Observations []beaconObservationInput `json:"observations"`
+}
 
 func executeOpsPreparePublicWitnessReceipt(options OpsPreparePublicWitnessReceiptOptions) (CommandResult, error) {
 	trusted, err := mpcceremony.LoadSignedDefinition(mpcceremony.TrustPaths{
@@ -90,6 +112,100 @@ func executeOpsPreparePublicWitnessReceipt(options OpsPreparePublicWitnessReceip
 			"signing_request": requestPath,
 		},
 	}, nil
+}
+
+func executeOpsPrepareBeaconEvidence(options OpsPrepareBeaconEvidenceOptions) (CommandResult, error) {
+	trusted, err := mpcceremony.LoadSignedDefinition(mpcceremony.TrustPaths{
+		DefinitionPath:           options.CeremonyPath,
+		DefinitionSignaturePath:  options.CeremonySignaturePath,
+		CoordinatorPublicKeyPath: options.CoordinatorPublicKeyFile,
+	})
+	if err != nil {
+		return CommandResult{}, err
+	}
+	closure, _, err := mpcceremony.LoadSignedCloseExact(trusted, options.TranscriptRoot, options.ClosurePath, options.ClosureSignaturePath)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	recordedAt, err := time.Parse(time.RFC3339Nano, options.RecordedAt)
+	if err != nil || recordedAt.IsZero() || recordedAt.Location() != time.UTC {
+		return CommandResult{}, errors.New("recorded-at must be a nonzero canonical UTC timestamp")
+	}
+	rawInputs, err := readRegularOperationalFile(options.ObservationsPath, 1<<20)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(rawInputs))
+	decoder.DisallowUnknownFields()
+	var inputs beaconObservationInputSet
+	if err := decoder.Decode(&inputs); err != nil {
+		return CommandResult{}, fmt.Errorf("decode beacon observations: %w", err)
+	}
+	if decoder.Decode(&struct{}{}) != io.EOF {
+		return CommandResult{}, errors.New("beacon observations contain trailing JSON")
+	}
+	if inputs.Schema != beaconObservationInputSchema || len(inputs.Observations) < 2 || len(inputs.Observations) > 16 {
+		return CommandResult{}, errors.New("beacon observations require the supported schema and between 2 and 16 entries")
+	}
+	observations := make([]mpcceremony.RelayObservation, 0, len(inputs.Observations))
+	responses := make(map[string][]byte, len(inputs.Observations))
+	for index, input := range inputs.Observations {
+		endpoint, err := url.Parse(input.Endpoint)
+		if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
+			return CommandResult{}, fmt.Errorf("observation %d endpoint must be a credential-free HTTPS URL without query or fragment", index)
+		}
+		name := filepath.ToSlash(filepath.Clean(filepath.FromSlash(input.RawResponseName)))
+		if input.RawResponseName == "" || name != input.RawResponseName || filepath.IsAbs(filepath.FromSlash(name)) || name == "." || name == ".." || strings.HasPrefix(name, "../") {
+			return CommandResult{}, fmt.Errorf("observation %d raw response name must be a clean relative artifact name", index)
+		}
+		raw, err := openCheckpointArtifactBytes(options.TranscriptRoot, name, 1<<20)
+		if err != nil {
+			return CommandResult{}, fmt.Errorf("observation %d raw response: %w", index, err)
+		}
+		retrievedAt, err := time.Parse(time.RFC3339Nano, input.RetrievedAt)
+		if err != nil || retrievedAt.IsZero() || retrievedAt.Location() != time.UTC {
+			return CommandResult{}, fmt.Errorf("observation %d retrieved_at must be a nonzero canonical UTC timestamp", index)
+		}
+		randomness, err := mpcceremony.VerifyDrandBeaconResponse(trusted.Definition.BeaconPolicy, closure.Record.BeaconRound, raw)
+		if err != nil {
+			return CommandResult{}, fmt.Errorf("observation %d drand response: %w", index, err)
+		}
+		hash := sha256.Sum256([]byte(input.Endpoint))
+		observations = append(observations, mpcceremony.RelayObservation{
+			RelayID:            input.RelayID,
+			OperatorID:         input.OperatorID,
+			EndpointSHA256:     "sha256:" + hex.EncodeToString(hash[:]),
+			RawResponse:        mpcceremony.ArtifactRef{Name: name, Digest: mpcceremony.NewDigest(raw)},
+			RetrievedAt:        input.RetrievedAt,
+			VerifiedRandomness: randomness,
+		})
+		if _, duplicate := responses[input.RelayID]; duplicate {
+			return CommandResult{}, fmt.Errorf("observation %d duplicates relay_id", index)
+		}
+		responses[input.RelayID] = raw
+	}
+	sort.Slice(observations, func(i, j int) bool { return observations[i].RelayID < observations[j].RelayID })
+	record, err := mpcceremony.NewMultiRelayBeaconEvidence(trusted.Definition, closure.Record, observations, responses, options.RecordedAt)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	canonical, err := mpcceremony.MarshalCanonical(record)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	request, err := mpcceremony.NewOperationalSigningRequest(mpcceremony.RecordBeaconEvidence, canonical)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	requestBytes, err := mpcceremony.MarshalCanonical(request)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	canonicalPath, requestPath, err := writeOperationalSigningExport(options.OutDir, canonical, requestBytes)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	return CommandResult{CeremonyID: trusted.Definition.CeremonyID, Phase: string(closure.Record.Phase), Summary: "verified distinct-operator drand responses and exported canonical multi-relay evidence", Outputs: map[string]string{"canonical": canonicalPath, "signing_request": requestPath}}, nil
 }
 
 func executeOpsPrepareMirrorReceipt(options OpsPrepareMirrorReceiptOptions) (CommandResult, error) {
