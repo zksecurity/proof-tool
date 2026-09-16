@@ -62,7 +62,11 @@ func InspectContributionInventoryV4(trust TrustPaths, predecessor PhaseTranscrip
 
 func inspectContributionInventoryV4(r *checkpointReaderV4, d CeremonyDefinition, chain Chain, scope ContributionScope) (ContributionInventoryInspectionV4, error) {
 	var zero ContributionInventoryInspectionV4
-	names := []string{"attestation.json", "attestation.sig", "erasure.json", "erasure.sig"}
+	generated, attestation, err := inspectComputationOutputV4(r, d, chain, scope)
+	if err != nil {
+		return zero, err
+	}
+	names := []string{"erasure.json", "erasure.sig"}
 	data := map[string][]byte{}
 	for _, name := range names {
 		limit := int64(maxSignedRecordBytes)
@@ -83,10 +87,6 @@ func inspectContributionInventoryV4(r *checkpointReaderV4, d CeremonyDefinition,
 	if err != nil {
 		return zero, err
 	}
-	var attestation ContributionAttestation
-	if err := VerifySignedRecord(data["attestation.json"], data["attestation.sig"], &attestation, participant.Identity.KeyID, key); err != nil {
-		return zero, err
-	}
 	var erasure ErasureAttestation
 	if err := VerifySignedRecord(data["erasure.json"], data["erasure.sig"], &erasure, participant.Identity.KeyID, key); err != nil {
 		return zero, err
@@ -94,30 +94,9 @@ func inspectContributionInventoryV4(r *checkpointReaderV4, d CeremonyDefinition,
 	if err := ValidateErasureForContribution(attestation, erasure); err != nil {
 		return zero, err
 	}
-	previous, err := chain.HeadPayload()
-	if err != nil {
-		return zero, err
-	}
-	if attestation.CeremonyID != scope.CeremonyID || attestation.Phase != scope.Phase || attestation.PhaseID != chain.PhaseID || attestation.Index != scope.Index || attestation.ParticipantID != scope.ParticipantID || attestation.ParticipantKeyID != participant.Identity.KeyID || attestation.PreviousAcceptanceID != scope.ParentHeadID || attestation.PreviousPayload != previous || attestation.OutputPayload.Name != contributionLogicalNames(scope.Phase, int(scope.Index)).Payload {
-		return zero, errors.New("candidate attestation differs from the exact expected predecessor and participant")
-	}
-	if err := validateAttestationSoftwareBinding(d, attestation); err != nil {
-		return zero, err
-	}
-	if err := validateContributionChronology(d, chain, attestation); err != nil {
-		return zero, err
-	}
-	output := attestation.OutputPayload
-	output.Name = "contribution.bin"
-	if _, err := r.read(output, MaxArtifactSize, false); err != nil {
-		return zero, err
-	}
-	computed := CandidateInventory{Schema: CandidateInventorySchemaV1, Scope: scope, Files: []ArtifactRef{
-		{Name: "attestation.json", Digest: NewDigest(data["attestation.json"])},
-		{Name: "attestation.sig", Digest: NewDigest(data["attestation.sig"])}, output,
-		{Name: "erasure.json", Digest: NewDigest(data["erasure.json"])},
-		{Name: "erasure.sig", Digest: NewDigest(data["erasure.sig"])},
-	}}
+	computed := CandidateInventory{Schema: CandidateInventorySchemaV1, Scope: scope, Files: append(append([]ArtifactRef{}, generated.Files...),
+		ArtifactRef{Name: "erasure.json", Digest: NewDigest(data["erasure.json"])},
+		ArtifactRef{Name: "erasure.sig", Digest: NewDigest(data["erasure.sig"])})}
 	id, err := computed.ID()
 	if err != nil {
 		return zero, err

@@ -20,8 +20,12 @@ type ContributionInventoryInspectionV4 struct {
 }
 
 func parseContributionInventoryV4(args []string) (ContributionInventoryOptionsV4, error) {
+	return parseContributionInspectionV4("contribution-inventory-v4", args)
+}
+
+func parseContributionInspectionV4(name string, args []string) (ContributionInventoryOptionsV4, error) {
 	var o ContributionInventoryOptionsV4
-	fs := commandFlagSet("inspect contribution-inventory-v4")
+	fs := commandFlagSet("inspect " + name)
 	addCeremonyTrustFlags(fs, &o.CeremonyPath, &o.CeremonySignaturePath, &o.CoordinatorPublicKeyFile)
 	fs.StringVar(&o.TranscriptRoot, "transcript-root", "", "local transcript root")
 	fs.StringVar(&o.ChainPath, "chain", "", "exact signed predecessor chain")
@@ -35,22 +39,8 @@ func parseContributionInventoryV4(args []string) (ContributionInventoryOptionsV4
 }
 
 func executeContributionInventoryV4(o ContributionInventoryOptionsV4) (CommandResult, error) {
-	trusted, err := loadInspectionCeremony(o.InspectDefinitionOptions)
+	scope, err := expectedContributionInspectionScopeV4(o)
 	if err != nil {
-		return CommandResult{}, err
-	}
-	if err := m.VerifyRunningSoftwareForMode(trusted.Definition.Software, trusted.Definition.Mode); err != nil {
-		return CommandResult{}, err
-	}
-	raw, err := readRegularOperationalFile(o.ScopePath, 4096)
-	if err != nil {
-		return CommandResult{}, err
-	}
-	var scope m.ContributionScope
-	if err := m.UnmarshalCanonical(raw, &scope); err != nil {
-		return CommandResult{}, err
-	}
-	if err := scope.ValidateAssignment(trusted.Definition); err != nil {
 		return CommandResult{}, err
 	}
 	i, err := m.InspectContributionInventoryV4(trustPaths(o.CeremonyPath, o.CeremonySignaturePath, o.CoordinatorPublicKeyFile), m.PhaseTranscriptPaths{RootDir: o.TranscriptRoot, ChainPath: o.ChainPath, ChainSignaturePath: o.ChainSignaturePath}, scope, o.CandidateDir)
@@ -58,4 +48,26 @@ func executeContributionInventoryV4(o ContributionInventoryOptionsV4) (CommandRe
 		return CommandResult{}, err
 	}
 	return CommandResult{CeremonyID: i.Scope.CeremonyID, Phase: string(i.Scope.Phase), Summary: "Verified retained candidate signatures, exact file digests and expected predecessor. No contribution mathematics, acceptance, freshness or physical erasure verified.", ContributionInventoryV4: &ContributionInventoryInspectionV4{Schema: "proof-tool-mpc-contribution-inventory-inspection-v4", Depth: "candidate-signatures-and-digests", Inventory: i, SignaturesVerified: true, PayloadDigestVerified: true}}, nil
+}
+
+func expectedContributionInspectionScopeV4(o ContributionInventoryOptionsV4) (m.ContributionScope, error) {
+	var scope m.ContributionScope
+	trusted, err := loadInspectionCeremony(o.InspectDefinitionOptions)
+	if err != nil {
+		return scope, err
+	}
+	if err := m.VerifyRunningSoftwareForMode(trusted.Definition.Software, trusted.Definition.Mode); err != nil {
+		return scope, err
+	}
+	raw, err := readRegularOperationalFile(o.ScopePath, 4096)
+	if err != nil {
+		return scope, err
+	}
+	if err := m.UnmarshalCanonical(raw, &scope); err != nil {
+		return scope, err
+	}
+	if err := scope.ValidateAssignment(trusted.Definition); err != nil {
+		return scope, err
+	}
+	return scope, nil
 }

@@ -222,6 +222,10 @@ func parseInspectSubcommand(invocation Invocation, args []string) (Invocation, e
 		options, err := parseContributionInventoryV4(args[1:])
 		invocation.Command, invocation.Options = CommandInspectContributionInventoryV4, options
 		return invocation, wrapCommandError(err, "inspect", "contribution-inventory-v4")
+	case "computation-output-v4":
+		options, err := parseContributionInspectionV4("computation-output-v4", args[1:])
+		invocation.Command, invocation.Options = CommandInspectComputationOutputV4, options
+		return invocation, wrapCommandError(err, "inspect", "computation-output-v4")
 	case "definition":
 		options, err := parseInspectDefinition(args[1:])
 		invocation.Command, invocation.Options = CommandInspectDefinition, options

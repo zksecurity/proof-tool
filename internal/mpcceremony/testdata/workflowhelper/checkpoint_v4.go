@@ -214,6 +214,13 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 	if _, err = m.CreateContributionCandidate(m.ContributionFilesOptions{Trust: trust, Circuit: circuit, Phase: m.Phase1, Transcript: paths, ParticipantID: p.ID, ParticipantPrivateKeyPath: participantPath, Environment: environment, ContributedAt: "2023-08-23T15:03:00Z", CandidateDir: candidateDir}); err != nil {
 		return err
 	}
+	generated, err := m.InspectComputationOutputV4(trust, paths, scope, candidateDir)
+	if err != nil {
+		return err
+	}
+	if len(generated.Files) != 3 {
+		return errors.New("preliminary computation inspection did not return three files")
+	}
 	if _, err = m.CreateErasureAttestationFiles(m.CreateErasureAttestationFilesOptions{Trust: trust, ParticipantID: p.ID, ParticipantPrivateKeyPath: participantPath, CandidateDir: candidateDir, DestroyedAt: "2023-08-23T15:04:00Z"}); err != nil {
 		return err
 	}

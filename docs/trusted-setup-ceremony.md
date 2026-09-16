@@ -109,6 +109,14 @@ in-progress ceremony through a changed verifier policy.
 
 ## Experimental V4 retained-candidate inspection
 
+`inspect computation-output-v4` checks the three generated public files before
+cleanup signing: `attestation.json`, `attestation.sig` and `contribution.bin`.
+It checks the expected signed predecessor, participant, software and file bytes,
+but not cleanup or process exit. It returns no candidate inventory ID. This lets
+the controller recognize completed computation without rerunning it, then record
+and execute cleanup signing as a separate operation. The controller must verify
+the original container is absent before making that recovery decision.
+
 `inspect contribution-inventory-v4` reconstructs a retained contribution from
 its exact signed predecessor and expected turn. It returns a five-file inventory
 after computation and cleanup attestation, and a distinct seven-file inventory

@@ -76,7 +76,6 @@ func checkContributionInventoryExecutableV4(t *testing.T, executable, root strin
 	}
 	write("contribution.bin", payload)
 	sign("attestation", a, p.KeyID, key)
-	sign("erasure", e, p.KeyID, key)
 	scope := m.ContributionScope{CeremonyID: d.CeremonyID, Phase: m.Phase1, Index: 1, ParticipantID: p.ID, ParentHeadID: head}
 	b, err := m.MarshalCanonical(scope)
 	if err != nil {
@@ -84,6 +83,13 @@ func checkContributionInventoryExecutableV4(t *testing.T, executable, root strin
 	}
 	write("scope.json", b)
 	args := []string{"--format", "json", "inspect", "contribution-inventory-v4", "--ceremony", filepath.Join(root, "ceremony.json"), "--ceremony-signature", filepath.Join(root, "ceremony.sig"), "--coordinator-public-key-file", filepath.Join(root, "coordinator-public-key.hex"), "--transcript-root", root, "--chain", filepath.Join(root, "phase1/chain-0000.json"), "--chain-signature", filepath.Join(root, "phase1/chain-0000.sig"), "--scope", filepath.Join(dir, "scope.json"), "--candidate-dir", dir}
+	generatedArgs := append([]string{}, args...)
+	generatedArgs[3] = "computation-output-v4"
+	generated := runCheckpointCommandExecutable(t, executable, generatedArgs).ComputationOutputV4
+	if generated == nil || len(generated.Output.Files) != 3 || generated.CleanupVerified || generated.MathematicsReplayed || generated.PhysicalErasureVerified || generated.GlobalFreshnessVerified || !generated.SignaturesVerified || !generated.PayloadDigestVerified {
+		t.Fatalf("wrong preliminary CLI result %+v", generated)
+	}
+	sign("erasure", e, p.KeyID, key)
 	five := runCheckpointCommandExecutable(t, executable, args).ContributionInventoryV4
 	if five == nil || five.Inventory.Complete != nil || five.MathematicsReplayed || five.GlobalFreshnessVerified || five.PhysicalErasureVerified || !five.SignaturesVerified || !five.PayloadDigestVerified {
 		t.Fatalf("wrong CLI boundary %+v", five)
@@ -121,5 +127,7 @@ func checkContributionInventoryExecutableV4(t *testing.T, executable, root strin
 			badArgs[i+1] = filepath.Join(dir, "unapproved.sig")
 		}
 	}
+	assertCheckpointExecutableFails(t, executable, badArgs, "binary")
+	badArgs[3] = "computation-output-v4"
 	assertCheckpointExecutableFails(t, executable, badArgs, "binary")
 }

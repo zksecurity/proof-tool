@@ -64,6 +64,7 @@ Commands:
   inspect definition-protocol  Authenticate its protocol selector and schedules
   inspect chain        Authenticate and describe an accepted chain
   inspect contribution-inventory-v4  Reconstruct retained V4 candidate files
+  inspect computation-output-v4     Check generated files before cleanup signing
   inspect participant  Match an existing key to the participant roster
   inspect enrollment   Authenticate an operational enrollment
   inspect checkpoint   Authenticate a storage-first workflow checkpoint
@@ -197,6 +198,19 @@ backend progress or replay contributions. Failure must not trigger legacy fallba
 
 Authenticates the exact canonical ceremony definition against the out-of-band
 coordinator public key and reports its identity, mode, schedules, and circuit.
+`,
+	"inspect computation-output-v4": `Usage:
+  mpc-ceremony --format json inspect computation-output-v4 --ceremony FILE \
+    --ceremony-signature FILE --coordinator-public-key-file KEY \
+    --transcript-root DIR --chain FILE --chain-signature FILE \
+    --scope FILE --candidate-dir DIR
+
+Read-only. Checks attestation.json, attestation.sig and contribution.bin against
+the exact signed predecessor and canonical expected scope. No candidate inventory
+ID is returned. Extra files, including cleanup records, are not inspected here.
+Does not verify cleanup, process exit, mathematics, acceptance, freshness or
+physical erasure. The controller must check container absence separately before
+using this result to finish an interrupted computation operation.
 `,
 	"inspect contribution-inventory-v4": `Usage:
   mpc-ceremony --format json inspect contribution-inventory-v4 --ceremony FILE \
