@@ -51,6 +51,9 @@ func TestCheckpointCommitmentsSurviveUnrelatedEdges(t *testing.T) {
 	if len(turn.Allocations) != 1 || turn.Allocations[0].AttemptID != sequence[1].Transition.AttemptID || turn.Allocations[0].CheckpointSequence != 1 || turn.AcceptedChain == nil || turn.AcceptedChain.Pair != *sequence[2].Transition.Record {
 		t.Fatalf("incomplete turn: %+v", turn)
 	}
+	if sequence[2].PreviousCheckpoint == nil || turn.Allocations[0].Checkpoint != *sequence[2].PreviousCheckpoint {
+		t.Fatalf("allocation lost its exact signed checkpoint pair: %+v", turn.Allocations[0])
+	}
 	if _, err := os.Stat(filepath.Join(root, roster.Record.Name)); !os.IsNotExist(err) {
 		t.Fatal("unexpected enrollment bytes")
 	}
@@ -94,11 +97,11 @@ func TestTurnCommitmentBoundsV4(t *testing.T) {
 	for n := 0; n < MaxDeliveryAttemptsPerSubmissionV2; n++ {
 		tx.Sequence = uint64(MaxDeliveryAttemptsPerSubmissionV2 - n)
 		tx.Transition.AttemptID = fmt.Sprintf("%032x", n+1)
-		if err := collectTurnCommitmentV4(turns, tx); err != nil {
+		if err := collectTurnCommitmentV4(turns, tx, checkpointSigned(fmt.Sprintf("checkpoints/%04d", n))); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := collectTurnCommitmentV4(turns, tx); err == nil {
+	if err := collectTurnCommitmentV4(turns, tx, checkpointSigned("checkpoints/overflow")); err == nil {
 		t.Fatal("allocation bound not enforced")
 	}
 }

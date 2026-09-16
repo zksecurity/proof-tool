@@ -185,7 +185,7 @@ func loadCheckpointAncestryV4(reader *checkpointReaderV4, d CeremonyDefinition, 
 			}
 		}
 		result.count++
-		if err := collectTurnCommitmentV4(result.turnCommitments, current); err != nil {
+		if err := collectTurnCommitmentV4(result.turnCommitments, current, refs); err != nil {
 			return checkpointAncestryV4{}, err
 		}
 		result.checkpoints = append(result.checkpoints, refs)

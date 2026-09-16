@@ -15,9 +15,10 @@ type CheckpointCommitmentsV4 struct {
 }
 
 type CandidateAllocationV4 struct {
-	CheckpointSequence uint64 `json:"checkpoint_sequence"`
-	AttemptID          string `json:"attempt_id"`
-	AllocatedAt        string `json:"allocated_at"`
+	CheckpointSequence uint64             `json:"checkpoint_sequence"`
+	Checkpoint         SignedArtifactRefs `json:"checkpoint"`
+	AttemptID          string             `json:"attempt_id"`
+	AllocatedAt        string             `json:"allocated_at"`
 }
 
 type AcceptedChainCommitmentV4 struct {
@@ -32,7 +33,10 @@ type TurnCommitmentV4 struct {
 	AcceptedChain *AcceptedChainCommitmentV4 `json:"accepted_chain,omitempty"`
 }
 
-func collectTurnCommitmentV4(turns map[ContributionScope]*TurnCommitmentV4, c CheckpointV4) error {
+func collectTurnCommitmentV4(turns map[ContributionScope]*TurnCommitmentV4, c CheckpointV4, refs SignedArtifactRefs) error {
+	if err := refs.Validate(); err != nil {
+		return err
+	}
 	t := c.Transition
 	switch t.Kind {
 	case CheckpointPhase1CandidateAllocated, CheckpointPhase2CandidateAllocated, CheckpointPhase1CandidateAccepted, CheckpointPhase2CandidateAccepted:
@@ -53,7 +57,7 @@ func collectTurnCommitmentV4(turns map[ContributionScope]*TurnCommitmentV4, c Ch
 		if len(turn.Allocations) >= MaxDeliveryAttemptsPerSubmissionV2 {
 			return errors.New("candidate allocation index exceeds attempt limit")
 		}
-		turn.Allocations = append(turn.Allocations, CandidateAllocationV4{CheckpointSequence: c.Sequence, AttemptID: t.AttemptID, AllocatedAt: t.AllocatedAt})
+		turn.Allocations = append(turn.Allocations, CandidateAllocationV4{CheckpointSequence: c.Sequence, Checkpoint: refs, AttemptID: t.AttemptID, AllocatedAt: t.AllocatedAt})
 	case CheckpointPhase1CandidateAccepted, CheckpointPhase2CandidateAccepted:
 		if turn.AcceptedChain != nil {
 			return errors.New("duplicate candidate commitment")
