@@ -690,55 +690,6 @@ func verifyCandidateChainInventoryV4(last ChainRecord, scope ContributionScope, 
 	return errors.New("candidate verification artifact is missing")
 }
 
-func verifyReturnHandoffV4(reader *checkpointReaderV4, d CeremonyDefinition, scope ContributionScope, inventory CandidateInventory) error {
-	if err := inventory.Validate(); err != nil {
-		return err
-	}
-	if len(inventory.Files) != 7 || inventory.Scope != scope {
-		return errors.New("return handoff requires the complete seven-file inventory for this scope")
-	}
-	base := fmt.Sprintf("%s/contributions/%04d/", scope.Phase, scope.Index)
-	refs := SignedArtifactRefs{Record: ArtifactRef{Name: base + inventory.Files[5].Name, Digest: inventory.Files[5].Digest}, Signature: ArtifactRef{Name: base + inventory.Files[6].Name, Digest: inventory.Files[6].Digest}}
-	record, signature, err := reader.pair(refs)
-	if err != nil {
-		return err
-	}
-	return verifyReturnHandoffBytesV4(d, scope, inventory, record, signature)
-}
-
-func verifyReturnHandoffBytesV4(d CeremonyDefinition, scope ContributionScope, inventory CandidateInventory, record, signature []byte) error {
-	if err := inventory.Validate(); err != nil {
-		return err
-	}
-	if len(inventory.Files) != 7 || inventory.Scope != scope || NewDigest(record) != inventory.Files[5].Digest || NewDigest(signature) != inventory.Files[6].Digest {
-		return errors.New("return handoff differs from the complete candidate inventory")
-	}
-	base := fmt.Sprintf("%s/contributions/%04d/", scope.Phase, scope.Index)
-	participant, ok := d.ParticipantByID(scope.ParticipantID)
-	if !ok {
-		return errors.New("return sender is not in roster")
-	}
-	key, err := identityPublicKey(participant.Identity)
-	if err != nil {
-		return err
-	}
-	var handoff TransferHandoff
-	if err := VerifySignedRecord(record, signature, &handoff, participant.Identity.KeyID, key); err != nil {
-		return err
-	}
-	if err := verifyTransferSource(d, handoff.Source); err != nil {
-		return err
-	}
-	expected := append([]ArtifactRef{}, inventory.Files[:5]...)
-	for i := range expected {
-		expected[i].Name = base + expected[i].Name
-	}
-	if handoff.CeremonyID != d.CeremonyID || handoff.Phase != scope.Phase || handoff.Index != scope.Index || handoff.PredecessorHeadID != scope.ParentHeadID || handoff.SenderID != scope.ParticipantID || handoff.SenderKeyID != participant.Identity.KeyID || handoff.RecipientID != d.Coordinator.ID || handoff.RecipientKeyID != d.Coordinator.KeyID || !slices.Equal(handoff.Files, expected) {
-		return errors.New("return handoff does not bind this participant and complete candidate")
-	}
-	return nil
-}
-
 func verifyV4ChainProjection(chain Chain, refs SignedArtifactRefs, state CheckpointPhaseState) error {
 	head, err := chain.HeadPayload()
 	if err != nil {

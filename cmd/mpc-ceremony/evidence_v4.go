@@ -124,7 +124,7 @@ func validateBundleReviewV4(o EvidenceOptionsV4) error {
 		return errors.New("bundle signing requires --reviewed and --reviewed-sha256 of the exact canonical bytes")
 	}
 	for _, c := range o.ReviewedSHA256 {
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return errors.New("reviewed SHA-256 must be 64 lowercase hexadecimal characters")
 		}
 	}

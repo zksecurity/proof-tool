@@ -85,11 +85,14 @@ func (c CandidateInventory) Validate() error {
 		if ref.Name != expected[i] {
 			return fmt.Errorf("candidate file %d must be %s", i, expected[i])
 		}
-		limit := int64(maxSignedRecordBytes)
-		if ref.Name == "contribution.bin" {
+		var limit int64
+		switch ref.Name {
+		case "contribution.bin":
 			limit = MaxArtifactSize
-		} else if ref.Name == "attestation.sig" || ref.Name == "erasure.sig" {
+		case "attestation.sig", "erasure.sig":
 			limit = 4096
+		default:
+			limit = maxSignedRecordBytes
 		}
 		if ref.Digest.Size <= 0 || ref.Digest.Size > limit {
 			return fmt.Errorf("candidate file %s exceeds its protocol size bound", ref.Name)

@@ -1172,11 +1172,14 @@ func ComputeFinalTranscriptID(record FinalTranscript) (string, error) {
 	if err := record.validate(false); err != nil {
 		return "", err
 	}
-	domain := "proof-tool/mpc-ceremony/final-transcript/v2"
-	if record.Schema == FinalTranscriptSchemaV1 {
+	var domain string
+	switch record.Schema {
+	case FinalTranscriptSchemaV1:
 		domain = "proof-tool/mpc-ceremony/final-transcript/v1"
-	} else if record.Schema == FinalTranscriptSchemaV3 {
+	case FinalTranscriptSchemaV3:
 		domain = "proof-tool/mpc-ceremony/final-transcript/v3"
+	default:
+		domain = "proof-tool/mpc-ceremony/final-transcript/v2"
 	}
 	return canonicalHash(domain, record)
 }

@@ -125,7 +125,7 @@ func verifyReleaseReviewV4(trust TrustPaths, artifactRoot string, head, bundleRe
 		return ReleaseReviewV4{}, errors.New("review requires the canonical final candidate pair")
 	}
 	for _, ref := range append(signedArtifacts(final.Transition.Record), final.Transition.Evidence...) {
-		limit := int64(MaxArtifactSize)
+		limit := MaxArtifactSize
 		if strings.HasSuffix(ref.Name, ".json") || strings.HasSuffix(ref.Name, ".sig") || strings.HasSuffix(ref.Name, ".txt") {
 			limit = maxSignedRecordBytes
 		}
