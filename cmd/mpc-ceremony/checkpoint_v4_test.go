@@ -194,6 +194,9 @@ func TestCheckpointV4CLIInitialPrepareSignInspectAndMutation(t *testing.T) {
 		t.Fatalf("empty enrollment set overclaim or wrong head: %+v", enrollments)
 	}
 	disclosurePath := filepath.Join(artifactRoot, "enrollments", "participant-01", "disclosure.txt")
+	if err := os.MkdirAll(filepath.Dir(disclosurePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	writeDecisionTestFile(t, disclosurePath, []byte("Single-process CLI fixture; no independence claim.\n"), 0o600)
 	disclosure := ref("enrollments/participant-01/disclosure.txt")
 	participant := d.Roster[0].Identity

@@ -13,12 +13,17 @@ func verifyFinalCandidateV4(options CheckpointPreparationV4, trusted *TrustedCer
 	if t.Record.Record.Name != "final/candidate/"+CandidateMetadataFile || t.Record.Signature.Name != "final/candidate/"+CandidateSignatureFile {
 		return errors.New("final candidate must use its canonical closed directory")
 	}
-	running, err := RunningSoftwareBindingForMode(trusted.Definition.Software.ProofToolVersion, trusted.Definition.Mode)
-	if err != nil {
-		return err
+	if t.ReplayVerification == nil {
+		return errors.New("final candidate requires the coordinator replay claim")
 	}
-	if t.ReplayVerification == nil || t.ReplayVerification.ToolBinary != running.ToolBinary {
-		return errors.New("final candidate replay claim must identify the actual approved executable")
+	if options.RequireCurrentReplayExecutable {
+		running, err := RunningSoftwareBindingForMode(trusted.Definition.Software.ProofToolVersion, trusted.Definition.Mode)
+		if err != nil {
+			return err
+		}
+		if t.ReplayVerification.ToolBinary != running.ToolBinary {
+			return errors.New("final candidate replay claim must identify the executable performing this replay")
+		}
 	}
 	paths, err := finalReplayPathsV4(options.Trust, trusted.Definition.Coordinator.Ed25519PublicKeyHex, reader.path, previous.Progress)
 	if err != nil {

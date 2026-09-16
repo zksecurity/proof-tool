@@ -107,6 +107,7 @@ func PrepareRecordedCheckpointV4(options RecordedCheckpointV4Options) (RecordedC
 
 	canonical, err := PrepareCheckpointV4(CheckpointPreparationV4{
 		Trust: options.Trust, ArtifactRoot: options.ArtifactRoot, Proposal: next, Circuit: options.Circuit,
+		RequireCurrentReplayExecutable: true,
 	})
 	if err != nil {
 		return RecordedCheckpointV4{}, err

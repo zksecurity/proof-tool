@@ -73,7 +73,7 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 	c := initial.Checkpoint
 	var committed m.SignedArtifactRefs
 	commit := func() error {
-		if _, err := m.PrepareCheckpointV4(m.CheckpointPreparationV4{Trust: trust, ArtifactRoot: root, Proposal: c, Circuit: circuit}); err != nil {
+		if _, err := m.PrepareCheckpointV4(m.CheckpointPreparationV4{Trust: trust, ArtifactRoot: root, Proposal: c, Circuit: circuit, RequireCurrentReplayExecutable: true}); err != nil {
 			return fmt.Errorf("prepare %s: %w", c.Transition.Kind, err)
 		}
 		var err error

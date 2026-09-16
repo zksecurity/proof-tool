@@ -324,6 +324,33 @@ func TestEvidenceV4CommandsOnRealArtifacts(t *testing.T) {
 		}
 		return result, nil
 	}
+	// Publication may be verified by a different platform executable from the
+	// one that performed the coordinator replay. Both are authenticated by the
+	// definition's signed allowlist. Re-preparing the historical checkpoint is
+	// read-only and must accept that distinction; signing it again must not.
+	// The retained review snapshot is intentionally the minimal release-signer
+	// input. Revalidating the historical final-candidate checkpoint needs the
+	// complete coordinator transcript that the checkpoint itself names.
+	fullRoot := filepath.Join(runRoot, "ceremony")
+	finalCandidateCheckpoint := filepath.Join(fullRoot, "checkpoints/0014.json")
+	publicationCopy := filepath.Join(t.TempDir(), "checkpoint.json")
+	publicationArgs := []string{"--format", "json", "checkpoint", "prepare-v4",
+		"--ceremony", filepath.Join(fullRoot, "ceremony.json"), "--ceremony-signature", filepath.Join(fullRoot, "ceremony.sig"),
+		"--coordinator-public-key-file", o.CoordinatorPublicKeyFile,
+		"--artifact-root", fullRoot, "--proposal", finalCandidateCheckpoint, "--out", publicationCopy}
+	if b, err := exec.Command(cli, publicationArgs...).CombinedOutput(); err != nil {
+		t.Fatalf("cross-platform publication verification: %v %s", err, b)
+	}
+	if !bytes.Equal(read(finalCandidateCheckpoint), read(publicationCopy)) {
+		t.Fatal("cross-platform publication verification changed checkpoint bytes")
+	}
+	signingArgs := append([]string{}, publicationArgs...)
+	signingArgs[3] = "sign-v4"
+	signingArgs = append(signingArgs, "--coordinator-signing-key", filepath.Join(runRoot, "identity-keys/coordinator.ed25519.private.hex"))
+	signingArgs[len(signingArgs)-3] = filepath.Join(t.TempDir(), "checkpoint.sig")
+	if b, err := exec.Command(cli, signingArgs...).CombinedOutput(); err == nil || !bytes.Contains(b, []byte("executable performing this replay")) {
+		t.Fatalf("cross-platform executable re-signed another executable's replay claim: %v %s", err, b)
+	}
 	metadataResult, err := execute(CommandCheckpointInspectEnrollmentsV4, o)
 	if err != nil {
 		t.Fatal(err)

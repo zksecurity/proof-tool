@@ -396,7 +396,11 @@ func executeCheckpointV4(command Command, o CheckpointOptionsV4) (CommandResult,
 			return CommandResult{}, err
 		}
 	}
-	checked, err := m.PrepareCheckpointV4(m.CheckpointPreparationV4{Trust: trust, ArtifactRoot: o.ArtifactRoot, Proposal: proposal, Circuit: circuit, RejectedCandidateDir: o.RejectedCandidateDir})
+	checked, err := m.PrepareCheckpointV4(m.CheckpointPreparationV4{
+		Trust: trust, ArtifactRoot: o.ArtifactRoot, Proposal: proposal, Circuit: circuit,
+		RejectedCandidateDir:           o.RejectedCandidateDir,
+		RequireCurrentReplayExecutable: command == CommandCheckpointSignV4,
+	})
 	if err != nil {
 		return CommandResult{}, err
 	}

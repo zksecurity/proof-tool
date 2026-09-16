@@ -289,6 +289,11 @@ type CheckpointPreparationV4 struct {
 	ArtifactRoot string
 	Proposal     CheckpointV4
 	Circuit      *CompiledCircuit
+	// RequireCurrentReplayExecutable is set by authoring/signing paths. A
+	// verifier may authenticate a checkpoint produced by any executable in the
+	// definition's signed allowlist; it must not require that historical replay
+	// to have used the verifier's own platform binary.
+	RequireCurrentReplayExecutable bool
 	// RejectedCandidateDir is private input only for an explicit rejection. Its
 	// normalized inventory hashes become state, never these unaccepted files.
 	RejectedCandidateDir string
