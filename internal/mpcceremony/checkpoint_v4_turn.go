@@ -245,6 +245,12 @@ func cloneCheckpointForTurnV4(value CheckpointV4) (CheckpointV4, error) {
 
 func appendUniqueSortedArtifactsV4(base []ArtifactRef, values ...ArtifactRef) []ArtifactRef {
 	result := slices.Clone(base)
+	if result == nil {
+		// V4 distinguishes an explicit empty artifact set from a missing/null
+		// set. Some lifecycle records have no auxiliary evidence, but they must
+		// still encode evidence as [] rather than omitting the list.
+		result = []ArtifactRef{}
+	}
 	for _, value := range values {
 		if !slices.Contains(result, value) {
 			result = append(result, value)

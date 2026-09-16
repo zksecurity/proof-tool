@@ -482,3 +482,10 @@ func TestCheckpointV4ExactPredecessorSignatureAndMinimum(t *testing.T) {
 		t.Fatal("phase closed before signed contribution minimum")
 	}
 }
+
+func TestAppendUniqueSortedArtifactsV4KeepsEmptyListExplicit(t *testing.T) {
+	artifacts := appendUniqueSortedArtifactsV4(nil)
+	if artifacts == nil || len(artifacts) != 0 {
+		t.Fatalf("empty artifact list = %#v, want explicit empty list", artifacts)
+	}
+}
