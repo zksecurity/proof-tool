@@ -16,30 +16,7 @@ func releaseTransitionFixtureV4() CheckpointTransitionV4 {
 }
 
 func TestFinalReleaseV4DerivesClosedDownloadInventory(t *testing.T) {
-	root := t.TempDir()
-	reviewCheckpoint := checkpointSigned("checkpoints/review")
-	required := checkpointArtifacts(checkpointArtifact("ceremony.json", "definition"), checkpointArtifact("final/candidate/candidate.json", "candidate"))
-	review := ReleaseReviewV4{
-		CeremonyID: "sha256:" + strings.Repeat("a", 64), ReviewCheckpoint: reviewCheckpoint,
-		FinalCandidateCheckpoint: checkpointSigned("checkpoints/candidate"), CandidateArtifacts: []ArtifactRef{required[1]},
-		RequiredArtifacts: required, OperationalBundle: checkpointSigned("operational/bundle"), Audits: []SignedArtifactRefs{},
-		ReplayVerification: CheckpointReplayVerificationV4{Method: CoordinatorReplayReleaseV1, ToolBinary: NewDigest([]byte("binary"))},
-		ReleasedAt:         "2026-07-23T16:00:00Z",
-	}
-	raw, err := MarshalCanonical(review)
-	if err != nil {
-		t.Fatal(err)
-	}
-	signature := []byte("review signature")
-	pair := SignedArtifactRefs{Record: ArtifactRef{Name: "final/review/record.json", Digest: NewDigest(raw)}, Signature: ArtifactRef{Name: "final/review/record.sig", Digest: NewDigest(signature)}}
-	writeFixtureFile(t, root, pair.Record.Name, raw)
-	writeFixtureFile(t, root, pair.Signature.Name, signature)
-	tx := releaseTransitionFixtureV4()
-	head := CheckpointV4{PreviousCheckpoint: &reviewCheckpoint, Transition: tx, Progress: CheckpointProgressV4{ReleaseReview: &pair, FinalRelease: tx.Record}}
-	reader, err := openCheckpointReaderV4(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	reader, head := finalReleaseDownloadFixtureV4(t)
 	defer func() {
 		if err := reader.root.Close(); err != nil {
 			t.Errorf("close checkpoint reader: %v", err)
@@ -50,8 +27,9 @@ func TestFinalReleaseV4DerivesClosedDownloadInventory(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"final/release/candidate.json", "final/release/ceremony.json", "final/release/checksums.sha256",
-		"final/release/manifest-public-key.hex", "final/release/manifest.json", "final/release/manifest.sig", "final/release/setup-transcript.json",
+		"final/release/cardano-vk.bin", "final/release/ceremony.json", "final/release/checksums.sha256",
+		"final/release/manifest-public-key.hex", "final/release/manifest.json", "final/release/manifest.sig",
+		"final/release/ownership.pk", "final/release/ownership.vk", "final/release/setup-transcript.json",
 	}
 	names := make([]string, len(refs))
 	for i, ref := range refs {
@@ -62,6 +40,69 @@ func TestFinalReleaseV4DerivesClosedDownloadInventory(t *testing.T) {
 	}
 	if !slices.Equal(names, want) {
 		t.Fatalf("inventory names = %v, want %v", names, want)
+	}
+}
+
+// finalReleaseDownloadFixtureV4 models the real layout: Progress.ReleaseReview
+// is the signed operational-bundle pair, while the ReleaseReviewV4 lives inside
+// the signed final/release/setup-transcript.json. Keeping those two record
+// types distinct prevents a final checkpoint from treating an evidence bundle
+// as a release review merely because both are canonical JSON.
+func finalReleaseDownloadFixtureV4(t *testing.T) (*checkpointReaderV4, CheckpointV4) {
+	t.Helper()
+	root := t.TempDir()
+	d, candidate, review := transcriptFixtureV3(t)
+	transcript, err := newFinalTranscriptV3(d, candidate, review)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := MarshalCanonical(transcript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx := releaseTransitionFixtureV4()
+	for n := range tx.Evidence {
+		if tx.Evidence[n].Name == FinalReleasePackagePrefixV4+FinalTranscriptFile {
+			tx.Evidence[n].Digest = NewDigest(raw)
+			writeFixtureFile(t, root, tx.Evidence[n].Name, raw)
+		}
+	}
+	reader, err := openCheckpointReaderV4(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := CheckpointV4{CeremonyID: d.CeremonyID, PreviousCheckpoint: &review.ReviewCheckpoint, Transition: tx, Progress: CheckpointProgressV4{ReleaseReview: &review.OperationalBundle, FinalRelease: tx.Record}}
+	return reader, head
+}
+
+func TestFinalReleaseV4InventoryRejectsUnboundTranscript(t *testing.T) {
+	for name, change := range map[string]func(*CheckpointV4){
+		"missing setup transcript": func(head *CheckpointV4) {
+			filtered := head.Transition.Evidence[:0]
+			for _, ref := range head.Transition.Evidence {
+				if ref.Name != FinalReleasePackagePrefixV4+FinalTranscriptFile {
+					filtered = append(filtered, ref)
+				}
+			}
+			head.Transition.Evidence = filtered
+		},
+		"different operational bundle": func(head *CheckpointV4) {
+			pair := checkpointSigned("operational/different-bundle")
+			head.Progress.ReleaseReview = &pair
+		},
+		"different review predecessor": func(head *CheckpointV4) {
+			pair := checkpointSigned("checkpoints/different-review")
+			head.PreviousCheckpoint = &pair
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			reader, head := finalReleaseDownloadFixtureV4(t)
+			defer func() { _ = reader.root.Close() }()
+			change(&head)
+			if _, err := finalReleaseDownloadArtifactsV4(reader, checkpointAncestryV4{head: head}); err == nil {
+				t.Fatal("unbound final transcript inventory accepted")
+			}
+		})
 	}
 }
 

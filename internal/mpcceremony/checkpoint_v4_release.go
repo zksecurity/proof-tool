@@ -112,13 +112,32 @@ func finalReleaseDownloadArtifactsV4(reader *checkpointReaderV4, a checkpointAnc
 	if c.Progress.ReleaseReview == nil {
 		return nil, errors.New("final release lacks its authenticated review")
 	}
-	record, _, err := reader.pair(*c.Progress.ReleaseReview)
+	var transcriptRef ArtifactRef
+	for _, ref := range c.Transition.Evidence {
+		if ref.Name == FinalReleasePackagePrefixV4+FinalTranscriptFile {
+			transcriptRef = ref
+		}
+	}
+	if transcriptRef.Name == "" {
+		return nil, errors.New("final release lacks its exact setup transcript")
+	}
+	record, err := reader.read(transcriptRef, maxFinalTranscriptV3Bytes, true)
 	if err != nil {
 		return nil, err
 	}
-	var review ReleaseReviewV4
-	if err := UnmarshalCanonical(record, &review); err != nil {
+	var transcript FinalTranscript
+	if err := UnmarshalCanonical(record, &transcript); err != nil {
 		return nil, err
+	}
+	if err := transcript.Validate(); err != nil {
+		return nil, err
+	}
+	if transcript.Schema != FinalTranscriptSchemaV3 || transcript.CeremonyID != c.CeremonyID || transcript.ReleaseReview == nil {
+		return nil, errors.New("final release setup transcript does not bind this V4 ceremony and review")
+	}
+	review := *transcript.ReleaseReview
+	if review.OperationalBundle != *c.Progress.ReleaseReview {
+		return nil, errors.New("final release setup transcript names a different operational review")
 	}
 	if err := requireReleaseReviewPredecessorV4(review, c); err != nil {
 		return nil, err

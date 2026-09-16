@@ -56,7 +56,7 @@ func (r *checkpointReaderV4) read(ref ArtifactRef, limit int64, capture bool) ([
 	if ref.Digest.Size <= 0 || ref.Digest.Size > limit {
 		return nil, fmt.Errorf("artifact %s exceeds its permitted size", ref.Name)
 	}
-	if capture && limit > maxSignedRecordBytes {
+	if capture && limit > maxFinalTranscriptV3Bytes {
 		return nil, errors.New("large artifacts must be streamed, not retained in memory")
 	}
 	name := ref.Name
