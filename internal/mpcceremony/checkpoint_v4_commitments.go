@@ -12,7 +12,13 @@ import (
 type CheckpointCommitmentsV4 struct {
 	Enrollments           []SignedArtifactRefs `json:"enrollments"`
 	Turns                 []TurnCommitmentV4   `json:"turns"`
+	BeaconEvidence        []PhaseCommitmentV4  `json:"beacon_evidence"`
 	FinalReleaseArtifacts []ArtifactRef        `json:"final_release_artifacts"`
+}
+
+type PhaseCommitmentV4 struct {
+	Phase Phase              `json:"phase"`
+	Pair  SignedArtifactRefs `json:"pair"`
 }
 
 type CandidateAllocationV4 struct {
@@ -82,6 +88,9 @@ func InspectStoredCheckpointV4(trust TrustPaths, root string, head SignedArtifac
 	defer func() { _ = c.reader.root.Close() }()
 	index, err := checkpointCommitmentsV4(c.ancestry)
 	if err == nil {
+		index.BeaconEvidence, err = beaconEvidenceCommitmentsV4(c.reader, c.trusted.Definition, c.ancestry)
+	}
+	if err == nil {
 		index.FinalReleaseArtifacts, err = finalReleaseDownloadArtifactsV4(c.reader, c.ancestry)
 	}
 	return c.ancestry.head, index, err
@@ -91,7 +100,7 @@ func checkpointCommitmentsV4(a checkpointAncestryV4) (CheckpointCommitmentsV4, e
 	if len(a.enrollments) > 128 {
 		return CheckpointCommitmentsV4{}, errors.New("enrollment commitment index exceeds protocol capacity")
 	}
-	index := CheckpointCommitmentsV4{Enrollments: sortedSignedRefsV4(a.enrollments), Turns: []TurnCommitmentV4{}, FinalReleaseArtifacts: []ArtifactRef{}}
+	index := CheckpointCommitmentsV4{Enrollments: sortedSignedRefsV4(a.enrollments), Turns: []TurnCommitmentV4{}, BeaconEvidence: []PhaseCommitmentV4{}, FinalReleaseArtifacts: []ArtifactRef{}}
 	for _, turn := range a.turnCommitments {
 		index.Turns = append(index.Turns, *turn)
 	}
@@ -102,4 +111,30 @@ func checkpointCommitmentsV4(a checkpointAncestryV4) (CheckpointCommitmentsV4, e
 		return int(a.Scope.Index) - int(b.Scope.Index)
 	})
 	return index, nil
+}
+
+func beaconEvidenceCommitmentsV4(reader *checkpointReaderV4, definition CeremonyDefinition, ancestry checkpointAncestryV4) ([]PhaseCommitmentV4, error) {
+	key, err := identityPublicKey(definition.Coordinator)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]PhaseCommitmentV4, 0, len(ancestry.beaconEvidence))
+	for _, pair := range ancestry.beaconEvidence {
+		record, signature, err := reader.pair(pair)
+		if err != nil {
+			return nil, err
+		}
+		var evidence MultiRelayBeaconEvidence
+		if err := VerifySignedRecord(record, signature, &evidence, definition.Coordinator.KeyID, key); err != nil {
+			return nil, err
+		}
+		result = append(result, PhaseCommitmentV4{Phase: evidence.Phase, Pair: pair})
+	}
+	slices.SortFunc(result, func(a, b PhaseCommitmentV4) int { return strings.Compare(string(a.Phase), string(b.Phase)) })
+	for i := 1; i < len(result); i++ {
+		if result[i-1].Phase == result[i].Phase {
+			return nil, errors.New("duplicate beacon evidence commitment for phase")
+		}
+	}
+	return result, nil
 }
