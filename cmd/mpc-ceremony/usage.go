@@ -310,6 +310,16 @@ a signed candidate-allocation checkpoint. The caller cannot override the turn.
 The output is not current until the delivery service uploads the pair and
 conditionally advances the ceremony head.
 `,
+	"checkpoint initialize-v4": `Usage:
+  mpc-ceremony checkpoint initialize-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --coordinator-signing-key KEY --out-dir FRESH_DIR
+
+Authenticates the signed V4 definition and stored circuit, fully checks the
+Phase 1 genesis chain and derives the only valid sequence-zero checkpoint.
+Creates a signed pair atomically. The pair is not current until the delivery
+service publishes its immutable files and creates the ceremony root.
+`,
 	"checkpoint accept-candidate-v4": `Usage:
   mpc-ceremony checkpoint accept-candidate-v4 --ceremony FILE --ceremony-signature FILE \
     --coordinator-public-key-file KEY --artifact-root DIR \
@@ -365,7 +375,7 @@ performed. Keep the report outside final/candidate and final/release.
 `,
 	"checkpoint": `Usage:
   mpc-ceremony checkpoint <prepare|sign|verify|verify-stored> [flags]
-	  mpc-ceremony checkpoint <prepare-v4|sign-v4|allocate-v4|accept-candidate-v4> [flags]
+	  mpc-ceremony checkpoint <prepare-v4|sign-v4|initialize-v4|allocate-v4|accept-candidate-v4> [flags]
 	  mpc-ceremony checkpoint <verify-stored-v4|verify-release-v4> [flags]
   mpc-ceremony checkpoint inspect-signed-v4 [flags]
   mpc-ceremony checkpoint inspect-enrollments-v4 [flags]

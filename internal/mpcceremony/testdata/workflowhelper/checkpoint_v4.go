@@ -66,14 +66,11 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 	if err != nil {
 		return err
 	}
-	definition, err := pair("ceremony")
+	initial, err := m.PrepareInitialCheckpointV4(m.InitialCheckpointV4Options{Trust: trust, Circuit: circuit, ArtifactRoot: root})
 	if err != nil {
-		return err
+		return fmt.Errorf("derive initial checkpoint: %w", err)
 	}
-	c := m.CheckpointV4{Schema: m.CheckpointSchemaV4, Workflow: m.StorageFirstWorkflowV2, CeremonyID: d.CeremonyID, Definition: definition, AssurancePolicy: d.AssurancePolicy, ReleaseVerification: m.CoordinatorReplayReleaseV1,
-		Transition:        m.CheckpointTransitionV4{Kind: m.CheckpointInitial, Evidence: []m.ArtifactRef{}},
-		Progress:          m.CheckpointProgressV4{Phase1: m.CheckpointPhaseState{Phase: m.Phase1, HeadRecordID: head, HeadPayload: payload, Chain: chainRefs}},
-		AcceptedArtifacts: sorted([]m.ArtifactRef{definition.Record, definition.Signature, chainRefs.Record, chainRefs.Signature, payload}), Deliveries: []m.DeliverySlotV2{}}
+	c := initial.Checkpoint
 	var committed m.SignedArtifactRefs
 	commit := func() error {
 		if _, err := m.PrepareCheckpointV4(m.CheckpointPreparationV4{Trust: trust, ArtifactRoot: root, Proposal: c, Circuit: circuit}); err != nil {

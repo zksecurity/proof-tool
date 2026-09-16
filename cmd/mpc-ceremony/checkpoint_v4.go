@@ -59,20 +59,25 @@ func parseCheckpointV4(action string, args []string) (CheckpointOptionsV4, error
 	fs := commandFlagSet("checkpoint " + action)
 	addCeremonyTrustFlags(fs, &o.CeremonyPath, &o.CeremonySignaturePath, &o.CoordinatorPublicKeyFile)
 	fs.StringVar(&o.ArtifactRoot, "artifact-root", "", "local root containing protocol artifacts")
-	if checkpointReadOnlyActionV4(action) || action == "allocate-v4" || action == "accept-candidate-v4" {
-		fs.StringVar(&o.CheckpointPath, "checkpoint", "", "exact checkpoint under artifact-root")
-		fs.StringVar(&o.CheckpointSignaturePath, "checkpoint-signature", "", "exact detached checkpoint signature under artifact-root")
-		if action == "allocate-v4" || action == "accept-candidate-v4" {
-			fs.StringVar(&o.AttemptID, "attempt-id", "", "fresh 32-character hexadecimal delivery attempt ID")
+	if checkpointReadOnlyActionV4(action) || action == "initialize-v4" || action == "allocate-v4" || action == "accept-candidate-v4" {
+		if action == "initialize-v4" {
 			fs.StringVar(&o.CoordinatorSigningKey, "coordinator-signing-key", "", "existing coordinator private key")
-			fs.StringVar(&o.OutDir, "out-dir", "", "fresh atomic output directory for the signed checkpoint pair")
-		}
-		if action == "allocate-v4" {
-			fs.StringVar(&o.AllocatedAt, "allocated-at", "", "allocation time in RFC3339 format")
-		}
-		if action == "accept-candidate-v4" {
-			fs.StringVar(&o.CandidateDir, "candidate-dir", "", "exact complete candidate directory")
-			fs.StringVar(&o.AcceptedAt, "accepted-at", "", "acceptance time in RFC3339 format")
+			fs.StringVar(&o.OutDir, "out-dir", "", "fresh atomic output directory for the signed initial checkpoint pair")
+		} else {
+			fs.StringVar(&o.CheckpointPath, "checkpoint", "", "exact checkpoint under artifact-root")
+			fs.StringVar(&o.CheckpointSignaturePath, "checkpoint-signature", "", "exact detached checkpoint signature under artifact-root")
+			if action == "allocate-v4" || action == "accept-candidate-v4" {
+				fs.StringVar(&o.AttemptID, "attempt-id", "", "fresh 32-character hexadecimal delivery attempt ID")
+				fs.StringVar(&o.CoordinatorSigningKey, "coordinator-signing-key", "", "existing coordinator private key")
+				fs.StringVar(&o.OutDir, "out-dir", "", "fresh atomic output directory for the signed checkpoint pair")
+			}
+			if action == "allocate-v4" {
+				fs.StringVar(&o.AllocatedAt, "allocated-at", "", "allocation time in RFC3339 format")
+			}
+			if action == "accept-candidate-v4" {
+				fs.StringVar(&o.CandidateDir, "candidate-dir", "", "exact complete candidate directory")
+				fs.StringVar(&o.AcceptedAt, "accepted-at", "", "acceptance time in RFC3339 format")
+			}
 		}
 	} else {
 		fs.StringVar(&o.ProposalPath, "proposal", "", "exact canonical V4 checkpoint proposal")
@@ -90,6 +95,9 @@ func parseCheckpointV4(action string, args []string) (CheckpointOptionsV4, error
 	}
 	if checkpointReadOnlyActionV4(action) {
 		return o, requireValues(pathValue("--checkpoint", o.CheckpointPath), pathValue("--checkpoint-signature", o.CheckpointSignaturePath))
+	}
+	if action == "initialize-v4" {
+		return o, requireValues(pathValue("--coordinator-signing-key", o.CoordinatorSigningKey), pathValue("--out-dir", o.OutDir))
 	}
 	if action == "allocate-v4" || action == "accept-candidate-v4" {
 		if err := requireValues(pathValue("--checkpoint", o.CheckpointPath), pathValue("--checkpoint-signature", o.CheckpointSignaturePath), value("--attempt-id", o.AttemptID), pathValue("--coordinator-signing-key", o.CoordinatorSigningKey), pathValue("--out-dir", o.OutDir)); err != nil {
@@ -146,6 +154,35 @@ func executeCheckpointV4(command Command, o CheckpointOptionsV4) (CommandResult,
 	}
 	if err := m.VerifyRunningSoftwareForMode(d.Software, d.Mode); err != nil {
 		return CommandResult{}, err
+	}
+	if command == CommandCheckpointInitializeV4 {
+		private, public, err := keybundle.LoadExistingPrivateKey(o.CoordinatorSigningKey)
+		if err != nil {
+			return CommandResult{}, err
+		}
+		if !bytes.Equal(public, trusted.CoordinatorPublicKey) {
+			return CommandResult{}, errors.New("checkpoint signing key is not the authenticated coordinator key")
+		}
+		circuit, err := loadCheckpointCircuitV4(o.ArtifactRoot, d)
+		if err != nil {
+			return CommandResult{}, err
+		}
+		prepared, err := m.PrepareInitialCheckpointV4(m.InitialCheckpointV4Options{Trust: trust, Circuit: circuit, ArtifactRoot: o.ArtifactRoot})
+		if err != nil {
+			return CommandResult{}, err
+		}
+		signature, err := m.SignExact(prepared.Canonical, d.Coordinator.KeyID, private)
+		if err != nil {
+			return CommandResult{}, err
+		}
+		signatureBytes, err := m.MarshalCanonical(signature)
+		if err != nil {
+			return CommandResult{}, err
+		}
+		if err := writeAtomicOutputDir(o.OutDir, map[string][]byte{"checkpoint.json": prepared.Canonical, "checkpoint.sig": signatureBytes}); err != nil {
+			return CommandResult{}, err
+		}
+		return CommandResult{CeremonyID: d.CeremonyID, Phase: string(m.Phase1), Sequence: 0, Summary: "derived and signed the initial checkpoint from the authenticated definition and replayed genesis chain; it is not current until the delivery service publishes it", Outputs: map[string]string{"checkpoint": filepath.Join(o.OutDir, "checkpoint.json"), "checkpoint_signature": filepath.Join(o.OutDir, "checkpoint.sig")}}, nil
 	}
 	if command == CommandCheckpointAllocateV4 || command == CommandCheckpointAcceptCandidateV4 {
 		_, _, refs, err := checkpointSignedBytes(o.ArtifactRoot, o.CheckpointPath, o.CheckpointSignaturePath)
