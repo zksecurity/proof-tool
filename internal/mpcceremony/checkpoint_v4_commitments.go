@@ -10,8 +10,9 @@ import (
 // assert that those records, their signatures or their payloads were re-read.
 // The containing inspection binds this index to its exact verified head pair.
 type CheckpointCommitmentsV4 struct {
-	Enrollments []SignedArtifactRefs `json:"enrollments"`
-	Turns       []TurnCommitmentV4   `json:"turns"`
+	Enrollments           []SignedArtifactRefs `json:"enrollments"`
+	Turns                 []TurnCommitmentV4   `json:"turns"`
+	FinalReleaseArtifacts []ArtifactRef        `json:"final_release_artifacts"`
 }
 
 type CandidateAllocationV4 struct {
@@ -80,6 +81,9 @@ func InspectStoredCheckpointV4(trust TrustPaths, root string, head SignedArtifac
 	}
 	defer func() { _ = c.reader.root.Close() }()
 	index, err := checkpointCommitmentsV4(c.ancestry)
+	if err == nil {
+		index.FinalReleaseArtifacts, err = finalReleaseDownloadArtifactsV4(c.reader, c.ancestry)
+	}
 	return c.ancestry.head, index, err
 }
 
@@ -87,7 +91,7 @@ func checkpointCommitmentsV4(a checkpointAncestryV4) (CheckpointCommitmentsV4, e
 	if len(a.enrollments) > 128 {
 		return CheckpointCommitmentsV4{}, errors.New("enrollment commitment index exceeds protocol capacity")
 	}
-	index := CheckpointCommitmentsV4{Enrollments: sortedSignedRefsV4(a.enrollments), Turns: []TurnCommitmentV4{}}
+	index := CheckpointCommitmentsV4{Enrollments: sortedSignedRefsV4(a.enrollments), Turns: []TurnCommitmentV4{}, FinalReleaseArtifacts: []ArtifactRef{}}
 	for _, turn := range a.turnCommitments {
 		index.Turns = append(index.Turns, *turn)
 	}

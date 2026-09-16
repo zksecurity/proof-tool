@@ -97,6 +97,62 @@ func requireReleaseReviewPredecessorV4(review ReleaseReviewV4, c CheckpointV4) e
 	return nil
 }
 
+// finalReleaseDownloadArtifactsV4 derives the complete closed package set from
+// the authenticated review and final transition. It reads no package member
+// bytes, so a fresh client can download exactly this set before full release
+// verification. The names and digests are already bound by the signed ancestry.
+func finalReleaseDownloadArtifactsV4(reader *checkpointReaderV4, a checkpointAncestryV4) ([]ArtifactRef, error) {
+	c := a.head
+	if c.Transition.Kind != CheckpointFinalReleaseRecorded {
+		return []ArtifactRef{}, nil
+	}
+	if err := validateFinalReleaseTransitionV4(c.Transition); err != nil {
+		return nil, err
+	}
+	if c.Progress.ReleaseReview == nil {
+		return nil, errors.New("final release lacks its authenticated review")
+	}
+	record, _, err := reader.pair(*c.Progress.ReleaseReview)
+	if err != nil {
+		return nil, err
+	}
+	var review ReleaseReviewV4
+	if err := UnmarshalCanonical(record, &review); err != nil {
+		return nil, err
+	}
+	if err := requireReleaseReviewPredecessorV4(review, c); err != nil {
+		return nil, err
+	}
+	names, err := releaseDependencyNamesV4(review.RequiredArtifacts)
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]ArtifactRef, 0, len(names)+5)
+	for _, ref := range review.RequiredArtifacts {
+		name, err := releasePhysicalNameV4(ref.Name)
+		if err != nil {
+			return nil, err
+		}
+		ref.Name = FinalReleasePackagePrefixV4 + name
+		refs = append(refs, ref)
+	}
+	refs = append(refs, signedArtifacts(c.Transition.Record)...)
+	refs = append(refs, c.Transition.Evidence...)
+	slices.SortFunc(refs, compareArtifactRefName)
+	if len(refs) != len(names)+len(releaseGeneratedNamesV4()) {
+		return nil, errors.New("final release package inventory is incomplete")
+	}
+	if err := validateV4ArtifactSet(refs, maxReleaseReviewArtifactsV4+5); err != nil {
+		return nil, err
+	}
+	for _, ref := range refs {
+		if !strings.HasPrefix(ref.Name, FinalReleasePackagePrefixV4) {
+			return nil, errors.New("final release package inventory escaped its closed namespace")
+		}
+	}
+	return refs, nil
+}
+
 // VerifyFinalReleaseCheckpointV4 authenticates the ancestry and all package
 // bytes. It does not replay contribution mathematics, authorize production use,
 // publish files, or establish that the supplied checkpoint is globally current.

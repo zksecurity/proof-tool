@@ -2,6 +2,8 @@ package mpcceremony
 
 import (
 	"fmt"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -11,6 +13,52 @@ import (
 func releaseTransitionFixtureV4() CheckpointTransitionV4 {
 	pair := SignedArtifactRefs{Record: checkpointArtifact(FinalReleasePackagePrefixV4+keybundle.ManifestFile, "manifest"), Signature: checkpointArtifact(FinalReleasePackagePrefixV4+keybundle.ManifestSignatureFile, "signature")}
 	return CheckpointTransitionV4{Kind: CheckpointFinalReleaseRecorded, Record: &pair, Evidence: checkpointArtifacts(checkpointArtifact(FinalReleasePackagePrefixV4+FinalTranscriptFile, "transcript"), checkpointArtifact(FinalReleasePackagePrefixV4+ReleaseChecksumsFile, "checksums"), checkpointArtifact(FinalReleasePackagePrefixV4+keybundle.ManifestPublicKeyFile, "public key"))}
+}
+
+func TestFinalReleaseV4DerivesClosedDownloadInventory(t *testing.T) {
+	root := t.TempDir()
+	reviewCheckpoint := checkpointSigned("checkpoints/review")
+	required := checkpointArtifacts(checkpointArtifact("ceremony.json", "definition"), checkpointArtifact("final/candidate/candidate.json", "candidate"))
+	review := ReleaseReviewV4{
+		CeremonyID: "sha256:" + strings.Repeat("a", 64), ReviewCheckpoint: reviewCheckpoint,
+		FinalCandidateCheckpoint: checkpointSigned("checkpoints/candidate"), CandidateArtifacts: []ArtifactRef{required[1]},
+		RequiredArtifacts: required, OperationalBundle: checkpointSigned("operational/bundle"), Audits: []SignedArtifactRefs{},
+		ReplayVerification: CheckpointReplayVerificationV4{Method: CoordinatorReplayReleaseV1, ToolBinary: NewDigest([]byte("binary"))},
+		ReleasedAt:         "2026-07-23T16:00:00Z",
+	}
+	raw, err := MarshalCanonical(review)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signature := []byte("review signature")
+	pair := SignedArtifactRefs{Record: ArtifactRef{Name: "final/review/record.json", Digest: NewDigest(raw)}, Signature: ArtifactRef{Name: "final/review/record.sig", Digest: NewDigest(signature)}}
+	writeFixtureFile(t, root, pair.Record.Name, raw)
+	writeFixtureFile(t, root, pair.Signature.Name, signature)
+	tx := releaseTransitionFixtureV4()
+	head := CheckpointV4{PreviousCheckpoint: &reviewCheckpoint, Transition: tx, Progress: CheckpointProgressV4{ReleaseReview: &pair, FinalRelease: tx.Record}}
+	reader, err := openCheckpointReaderV4(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.root.Close()
+	refs, err := finalReleaseDownloadArtifactsV4(reader, checkpointAncestryV4{head: head})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"final/release/candidate.json", "final/release/ceremony.json", "final/release/checksums.sha256",
+		"final/release/manifest-public-key.hex", "final/release/manifest.json", "final/release/manifest.sig", "final/release/setup-transcript.json",
+	}
+	names := make([]string, len(refs))
+	for i, ref := range refs {
+		names[i] = ref.Name
+		if filepath.ToSlash(ref.Name) != ref.Name {
+			t.Fatalf("non-portable inventory name %q", ref.Name)
+		}
+	}
+	if !slices.Equal(names, want) {
+		t.Fatalf("inventory names = %v, want %v", names, want)
+	}
 }
 
 func TestFinalReleaseV4CanonicalBootstrap(t *testing.T) {
