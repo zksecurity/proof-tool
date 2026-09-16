@@ -58,7 +58,7 @@ func PrepareInitialCheckpointV4(options InitialCheckpointV4Options) (InitialChec
 		Progress: CheckpointProgressV4{Phase1: CheckpointPhaseState{
 			Phase: Phase1, HeadRecordID: headID, HeadPayload: headPayload, Chain: chainRefs,
 		}},
-		AcceptedArtifacts: appendUniqueSortedArtifactsV4(nil, trusted.DefinitionRefs.Record, trusted.DefinitionRefs.Signature, chainRefs.Record, chainRefs.Signature, headPayload),
+		AcceptedArtifacts: appendUniqueSortedArtifactsV4(nil, trusted.DefinitionRefs.Record, trusted.DefinitionRefs.Signature, d.Circuit.R1CS, chainRefs.Record, chainRefs.Signature, headPayload),
 		Deliveries:        []DeliverySlotV2{},
 	}
 	canonical, err := PrepareCheckpointV4(CheckpointPreparationV4{

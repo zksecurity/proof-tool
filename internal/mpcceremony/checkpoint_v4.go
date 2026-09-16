@@ -221,8 +221,8 @@ func (c CheckpointV4) Validate() error {
 		}
 	}
 	if c.Sequence == 0 {
-		if c.Progress.Phase1.AcceptedCount != 0 || c.Progress.Phase2 != nil || c.Progress.Phase1Closure != nil || len(c.Deliveries) != 0 || len(c.AcceptedArtifacts) != 5 {
-			return errors.New("initial checkpoint must contain exactly the signed definition and genesis chain/payload")
+		if c.Progress.Phase1.AcceptedCount != 0 || c.Progress.Phase2 != nil || c.Progress.Phase1Closure != nil || len(c.Deliveries) != 0 || len(c.AcceptedArtifacts) != 6 {
+			return errors.New("initial checkpoint must contain exactly the signed definition, circuit and genesis chain/payload")
 		}
 	}
 	return nil

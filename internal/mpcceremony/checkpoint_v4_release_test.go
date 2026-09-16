@@ -40,7 +40,11 @@ func TestFinalReleaseV4DerivesClosedDownloadInventory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reader.root.Close()
+	defer func() {
+		if err := reader.root.Close(); err != nil {
+			t.Errorf("close checkpoint reader: %v", err)
+		}
+	}()
 	refs, err := finalReleaseDownloadArtifactsV4(reader, checkpointAncestryV4{head: head})
 	if err != nil {
 		t.Fatal(err)

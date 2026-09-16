@@ -36,7 +36,7 @@ func checkpointFixtureV4(t *testing.T) (CeremonyDefinition, CheckpointV4, []byte
 		AssurancePolicy: cloneAssurancePolicy(d.AssurancePolicy), ReleaseVerification: CoordinatorReplayReleaseV1,
 		Transition:        CheckpointTransitionV4{Kind: CheckpointInitial, Evidence: []ArtifactRef{}},
 		Progress:          CheckpointProgressV4{Phase1: CheckpointPhaseState{Phase: Phase1, HeadRecordID: NewDigest([]byte("head-0")).SHA256, HeadPayload: d.Phase1Genesis, Chain: chain}},
-		AcceptedArtifacts: checkpointArtifacts(def.Record, def.Signature, chain.Record, chain.Signature, d.Phase1Genesis), Deliveries: []DeliverySlotV2{}}
+		AcceptedArtifacts: checkpointArtifacts(def.Record, def.Signature, d.Circuit.R1CS, chain.Record, chain.Signature, d.Phase1Genesis), Deliveries: []DeliverySlotV2{}}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
