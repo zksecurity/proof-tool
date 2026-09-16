@@ -71,6 +71,7 @@ const (
 	CommandCheckpointPrepareV4              Command = "checkpoint prepare-v4"
 	CommandCheckpointSignV4                 Command = "checkpoint sign-v4"
 	CommandCheckpointInitializeV4           Command = "checkpoint initialize-v4"
+	CommandCheckpointRecordV4               Command = "checkpoint record-v4"
 	CommandCheckpointAllocateV4             Command = "checkpoint allocate-v4"
 	CommandCheckpointAcceptCandidateV4      Command = "checkpoint accept-candidate-v4"
 	CommandCheckpointVerifyStoredV4         Command = "checkpoint verify-stored-v4"

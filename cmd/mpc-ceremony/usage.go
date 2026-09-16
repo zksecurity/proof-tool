@@ -309,6 +309,7 @@ phase, participant, index and input head from signed ceremony state, and creates
 a signed candidate-allocation checkpoint. The caller cannot override the turn.
 The output is not current until the delivery service uploads the pair and
 conditionally advances the ceremony head.
+The output directory must be fresh and its parent must already exist.
 `,
 	"checkpoint initialize-v4": `Usage:
   mpc-ceremony checkpoint initialize-v4 --ceremony FILE --ceremony-signature FILE \
@@ -319,6 +320,22 @@ Authenticates the signed V4 definition and stored circuit, fully checks the
 Phase 1 genesis chain and derives the only valid sequence-zero checkpoint.
 Creates a signed pair atomically. The pair is not current until the delivery
 service publishes its immutable files and creates the ceremony root.
+The output directory must be fresh and its parent must already exist.
+`,
+	"checkpoint record-v4": `Usage:
+  mpc-ceremony checkpoint record-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE --transition KIND \
+    --record FILE --record-signature FILE [--evidence FILE ...] \
+    --coordinator-signing-key KEY --out-dir FRESH_DIR
+
+Authenticates the complete current V4 state and the supplied signed protocol
+record, derives the only legal descendant and signs it atomically. This covers
+enrollment, optional assurance evidence, phase closure/beacon/seal/init, final
+candidate review, final release, incidents and aborts. Allocation and candidate
+acceptance use their dedicated commands. The output is not current until the
+delivery service conditionally publishes it.
+The output directory must be fresh and its parent must already exist.
 `,
 	"checkpoint accept-candidate-v4": `Usage:
   mpc-ceremony checkpoint accept-candidate-v4 --ceremony FILE --ceremony-signature FILE \
@@ -332,6 +349,7 @@ and contribution mathematics against its immutable input snapshot, writes the
 accepted transcript artifacts, then creates the signed descendant checkpoint.
 The output is not current until the delivery service conditionally advances the
 ceremony head. No participant transport envelope or custody receipt is used.
+The output directory must be fresh and its parent must already exist.
 `,
 	"checkpoint inspect-enrollments-v4": `Usage:
   mpc-ceremony checkpoint inspect-enrollments-v4 --ceremony FILE --ceremony-signature FILE \
@@ -375,7 +393,7 @@ performed. Keep the report outside final/candidate and final/release.
 `,
 	"checkpoint": `Usage:
   mpc-ceremony checkpoint <prepare|sign|verify|verify-stored> [flags]
-	  mpc-ceremony checkpoint <prepare-v4|sign-v4|initialize-v4|allocate-v4|accept-candidate-v4> [flags]
+	  mpc-ceremony checkpoint <prepare-v4|sign-v4|initialize-v4|record-v4|allocate-v4|accept-candidate-v4> [flags]
 	  mpc-ceremony checkpoint <verify-stored-v4|verify-release-v4> [flags]
   mpc-ceremony checkpoint inspect-signed-v4 [flags]
   mpc-ceremony checkpoint inspect-enrollments-v4 [flags]

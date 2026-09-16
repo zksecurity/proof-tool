@@ -151,6 +151,16 @@ func TestCheckpointV4CLIInitialPrepareSignInspectAndMutation(t *testing.T) {
 	proposalPath, checkedPath, signaturePath := filepath.Join(artifactRoot, "proposal.json"), filepath.Join(artifactRoot, "checked.json"), filepath.Join(artifactRoot, "checked.sig")
 	data := writeJSON(proposalPath, proposal)
 	trustArgs := []string{"--ceremony", created.Outputs["ceremony"], "--ceremony-signature", created.Outputs["ceremony_signature"], "--coordinator-public-key-file", created.Outputs["coordinator_public_key"], "--artifact-root", artifactRoot}
+	initialDir := filepath.Join(artifactRoot, "checkpoints", "initial")
+	if err := os.MkdirAll(filepath.Dir(initialDir), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	initialize := append([]string{"--format", "json", "checkpoint", "initialize-v4"}, trustArgs...)
+	initialize = append(initialize, "--coordinator-signing-key", keyPath, "--out-dir", initialDir)
+	initialized := runCheckpointCommandExecutable(t, executable, initialize)
+	if !bytes.Equal(data, mustReadTestFile(t, initialized.Outputs["checkpoint"])) || initialized.Sequence != 0 {
+		t.Fatal("initialize-v4 did not derive the exact only valid initial checkpoint")
+	}
 	prepare := append([]string{"--format", "json", "checkpoint", "prepare-v4"}, trustArgs...)
 	prepare = append(prepare, "--proposal", proposalPath, "--out", checkedPath)
 	runCheckpointCommandExecutable(t, executable, prepare)
@@ -182,6 +192,38 @@ func TestCheckpointV4CLIInitialPrepareSignInspectAndMutation(t *testing.T) {
 	enrollments := runCheckpointCommandExecutable(t, executable, enrollmentArgs).EnrollmentMetadataV4
 	if enrollments == nil || enrollments.Schema != "proof-tool-mpc-enrollment-metadata-v4" || enrollments.Depth != "committed-enrollment-signatures" || !enrollments.EnrollmentSignaturesVerified || enrollments.DisclosureContentsVerified || enrollments.CompleteRosterVerified || enrollments.GlobalFreshnessVerified || enrollments.Metadata.Checkpoint != projection.CheckpointRefs || len(enrollments.Metadata.Enrollments) != 0 {
 		t.Fatalf("empty enrollment set overclaim or wrong head: %+v", enrollments)
+	}
+	disclosurePath := filepath.Join(artifactRoot, "enrollments", "participant-01", "disclosure.txt")
+	writeDecisionTestFile(t, disclosurePath, []byte("Single-process CLI fixture; no independence claim.\n"), 0o600)
+	disclosure := ref("enrollments/participant-01/disclosure.txt")
+	participant := d.Roster[0].Identity
+	enrollment, err := m.NewEnrollmentRecord(d, mustReadTestFile(t, created.Outputs["ceremony"]), participant, m.EnrollmentParticipant, 1, disclosure, "2026-09-16T00:00:01Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	enrollmentBytes, enrollmentSignature, err := m.SignRecord(enrollment, participant.KeyID, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x11}, ed25519.SeedSize)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	enrollmentPath := filepath.Join(artifactRoot, "enrollments", "participant-01", "record.json")
+	enrollmentSignaturePath := filepath.Join(artifactRoot, "enrollments", "participant-01", "record.sig")
+	writeDecisionTestFile(t, enrollmentPath, enrollmentBytes, 0o600)
+	writeDecisionTestFile(t, enrollmentSignaturePath, enrollmentSignature, 0o600)
+	recordedDir := filepath.Join(artifactRoot, "checkpoints", "participant-enrollment")
+	record := append([]string{"--format", "json", "checkpoint", "record-v4"}, trustArgs...)
+	record = append(record,
+		"--checkpoint", initialized.Outputs["checkpoint"], "--checkpoint-signature", initialized.Outputs["checkpoint_signature"],
+		"--transition", string(m.CheckpointEnrollmentRecorded), "--record", enrollmentPath, "--record-signature", enrollmentSignaturePath,
+		"--evidence", disclosurePath, "--coordinator-signing-key", keyPath, "--out-dir", recordedDir,
+	)
+	recorded := runCheckpointCommandExecutable(t, executable, record)
+	if recorded.Sequence != 1 {
+		t.Fatalf("record-v4 sequence = %d, want 1", recorded.Sequence)
+	}
+	recordedInspect := append([]string{"--format", "json", "checkpoint", "verify-stored-v4"}, trustArgs...)
+	recordedInspect = append(recordedInspect, "--checkpoint", recorded.Outputs["checkpoint"], "--checkpoint-signature", recorded.Outputs["checkpoint_signature"])
+	if got := runCheckpointCommandExecutable(t, executable, recordedInspect).CheckpointInspectionV4; got == nil || got.Checkpoint.Transition.Kind != m.CheckpointEnrollmentRecorded {
+		t.Fatalf("recorded enrollment did not authenticate: %+v", got)
 	}
 	// Sign again only after rereading every required byte, not a saved success marker.
 	genesis := filepath.Join(artifactRoot, payload.Name)
