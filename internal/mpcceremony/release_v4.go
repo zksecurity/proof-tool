@@ -198,7 +198,7 @@ func readReleaseReviewHeadV4(trust TrustPaths, root string, refs SignedArtifactR
 	if err != nil {
 		return CheckpointV4{}, err
 	}
-	defer r.root.Close()
+	defer func() { _ = r.root.Close() }()
 	rb, rs, err := r.pair(refs)
 	if err != nil {
 		return CheckpointV4{}, err

@@ -39,7 +39,7 @@ func InspectComputationOutputV4(trust TrustPaths, predecessor PhaseTranscriptPat
 	if err != nil {
 		return zero, err
 	}
-	defer r.root.Close()
+	defer func() { _ = r.root.Close() }()
 	result, _, err := inspectComputationOutputV4(r, d, chain, expected)
 	if err != nil {
 		return zero, err

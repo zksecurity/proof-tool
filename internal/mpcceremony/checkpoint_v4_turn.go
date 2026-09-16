@@ -43,7 +43,7 @@ func PrepareCandidateAllocationCheckpointV4(options CandidateAllocationCheckpoin
 		return CandidateAllocationCheckpointV4{}, err
 	}
 	if stored.trusted.Definition.Schema != DefinitionSchemaV4 {
-		stored.reader.root.Close()
+		_ = stored.reader.root.Close()
 		return CandidateAllocationCheckpointV4{}, errors.New("candidate allocation requires definition v4")
 	}
 	previous := stored.ancestry.head
@@ -126,12 +126,12 @@ func VerifyAndAcceptAllocatedCandidateV4(options AcceptAllocatedCandidateV4Optio
 		return AcceptedCandidateCheckpointV4{}, err
 	}
 	if stored.trusted.Definition.Schema != DefinitionSchemaV4 {
-		stored.reader.root.Close()
+		_ = stored.reader.root.Close()
 		return AcceptedCandidateCheckpointV4{}, errors.New("candidate acceptance requires definition v4")
 	}
 	allocation, ok := stored.ancestry.allocations[options.AttemptID]
 	if !ok || allocation.Scope == nil {
-		stored.reader.root.Close()
+		_ = stored.reader.root.Close()
 		return AcceptedCandidateCheckpointV4{}, errors.New("candidate attempt is not allocated by the authenticated checkpoint ancestry")
 	}
 	previous := stored.ancestry.head
@@ -143,11 +143,11 @@ func VerifyAndAcceptAllocatedCandidateV4(options AcceptAllocatedCandidateV4Optio
 		}
 	}
 	if !active {
-		stored.reader.root.Close()
+		_ = stored.reader.root.Close()
 		return AcceptedCandidateCheckpointV4{}, errors.New("candidate allocation is no longer active at the authenticated checkpoint")
 	}
 	if err := previous.Progress.currentTurn(scope); err != nil {
-		stored.reader.root.Close()
+		_ = stored.reader.root.Close()
 		return AcceptedCandidateCheckpointV4{}, err
 	}
 	if err := stored.reader.root.Close(); err != nil {

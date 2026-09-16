@@ -213,7 +213,7 @@ func TestCheckpointV4ReaderStreamsAndConfinesFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reader.root.Close()
+	defer func() { _ = reader.root.Close() }()
 	if got, err := reader.read(ref, MaxArtifactSize, false); err != nil || got != nil {
 		t.Fatalf("streaming: %d %v", len(got), err)
 	}
@@ -318,7 +318,7 @@ func TestReceiptV4FindsCommittedHandoffAfterRetirement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reader.root.Close()
+	defer func() { _ = reader.root.Close() }()
 	previous := initial
 	previous.Transition = CheckpointTransitionV4{Kind: CheckpointDeliveryRetired, Evidence: []ArtifactRef{}}
 	tx := CheckpointTransitionV4{Kind: CheckpointPhase1ReceiptAccepted, Scope: &scope, Record: &r}

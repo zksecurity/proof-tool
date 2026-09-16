@@ -74,7 +74,7 @@ func InspectStoredCheckpointV4(trust TrustPaths, root string, head SignedArtifac
 	if err != nil {
 		return CheckpointV4{}, CheckpointCommitmentsV4{}, err
 	}
-	defer c.reader.root.Close()
+	defer func() { _ = c.reader.root.Close() }()
 	index, err := checkpointCommitmentsV4(c.ancestry)
 	return c.ancestry.head, index, err
 }

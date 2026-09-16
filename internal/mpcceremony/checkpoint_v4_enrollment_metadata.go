@@ -28,7 +28,7 @@ func InspectCheckpointGuidanceV4(trust TrustPaths, artifactRoot string, head Sig
 	if err != nil {
 		return CheckpointV4{}, CheckpointCommitmentsV4{}, EnrollmentMetadataV4{}, err
 	}
-	defer c.reader.root.Close()
+	defer func() { _ = c.reader.root.Close() }()
 	index, err := checkpointCommitmentsV4(c.ancestry)
 	if err != nil {
 		return CheckpointV4{}, CheckpointCommitmentsV4{}, EnrollmentMetadataV4{}, err

@@ -66,7 +66,7 @@ func TestCheckpointV4GovernanceSemanticBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reader.root.Close()
+	defer func() { _ = reader.root.Close() }()
 	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{1}, 32))
 	statement := putCheckpointTestFileV4(t, root, "governance/statement.txt", []byte("Public test statement; no private logs.\n"))
 	created, _ := time.Parse(time.RFC3339Nano, d.CreatedAt)
@@ -145,7 +145,7 @@ func TestCheckpointV4RestartAuthenticatesExactNewDefinition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reader.root.Close()
+	defer func() { _ = reader.root.Close() }()
 	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{1}, 32))
 	statement := putCheckpointTestFileV4(t, root, "restart/statement.txt", []byte("Public restart fixture.\n"))
 	created, _ := time.Parse(time.RFC3339Nano, d.CreatedAt)

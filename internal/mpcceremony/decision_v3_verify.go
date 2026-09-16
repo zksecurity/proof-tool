@@ -103,7 +103,7 @@ func VerifyProductionDecisionEvidenceV4(o VerifyProductionDecisionEvidenceV4Opti
 	if err != nil {
 		return empty, err
 	}
-	defer packageReader.root.Close()
+	defer func() { _ = packageReader.root.Close() }()
 	auditors := make([]DecisionAuditorV3, 0, len(release.Transcript.ReleaseReview.Audits))
 	for _, pair := range release.Transcript.ReleaseReview.Audits {
 		raw, _, err := packageReader.pair(pair)
@@ -124,7 +124,7 @@ func VerifyProductionDecisionEvidenceV4(o VerifyProductionDecisionEvidenceV4Opti
 	if err != nil {
 		return empty, err
 	}
-	defer reader.root.Close()
+	defer func() { _ = reader.root.Close() }()
 	refs, err := verifyDecisionExternalEvidenceV3(reader, decision)
 	if err != nil {
 		return empty, err

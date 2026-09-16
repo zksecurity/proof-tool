@@ -98,7 +98,7 @@ func verifyReleaseReviewV4(trust TrustPaths, artifactRoot string, head, bundleRe
 	if err != nil {
 		return ReleaseReviewV4{}, err
 	}
-	defer reader.root.Close()
+	defer func() { _ = reader.root.Close() }()
 	reader.flatCandidate = flatCandidate
 	a, err := loadCheckpointAncestryV4(reader, d, db, ds, head)
 	if err != nil {

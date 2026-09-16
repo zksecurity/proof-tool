@@ -243,7 +243,7 @@ func VerifyStoredCheckpointV4(trust TrustPaths, artifactRoot string, head Signed
 	if err != nil {
 		return CheckpointV4{}, err
 	}
-	defer c.reader.root.Close()
+	defer func() { _ = c.reader.root.Close() }()
 	return c.ancestry.head, nil
 }
 
@@ -275,7 +275,7 @@ func openStoredCheckpointV4(trust TrustPaths, artifactRoot string, head SignedAr
 	}
 	ancestry, err := loadCheckpointAncestryV4(reader, trusted.Definition, db, ds, head)
 	if err != nil {
-		reader.root.Close()
+		_ = reader.root.Close()
 		return nil, err
 	}
 	return &storedCheckpointContextV4{reader: reader, trusted: trusted, definitionBytes: db, ancestry: ancestry}, nil
@@ -319,7 +319,7 @@ func PrepareCheckpointV4(options CheckpointPreparationV4) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer reader.root.Close()
+	defer func() { _ = reader.root.Close() }()
 	var previous *CheckpointV4
 	allocations := map[string]CheckpointTransitionV4{}
 	enrollments := []SignedArtifactRefs{}
@@ -490,7 +490,7 @@ func verifyRejectedInventoryV4(dir string, inventory CandidateInventory) error {
 	if err != nil {
 		return err
 	}
-	defer reader.root.Close()
+	defer func() { _ = reader.root.Close() }()
 	entries, err := reader.root.Open(".")
 	if err != nil {
 		return err

@@ -50,7 +50,7 @@ func InspectContributionInventoryV4(trust TrustPaths, predecessor PhaseTranscrip
 	if err != nil {
 		return ContributionInventoryInspectionV4{}, err
 	}
-	defer reader.root.Close()
+	defer func() { _ = reader.root.Close() }()
 	result, err := inspectContributionInventoryV4(reader, d, chain, expected)
 	if err != nil {
 		return ContributionInventoryInspectionV4{}, err

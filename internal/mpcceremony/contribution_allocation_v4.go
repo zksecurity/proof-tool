@@ -33,7 +33,7 @@ func CreateAllocatedContributionCandidateV4(options AllocatedContributionFilesV4
 	if err != nil {
 		return ContributionFilesResult{}, err
 	}
-	defer stored.reader.root.Close()
+	defer func() { _ = stored.reader.root.Close() }()
 	if stored.trusted.Definition.Schema != DefinitionSchemaV4 {
 		return ContributionFilesResult{}, errors.New("allocated contribution requires definition v4")
 	}

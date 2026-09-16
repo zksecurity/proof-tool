@@ -120,7 +120,7 @@ func verifyFinalReleasePackageV4(trust TrustPaths, root string, c CheckpointV4) 
 	if err != nil {
 		return nil, empty, err
 	}
-	defer reader.root.Close()
+	defer func() { _ = reader.root.Close() }()
 	bootstrap := append(signedArtifacts(c.Transition.Record), c.Transition.Evidence...)
 	for _, ref := range bootstrap {
 		if _, err := reader.read(ref, finalReleaseArtifactLimitV4(ref), false); err != nil {

@@ -40,7 +40,7 @@ func TestCheckpointV4EnrollmentDisclosureLimitMatchesBundle(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err = readCheckpointEnrollmentV4(reader, d, db, refs)
-		reader.root.Close()
+		_ = reader.root.Close()
 		if (err == nil) != (size <= maxEnrollmentDisclosureBytes) {
 			t.Fatalf("size %d: %v", size, err)
 		}
@@ -79,7 +79,7 @@ func TestCheckpointV4ObserverAssignmentBound(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err = readCheckpointEnrollmentV4(reader, d, db, refs)
-		reader.root.Close()
+		_ = reader.root.Close()
 		if (err == nil) != (index <= MaxAuditors) {
 			t.Fatalf("index %d: %v", index, err)
 		}
@@ -108,7 +108,7 @@ func TestCheckpointV4EnrollmentAuthenticatesDisclosureAndUniqueness(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reader.root.Close()
+	defer func() { _ = reader.root.Close() }()
 	tx := CheckpointTransitionV4{Kind: CheckpointEnrollmentRecorded, Record: &refs, Evidence: []ArtifactRef{disclosure}}
 	records := map[string]EnrollmentRecord{}
 	if err = verifyNewCheckpointEnrollmentV4(reader, d, db, tx, records); err != nil {

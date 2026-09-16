@@ -235,7 +235,7 @@ func TestDecisionV3ExternalEvidenceBytesAndSignoff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reader.root.Close()
+	defer func() { _ = reader.root.Close() }()
 	if _, err := verifyDecisionExternalEvidenceV3(reader, x); err != nil {
 		t.Fatal(err)
 	}

@@ -43,7 +43,7 @@ func PrepareOperationalBundleV4(trust TrustPaths, artifactRoot string, head Sign
 	if err != nil {
 		return OperationalBundlePreparationV4{}, err
 	}
-	defer reader.root.Close()
+	defer func() { _ = reader.root.Close() }()
 	ancestry, err := loadCheckpointAncestryV4(reader, trusted.Definition, db, ds, head)
 	if err != nil {
 		return OperationalBundlePreparationV4{}, err
