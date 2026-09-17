@@ -112,6 +112,10 @@ func writeExecutionError(invocation Invocation, err error, args []string, stdout
 	if errors.Is(err, errExecutorNotWired) {
 		code = "engine_not_wired"
 	}
+	var candidateInvalid interface{ CandidateInvalid() }
+	if errors.As(err, &candidateInvalid) {
+		code = "candidate_invalid"
+	}
 	message := redactCLIError(err.Error(), args)
 	if invocation.Global.Format == "json" {
 		payload := struct {

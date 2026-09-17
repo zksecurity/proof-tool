@@ -68,23 +68,29 @@ func inspectComputationOutputV4(r *checkpointReaderV4, d CeremonyDefinition, cha
 		return zero, attestation, err
 	}
 	if err := VerifySignedRecord(record, signature, &attestation, participant.Identity.KeyID, key); err != nil {
-		return zero, attestation, err
+		return zero, attestation, candidateInvalid(err)
 	}
 	previous, err := chain.HeadPayload()
 	if err != nil {
 		return zero, attestation, err
 	}
 	if attestation.CeremonyID != scope.CeremonyID || attestation.Phase != scope.Phase || attestation.PhaseID != chain.PhaseID || attestation.Index != scope.Index || attestation.ParticipantID != scope.ParticipantID || attestation.ParticipantKeyID != participant.Identity.KeyID || attestation.PreviousAcceptanceID != scope.ParentHeadID || attestation.PreviousPayload != previous || attestation.OutputPayload.Name != contributionLogicalNames(scope.Phase, int(scope.Index)).Payload {
-		return zero, attestation, errors.New("candidate attestation differs from the exact expected predecessor and participant")
+		return zero, attestation, candidateInvalid(errors.New("candidate attestation differs from the exact expected predecessor and participant"))
 	}
 	if err := validateAttestationSoftwareBinding(d, attestation); err != nil {
-		return zero, attestation, err
+		return zero, attestation, candidateInvalid(err)
 	}
 	if err := validateContributionChronology(d, chain, attestation); err != nil {
-		return zero, attestation, err
+		return zero, attestation, candidateInvalid(err)
 	}
 	output := attestation.OutputPayload
 	output.Name = "contribution.bin"
+	if err := output.Validate(); err != nil {
+		return zero, attestation, candidateInvalid(err)
+	}
+	if err := validatePortableStorageName(output.Name); err != nil {
+		return zero, attestation, candidateInvalid(err)
+	}
 	if _, err := r.read(output, MaxArtifactSize, false); err != nil {
 		return zero, attestation, err
 	}

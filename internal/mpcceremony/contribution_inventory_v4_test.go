@@ -161,6 +161,28 @@ func TestContributionInventoryV4RejectsPartialChangedAndUnboundWork(t *testing.T
 	}
 }
 
+func TestContributionInventoryV4ClassifiesOnlySemanticCandidateFailures(t *testing.T) {
+	t.Run("signed candidate semantics", func(t *testing.T) {
+		f := localInventoryFixtureV4(t, Phase1)
+		a := f.a
+		a.SourceCommit = strings.Repeat("aa", 20)
+		f.sign(t, a)
+		if _, err := f.inspect(); err == nil || !IsCandidateInvalid(err) {
+			t.Fatalf("candidate semantic failure classification = %v, want candidate invalid", err)
+		}
+	})
+
+	t.Run("candidate file missing", func(t *testing.T) {
+		f := localInventoryFixtureV4(t, Phase1)
+		if err := os.Remove(filepath.Join(f.dir, "attestation.json")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.inspect(); err == nil || IsCandidateInvalid(err) {
+			t.Fatalf("operational failure classification = %v, must not be candidate invalid", err)
+		}
+	})
+}
+
 func TestContributionInventoryV4LaterTurnAndPredecessorTime(t *testing.T) {
 	for _, phase := range []Phase{Phase1, Phase2} {
 		t.Run(string(phase), func(t *testing.T) {

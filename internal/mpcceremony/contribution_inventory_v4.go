@@ -88,10 +88,10 @@ func inspectContributionInventoryV4(r *checkpointReaderV4, d CeremonyDefinition,
 	}
 	var erasure ErasureAttestation
 	if err := VerifySignedRecord(data["erasure.json"], data["erasure.sig"], &erasure, participant.Identity.KeyID, key); err != nil {
-		return zero, err
+		return zero, candidateInvalid(err)
 	}
 	if err := ValidateErasureForContribution(attestation, erasure); err != nil {
-		return zero, err
+		return zero, candidateInvalid(err)
 	}
 	computed := CandidateInventory{Schema: CandidateInventorySchemaV1, Scope: scope, Files: append(append([]ArtifactRef{}, generated.Files...),
 		ArtifactRef{Name: "erasure.json", Digest: NewDigest(data["erasure.json"])},
