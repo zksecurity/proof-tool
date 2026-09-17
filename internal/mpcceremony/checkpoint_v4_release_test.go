@@ -43,6 +43,18 @@ func TestFinalReleaseV4DerivesClosedDownloadInventory(t *testing.T) {
 	}
 }
 
+func TestFinalReleaseV4GuidanceIncludesClosedDownloadInventory(t *testing.T) {
+	reader, head := finalReleaseDownloadFixtureV4(t)
+	defer func() { _ = reader.root.Close() }()
+	index, err := checkpointGuidanceCommitmentsV4(reader, checkpointAncestryV4{head: head})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(index.FinalReleaseArtifacts) != 9 {
+		t.Fatalf("final release guidance inventory has %d artifacts, want 9", len(index.FinalReleaseArtifacts))
+	}
+}
+
 // finalReleaseDownloadFixtureV4 models the real layout: Progress.ReleaseReview
 // is the signed operational-bundle pair, while the ReleaseReviewV4 lives inside
 // the signed final/release/setup-transcript.json. Keeping those two record

@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -121,7 +122,7 @@ func checkpointTurnV4(t *testing.T, d CeremonyDefinition, start CheckpointV4, ph
 }
 
 func TestCheckpointV4FullStructuralLifecycle(t *testing.T) {
-	d, c, _, _ := checkpointFixtureV4(t)
+	d, c, definition, definitionSignature := checkpointFixtureV4(t)
 	turn := checkpointTurnV4(t, d, c, Phase1)
 	c = turn[len(turn)-1]
 	stages := []CheckpointTransitionKind{CheckpointPhase1Closed, CheckpointPhase1BeaconRecorded, CheckpointPhase1Sealed, CheckpointPhase2Initialized, CheckpointPhase2Closed, CheckpointPhase2BeaconRecorded, CheckpointFinalCandidateRecorded, CheckpointReleaseReviewRecorded, CheckpointFinalReleaseRecorded}
@@ -194,6 +195,17 @@ func TestCheckpointV4FullStructuralLifecycle(t *testing.T) {
 	}
 	if c.Progress.FinalRelease == nil {
 		t.Fatal("did not reach final release")
+	}
+	raw, signature, err := SignRecord(c, d.Coordinator.KeyID, adversarialPrivateKey(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	discovery, err := DiscoverSignedCheckpointV4(d, definition, definitionSignature, raw, signature)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(discovery.VerificationDependencies, c.Transition.Evidence) {
+		t.Fatalf("final-release discovery dependencies = %+v, want signed bootstrap evidence %+v", discovery.VerificationDependencies, c.Transition.Evidence)
 	}
 	for _, kind := range []CheckpointTransitionKind{CheckpointIncidentRecorded, CheckpointAborted, CheckpointRestarted} {
 		pair := checkpointSigned("governance/after-release")
