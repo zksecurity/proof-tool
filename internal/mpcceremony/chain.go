@@ -351,28 +351,13 @@ func ValidateAttestationAcceptance(
 	if !ok || participant.Identity.KeyID != attestation.ParticipantKeyID {
 		return errors.New("attestation participant identity does not match definition")
 	}
-	if !definition.Software.AllowsToolBinary(attestation.ToolBinary) ||
-		definition.Software.SourceCommit != attestation.SourceCommit ||
-		definition.Software.GnarkVersion != attestation.GnarkVersion ||
-		definition.Software.GnarkCryptoVersion != attestation.GnarkCryptoVersion ||
-		definition.Software.DrandVersion != attestation.DrandVersion {
-		return errors.New("attestation software binding does not match definition")
+	if err := validateAttestationSoftwareBinding(definition, attestation); err != nil {
+		return err
 	}
-	createdAt, _ := time.Parse(time.RFC3339Nano, definition.CreatedAt)
-	contributedAt, _ := time.Parse(time.RFC3339Nano, attestation.ContributedAt)
 	destroyedAt, _ := time.Parse(time.RFC3339Nano, erasure.DestroyedAt)
 	acceptedAt, _ := time.Parse(time.RFC3339Nano, record.AcceptedAt)
-	if !contributedAt.After(createdAt) {
-		return errors.New("contributed_at must be strictly after the ceremony definition")
-	}
-	if len(chain.Records) > 0 {
-		previousAcceptedAt, _ := time.Parse(
-			time.RFC3339Nano,
-			chain.Records[len(chain.Records)-1].AcceptedAt,
-		)
-		if !contributedAt.After(previousAcceptedAt) {
-			return errors.New("contributed_at must be strictly after the previous acceptance")
-		}
+	if err := validateContributionChronology(definition, chain, attestation); err != nil {
+		return err
 	}
 	if !acceptedAt.After(destroyedAt) {
 		return errors.New("accepted_at must be strictly after destroyed_at")
@@ -608,7 +593,7 @@ func ValidateClose(definition CeremonyDefinition, chain Chain, close CloseRecord
 // witness receipt unsatisfiable. See ProductionWitnessObservationWindowSeconds.
 func requiredCloseLead(definition CeremonyDefinition) time.Duration {
 	lead := time.Duration(definition.BeaconPolicy.MinimumWitnessLeadSeconds) * time.Second
-	witnessesEnabled := definition.Schema != DefinitionSchema ||
+	witnessesEnabled := !definition.UsesSignedAssurancePolicy() ||
 		(definition.AssurancePolicy != nil && definition.AssurancePolicy.PublicWitnessesPerPhase > 0)
 	if definition.Mode == ModeProduction && witnessesEnabled {
 		lead += time.Duration(ProductionWitnessObservationWindowSeconds) * time.Second
@@ -1159,6 +1144,7 @@ type FinalTranscript struct {
 	VerifyingKey        ArtifactRef        `json:"verifying_key"`
 	CardanoVerifyingKey ArtifactRef        `json:"cardano_verifying_key"`
 	FinalizedAt         string             `json:"finalized_at"`
+	ReleaseReview       *ReleaseReviewV4   `json:"release_review,omitempty"`
 }
 
 func NewFinalTranscript(record FinalTranscript) (FinalTranscript, error) {
@@ -1169,7 +1155,7 @@ func NewFinalTranscript(record FinalTranscript) (FinalTranscript, error) {
 			record.Schema = FinalTranscriptSchema
 		}
 	}
-	if record.Schema == FinalTranscriptSchema && record.Audits == nil {
+	if (record.Schema == FinalTranscriptSchema || record.Schema == FinalTranscriptSchemaV3) && record.Audits == nil {
 		record.Audits = []ArtifactRef{}
 	}
 	record.TranscriptID = ""
@@ -1186,9 +1172,14 @@ func ComputeFinalTranscriptID(record FinalTranscript) (string, error) {
 	if err := record.validate(false); err != nil {
 		return "", err
 	}
-	domain := "proof-tool/mpc-ceremony/final-transcript/v2"
-	if record.Schema == FinalTranscriptSchemaV1 {
+	var domain string
+	switch record.Schema {
+	case FinalTranscriptSchemaV1:
 		domain = "proof-tool/mpc-ceremony/final-transcript/v1"
+	case FinalTranscriptSchemaV3:
+		domain = "proof-tool/mpc-ceremony/final-transcript/v3"
+	default:
+		domain = "proof-tool/mpc-ceremony/final-transcript/v2"
 	}
 	return canonicalHash(domain, record)
 }
@@ -1208,8 +1199,11 @@ func (r FinalTranscript) Validate() error {
 }
 
 func (r FinalTranscript) validate(requireID bool) error {
+	if r.Schema != FinalTranscriptSchemaV3 && r.ReleaseReview != nil {
+		return errors.New("legacy final transcripts must not contain release_review")
+	}
 	switch r.Schema {
-	case FinalTranscriptSchema:
+	case FinalTranscriptSchema, FinalTranscriptSchemaV3:
 		if r.AssurancePolicy == nil {
 			return errors.New("final transcript v2 requires assurance_policy")
 		}
@@ -1222,6 +1216,11 @@ func (r FinalTranscript) validate(requireID bool) error {
 		}
 	default:
 		return fmt.Errorf("transcript schema %q is unsupported", r.Schema)
+	}
+	if r.Schema == FinalTranscriptSchemaV3 {
+		if err := validateFinalTranscriptReviewV3(r); err != nil {
+			return err
+		}
 	}
 	if requireID {
 		if err := validateHashID("transcript_id", r.TranscriptID); err != nil {
@@ -1254,7 +1253,7 @@ func (r FinalTranscript) validate(requireID bool) error {
 	if r.Schema == FinalTranscriptSchemaV1 && len(r.Audits) < 1 {
 		return errors.New("final transcript requires at least one independent audit artifact")
 	}
-	if r.Schema == FinalTranscriptSchema {
+	if r.Schema == FinalTranscriptSchema || r.Schema == FinalTranscriptSchemaV3 {
 		if len(r.Audits) < int(r.AssurancePolicy.PassingCeremonyAudits) {
 			return fmt.Errorf("final transcript has %d audits, below signed minimum %d", len(r.Audits), r.AssurancePolicy.PassingCeremonyAudits)
 		}

@@ -234,6 +234,12 @@ func VerifyFinalCandidateCheckpoint(paths ReplayPaths, circuit *CompiledCircuit,
 	if err := verifyCandidateReplay(circuit, &replay, paths, candidate, candidateDir); err != nil {
 		return CandidateMetadata{}, nil, err
 	}
+	return verifyCandidateClosedTree(replay.definition, replay.definitionRef, candidateDir, candidate, candidateRef)
+}
+
+// Shared exact-file check. The caller decides whether its versioned trust
+// model requires contribution replay; this helper never performs that replay.
+func verifyCandidateClosedTree(definition CeremonyDefinition, definitionRef ArtifactRef, candidateDir string, candidate CandidateMetadata, candidateRef ArtifactRef) (CandidateMetadata, []ArtifactRef, error) {
 	names := append(candidateChecksumNames(), CandidateChecksumsFile)
 	expected := make(map[string]struct{}, len(names))
 	for _, name := range names {
@@ -272,7 +278,7 @@ func VerifyFinalCandidateCheckpoint(paths ReplayPaths, circuit *CompiledCircuit,
 			return CandidateMetadata{}, nil, errors.New("finalized candidate record changed during verification")
 		}
 	}
-	verifiedAgain, candidateRefAgain, err := verifyCandidate(replay.definition, replay.definitionRef, candidateDir)
+	verifiedAgain, candidateRefAgain, err := verifyCandidate(definition, definitionRef, candidateDir)
 	if err != nil {
 		return CandidateMetadata{}, nil, fmt.Errorf("finalized candidate changed during closed-tree verification: %w", err)
 	}
@@ -369,6 +375,25 @@ func compareCandidateToReplay(
 	if _, err := readCanonicalFile(filepath.Join(dir, candidate.VerificationReport.Name), &candidateReport); err != nil {
 		return err
 	}
+	if err := validateCandidatePublicReport(candidateReport, cardanoVK, format); err != nil {
+		return err
+	}
+	if err := verifyPublicFinalizationEvidence(dir, candidate, candidateReport); err != nil {
+		return err
+	}
+	if _, _, _, err := loadAndVerifyPublicEvidence(
+		filepath.Join(dir, candidate.PublicEvidence.Name),
+		replay.definition.CeremonyID,
+		vk,
+		cardanoVK,
+		candidate.CardanoVerifyingKey,
+	); err != nil {
+		return fmt.Errorf("independent native public-evidence verification: %w", err)
+	}
+	return nil
+}
+
+func validateCandidatePublicReport(candidateReport VerificationReport, cardanoVK []byte, format string) error {
 	if candidateReport.CardanoVKRawDigest != NewDigest(cardanoVK) ||
 		candidateReport.CardanoVKBytes != len(cardanoVK) ||
 		candidateReport.CardanoVKFormat != format ||
@@ -384,19 +409,26 @@ func compareCandidateToReplay(
 		!candidateReport.ProofAppendRejected {
 		return errors.New("candidate verification report is not reproduced by independent evidence")
 	}
-	if err := verifyPublicFinalizationEvidence(dir, candidate, candidateReport); err != nil {
-		return err
-	}
-	if _, _, _, err := loadAndVerifyPublicEvidence(
-		filepath.Join(dir, candidate.PublicEvidence.Name),
-		replay.definition.CeremonyID,
-		vk,
-		cardanoVK,
-		candidate.CardanoVerifyingKey,
-	); err != nil {
-		return fmt.Errorf("independent native public-evidence verification: %w", err)
-	}
 	return nil
+}
+
+// Pin released replay semantics to explicit identifiers, not the moving
+// DefinitionSchema default. Future formats must add a separately verified path.
+func verifyRequiredReleaseSignerReplay(schema string, options SignReleaseOptions) error {
+	switch schema {
+	case DefinitionSchemaV1, DefinitionSchemaV2:
+		return nil
+	case DefinitionSchemaV3:
+		if options.Replay == nil || options.Circuit == nil {
+			return errors.New("storage-first release signing requires independent two-phase replay inputs")
+		}
+		if _, err := ReplayCandidate(*options.Replay, options.Circuit, options.CandidateDir); err != nil {
+			return fmt.Errorf("release-signer independent replay: %w", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported release-signing definition schema %q", schema)
+	}
 }
 
 // SignRelease validates the signed definition's required passing-audit count,
@@ -431,13 +463,8 @@ func SignRelease(options SignReleaseOptions) (*SignReleaseResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	if definition.Schema == DefinitionSchema {
-		if options.Replay == nil || options.Circuit == nil {
-			return nil, errors.New("storage-first release signing requires independent two-phase replay inputs")
-		}
-		if _, err := ReplayCandidate(*options.Replay, options.Circuit, options.CandidateDir); err != nil {
-			return nil, fmt.Errorf("release-signer independent replay: %w", err)
-		}
+	if err := verifyRequiredReleaseSignerReplay(definition.Schema, options); err != nil {
+		return nil, err
 	}
 	if options.SignatureKeyID != definition.ReleaseSigner.KeyID {
 		return nil, fmt.Errorf(
@@ -661,6 +688,9 @@ func VerifyRelease(options VerifyReleaseOptions) (*VerifyReleaseResult, error) {
 	if err := requireIdentityKey(definition.Coordinator, coordinatorPublicKey); err != nil {
 		return nil, err
 	}
+	if definition.Schema == DefinitionSchemaV4 {
+		return nil, errors.New("definition v4 requires the versioned trusted-coordinator release verification path")
+	}
 	if options.ExpectedSignatureKeyID != definition.ReleaseSigner.KeyID {
 		return nil, errors.New("expected release signature key id does not match ceremony definition")
 	}
@@ -702,6 +732,9 @@ func VerifyRelease(options VerifyReleaseOptions) (*VerifyReleaseResult, error) {
 	transcriptRef, err := readCanonicalFile(filepath.Join(options.KeysDir, FinalTranscriptFile), &transcript)
 	if err != nil {
 		return nil, err
+	}
+	if transcript.Schema == FinalTranscriptSchemaV3 {
+		return nil, errors.New("final transcript v3 requires the definition v4 release path")
 	}
 	bundledAudits, err := bundledAuditsForTranscript(options.KeysDir, transcript.Audits)
 	if err != nil {
@@ -766,14 +799,7 @@ func VerifyRelease(options VerifyReleaseOptions) (*VerifyReleaseResult, error) {
 		len(manifest.ArtifactURLs) != 0 {
 		return nil, errors.New("manifest does not exactly bind candidate key artifacts and signed provenance")
 	}
-	if _, err := ReadR1CSFile(filepath.Join(options.KeysDir, candidate.ConstraintSystem.Name), definition.Circuit); err != nil {
-		return nil, err
-	}
-	vk, err := prover.LoadVK(filepath.Join(options.KeysDir, NativeVerifyingKeyFile))
-	if err != nil {
-		return nil, err
-	}
-	if err := verifyCardanoFiles(options.KeysDir, candidate, vk); err != nil {
+	if _, err := verifyCandidateKeyExports(definition, candidate, options.KeysDir); err != nil {
 		return nil, err
 	}
 	if err := verifyChecksumsExact(
@@ -1073,16 +1099,57 @@ func verifyPassingAudits(
 	candidate CandidateMetadata,
 	inputs []AuditArtifact,
 ) ([]ArtifactRef, time.Time, error) {
+	if err := validateAuditCollectionCount(definition, len(inputs), true); err != nil {
+		return nil, time.Time{}, err
+	}
+	raw := make([]signedAuditInput, 0, len(inputs))
+	for index, input := range inputs {
+		record, err := readRegularFile(input.RecordPath)
+		if err != nil {
+			return nil, time.Time{}, fmt.Errorf("audit %d: %w", index, err)
+		}
+		signature, err := readRegularFile(input.SignaturePath)
+		if err != nil {
+			return nil, time.Time{}, fmt.Errorf("audit %d signature: %w", index, err)
+		}
+		name := input.LogicalName
+		if name == "" {
+			name = filepath.Base(input.RecordPath)
+		}
+		raw = append(raw, signedAuditInput{record: record, signature: signature, name: name})
+	}
+	return verifyAuditCollection(definition, candidate, raw, true)
+}
+
+type signedAuditInput struct {
+	record, signature []byte
+	name              string
+}
+
+// Collection mode postpones only the count gate. It does not weaken the
+// signed disabled-policy rule, signatures, candidate binding or uniqueness.
+func verifyAuditCollection(definition CeremonyDefinition, candidate CandidateMetadata, inputs []signedAuditInput, requireMinimum bool) ([]ArtifactRef, time.Time, error) {
+	if err := validateAuditCollectionCount(definition, len(inputs), requireMinimum); err != nil {
+		return nil, time.Time{}, err
+	}
+	return verifyAuditCollectionRecords(definition, candidate, inputs)
+}
+
+func validateAuditCollectionCount(definition CeremonyDefinition, count int, requireMinimum bool) error {
 	minimum := 1
-	if definition.Schema == DefinitionSchema {
+	if definition.UsesSignedAssurancePolicy() {
 		minimum = int(definition.AssurancePolicy.PassingCeremonyAudits)
 	}
-	if len(inputs) < minimum {
-		return nil, time.Time{}, fmt.Errorf("have %d passing ceremony audits, need %d", len(inputs), minimum)
+	if requireMinimum && count < minimum {
+		return fmt.Errorf("have %d passing ceremony audits, need %d", count, minimum)
 	}
-	if minimum == 0 && len(inputs) != 0 {
-		return nil, time.Time{}, errors.New("ceremony audit artifacts are forbidden when audits are disabled")
+	if minimum == 0 && count != 0 {
+		return errors.New("ceremony audit artifacts are forbidden when audits are disabled")
 	}
+	return nil
+}
+
+func verifyAuditCollectionRecords(definition CeremonyDefinition, candidate CandidateMetadata, inputs []signedAuditInput) ([]ArtifactRef, time.Time, error) {
 	replayRoot, err := replayRootSHA256(candidate)
 	if err != nil {
 		return nil, time.Time{}, err
@@ -1104,14 +1171,7 @@ func verifyPassingAudits(
 		Digest: NewDigest(candidateBytes),
 	})
 	for index, input := range inputs {
-		recordBytes, err := readRegularFile(input.RecordPath)
-		if err != nil {
-			return nil, time.Time{}, fmt.Errorf("audit %d: %w", index, err)
-		}
-		signatureBytes, err := readRegularFile(input.SignaturePath)
-		if err != nil {
-			return nil, time.Time{}, fmt.Errorf("audit %d signature: %w", index, err)
-		}
+		recordBytes, signatureBytes := input.record, input.signature
 		var unsigned AuditRecord
 		if err := UnmarshalCanonical(recordBytes, &unsigned); err != nil {
 			return nil, time.Time{}, fmt.Errorf("audit %d: %w", index, err)
@@ -1158,11 +1218,7 @@ func verifyPassingAudits(
 		}
 		seenAuditor[record.AuditorID] = struct{}{}
 		seenKey[record.AuditorKeyID] = struct{}{}
-		name := input.LogicalName
-		if name == "" {
-			name = filepath.Base(input.RecordPath)
-		}
-		ref := ArtifactRef{Name: name, Digest: NewDigest(recordBytes)}
+		ref := ArtifactRef{Name: input.name, Digest: NewDigest(recordBytes)}
 		if err := ref.Validate(); err != nil {
 			return nil, time.Time{}, err
 		}
@@ -1238,7 +1294,11 @@ func streamingDigest(write func(io.Writer) (int64, error)) (Digest, error) {
 }
 
 func verifyChecksumsExact(dir, checksumPath string, expectedNames []string) error {
-	data, err := readRegularFile(checksumPath)
+	return verifyChecksumsExactWithLimit(dir, checksumPath, expectedNames, maxSignedRecordBytes)
+}
+
+func verifyChecksumsExactWithLimit(dir, checksumPath string, expectedNames []string, limit int64) error {
+	data, err := readRegularBounded(checksumPath, limit)
 	if err != nil {
 		return err
 	}
@@ -1246,47 +1306,61 @@ func verifyChecksumsExact(dir, checksumPath string, expectedNames []string) erro
 	if err != nil {
 		return fmt.Errorf("checksum file path: %w", err)
 	}
+	entries, err := parseChecksumsExact(data, checksumName, expectedNames)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		path, err := resolveArtifactPath(dir, entry.name)
+		if err != nil {
+			return err
+		}
+		ref, err := artifactRefForFile(entry.name, path)
+		if err != nil {
+			return err
+		}
+		if strings.TrimPrefix(ref.Digest.SHA256, "sha256:") != entry.sha256 {
+			return fmt.Errorf("checksum mismatch for %q", entry.name)
+		}
+	}
+	return nil
+}
+
+type checksumEntry struct{ name, sha256 string }
+
+func parseChecksumsExact(data []byte, checksumName string, expectedNames []string) ([]checksumEntry, error) {
 	lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
 	if len(lines) == 0 || (len(lines) == 1 && lines[0] == "") {
-		return errors.New("checksum file is empty")
+		return nil, errors.New("checksum file is empty")
 	}
 	expected := append([]string(nil), expectedNames...)
 	slices.Sort(expected)
 	if len(lines) != len(expected) {
-		return fmt.Errorf("checksum file has %d entries, want exactly %d", len(lines), len(expected))
+		return nil, fmt.Errorf("checksum file has %d entries, want exactly %d", len(lines), len(expected))
 	}
 	seen := make(map[string]struct{}, len(lines))
+	entries := make([]checksumEntry, 0, len(lines))
 	for index, line := range lines {
 		if len(line) < 67 || line[64:66] != "  " {
-			return errors.New("invalid checksum line")
+			return nil, errors.New("invalid checksum line")
 		}
 		hashHex, name := line[:64], line[66:]
 		if _, err := hex.DecodeString(hashHex); err != nil {
-			return errors.New("invalid checksum hash")
+			return nil, errors.New("invalid checksum hash")
 		}
 		if err := validateArtifactName(name); err != nil || name == checksumName {
-			return errors.New("invalid checksum artifact name")
+			return nil, errors.New("invalid checksum artifact name")
 		}
 		if name != expected[index] {
-			return fmt.Errorf("checksum entry %d is %q, want %q", index, name, expected[index])
+			return nil, fmt.Errorf("checksum entry %d is %q, want %q", index, name, expected[index])
 		}
 		if _, duplicate := seen[name]; duplicate {
-			return fmt.Errorf("duplicate checksum for %q", name)
+			return nil, fmt.Errorf("duplicate checksum for %q", name)
 		}
 		seen[name] = struct{}{}
-		path, err := resolveArtifactPath(dir, name)
-		if err != nil {
-			return err
-		}
-		ref, err := artifactRefForFile(name, path)
-		if err != nil {
-			return err
-		}
-		if strings.TrimPrefix(ref.Digest.SHA256, "sha256:") != hashHex {
-			return fmt.Errorf("checksum mismatch for %q", name)
-		}
+		entries = append(entries, checksumEntry{name, hashHex})
 	}
-	return nil
+	return entries, nil
 }
 
 func candidateChecksumNames() []string {
@@ -1746,12 +1820,13 @@ func publishReleaseDirectory(stagingDir, releaseDir string) (err error) {
 }
 
 func verifyReleaseTreeExact(dir string, auditCount int, operationalNames []string) error {
+	return verifyExactReleaseFiles(dir, append(releaseChecksumNames(auditCount, operationalNames), ReleaseChecksumsFile), false)
+}
+
+func verifyExactReleaseFiles(dir string, names []string, rejectHardlinks bool) error {
 	expectedFiles := make(map[string]struct{})
 	expectedDirectories := map[string]struct{}{".": {}}
-	for _, name := range append(
-		releaseChecksumNames(auditCount, operationalNames),
-		ReleaseChecksumsFile,
-	) {
+	for _, name := range names {
 		if err := validateArtifactName(name); err != nil {
 			return fmt.Errorf("expected release artifact %q: %w", name, err)
 		}
@@ -1788,6 +1863,11 @@ func verifyReleaseTreeExact(dir string, auditCount int, operationalNames []strin
 		}
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("release-tree entry %q is not a regular file", name)
+		}
+		if rejectHardlinks {
+			if err := requireSingleLinkV4(info); err != nil {
+				return fmt.Errorf("release-tree entry %q: %w", name, err)
+			}
 		}
 		if _, ok := expectedFiles[name]; !ok {
 			return fmt.Errorf("unexpected release-tree entry %q", name)

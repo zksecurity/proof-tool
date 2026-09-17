@@ -25,7 +25,7 @@ type discoveredOperational struct {
 func PrepareOperationalEvidence(definition CeremonyDefinition, root, assembledAt string) (OperationalPreparation, error) {
 	bundleSchema := OperationalEvidenceBundleSchema
 	bundleAssurance := cloneAssurancePolicy(definition.AssurancePolicy)
-	if definition.Schema != DefinitionSchema {
+	if !definition.UsesSignedAssurancePolicy() {
 		bundleSchema = OperationalEvidenceBundleSchemaV2
 		bundleAssurance = nil
 	}
@@ -42,7 +42,7 @@ func PrepareOperationalEvidence(definition CeremonyDefinition, root, assembledAt
 		return result, err
 	}
 	assurance := defaultAssurancePolicy(definition.Mode)
-	if definition.Schema == DefinitionSchema {
+	if definition.UsesSignedAssurancePolicy() {
 		assurance = *definition.AssurancePolicy
 	}
 	var records []discoveredOperational

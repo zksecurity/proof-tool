@@ -207,6 +207,18 @@ func parseInspectSubcommand(invocation Invocation, args []string) (Invocation, e
 		return Invocation{}, &helpRequest{topic: append([]string{"inspect"}, args[1:]...)}
 	}
 	switch args[0] {
+	case "definition-protocol":
+		options, err := parseInspectDefinition(args[1:])
+		invocation.Command, invocation.Options = CommandInspectDefinitionProtocol, options
+		return invocation, wrapCommandError(err, "inspect", "definition-protocol")
+	case "contribution-inventory-v4":
+		options, err := parseContributionInventoryV4(args[1:])
+		invocation.Command, invocation.Options = CommandInspectContributionInventoryV4, options
+		return invocation, wrapCommandError(err, "inspect", "contribution-inventory-v4")
+	case "computation-output-v4":
+		options, err := parseContributionInspectionV4("computation-output-v4", args[1:])
+		invocation.Command, invocation.Options = CommandInspectComputationOutputV4, options
+		return invocation, wrapCommandError(err, "inspect", "computation-output-v4")
 	case "definition":
 		options, err := parseInspectDefinition(args[1:])
 		invocation.Command, invocation.Options = CommandInspectDefinition, options
@@ -465,9 +477,15 @@ func parseDecisionPrepare(args []string) (DecisionPrepareOptions, error) {
 		&options.CoordinatorPublicKeyFile,
 	)
 	fs.StringVar(&options.DraftPath, "draft", "", "canonical production-decision draft JSON")
+	fs.StringVar(&options.EvidenceRoot, "evidence-root", "", "required local evidence root for definition v4")
 	fs.StringVar(&options.OutPath, "out", "", "fresh canonical content-addressed decision output")
 	if err := parseFlags(fs, args); err != nil {
 		return options, err
+	}
+	if options.EvidenceRoot != "" {
+		if err := validatePathValue("--evidence-root", options.EvidenceRoot); err != nil {
+			return options, err
+		}
 	}
 	return options, requireValues(
 		pathValue("--ceremony", options.CeremonyPath),
@@ -563,6 +581,11 @@ func parseOps(invocation Invocation, args []string) (Invocation, error) {
 		options, err := parseOpsPrepareBundle(args[1:])
 		invocation.Command, invocation.Options = CommandOpsPrepareBundle, options
 		return invocation, wrapCommandError(err, "ops", "prepare-bundle")
+	case "prepare-bundle-v4", "sign-bundle-v4":
+		invocation.Command = Command("ops " + args[0])
+		options, err := parseEvidenceV4(invocation.Command, args[1:])
+		invocation.Options = options
+		return invocation, wrapCommandError(err, "ops", args[0])
 	case "prepare-public-witness-receipt":
 		options, err := parseOpsPreparePublicWitnessReceipt(args[1:])
 		invocation.Command, invocation.Options = CommandOpsPreparePublicWitnessReceipt, options
@@ -816,6 +839,10 @@ func parseRelease(invocation Invocation, args []string) (Invocation, error) {
 		return Invocation{}, &helpRequest{topic: append([]string{"release"}, args[1:]...)}
 	}
 	switch args[0] {
+	case "review-v4":
+		options, err := parseEvidenceV4(CommandReleaseReviewV4, args[1:])
+		invocation.Command, invocation.Options = CommandReleaseReviewV4, options
+		return invocation, wrapCommandError(err, "release", args[0])
 	case "sign":
 		options, err := parseReleaseSign(args[1:])
 		invocation.Command, invocation.Options = CommandReleaseSign, options
@@ -836,6 +863,7 @@ func parseInit(args []string) (InitOptions, error) {
 	var options InitOptions
 	var allowedBinaries stringList
 	fs := commandFlagSet("init")
+	fs.StringVar(&options.ReleaseVerification, "release-verification", "", "opt into definition v4 with coordinator-full-replay-v1; omitted preserves v3")
 	fs.StringVar(&options.SessionNonceHex, "session-nonce-hex", "", "optional 32-byte session nonce as hex; generated securely when omitted")
 	fs.StringVar(&options.CreatedAt, "created-at", "", "ceremony creation timestamp in RFC3339")
 	fs.StringVar(&options.KeyVersion, "key-version", "", "repository key version (ownership-destination-v2, or rehearsal-tiny-v1 with --mode rehearsal)")
@@ -850,6 +878,9 @@ func parseInit(args []string) (InitOptions, error) {
 		return options, err
 	}
 	options.AllowedBinaryPaths = append([]string(nil), allowedBinaries...)
+	if options.ReleaseVerification != "" && options.ReleaseVerification != mpcceremony.CoordinatorReplayReleaseV1 {
+		return options, errors.New("--release-verification must be coordinator-full-replay-v1 or omitted")
+	}
 	for _, path := range options.AllowedBinaryPaths {
 		if err := validatePathValue("--allowed-binary", path); err != nil {
 			return options, err
@@ -902,6 +933,10 @@ func parseContribute(name string, args []string, phase2 bool) (ContributeOptions
 	fs.StringVar(&options.EnvironmentPath, "environment", "", "canonical contribution environment attestation JSON path")
 	fs.StringVar(&options.ContributedAt, "contributed-at", "", "contribution timestamp in RFC3339")
 	fs.StringVar(&options.OutDir, "out-dir", "", "fresh candidate contribution directory")
+	fs.StringVar(&options.ArtifactRoot, "artifact-root", "", "definition v4 authenticated artifact root")
+	fs.StringVar(&options.CheckpointPath, "checkpoint", "", "definition v4 signed allocation checkpoint")
+	fs.StringVar(&options.CheckpointSignaturePath, "checkpoint-signature", "", "definition v4 detached allocation checkpoint signature")
+	fs.StringVar(&options.AttemptID, "attempt-id", "", "definition v4 preallocated candidate attempt")
 	if err := parseFlags(fs, args); err != nil {
 		return options, err
 	}
@@ -1233,6 +1268,8 @@ func parseReleaseSign(args []string) (ReleaseSignOptions, error) {
 	fs := commandFlagSet("release sign")
 	addCeremonyTrustFlags(fs, &options.CeremonyPath, &options.CeremonySignaturePath, &options.CoordinatorPublicKeyFile)
 	fs.StringVar(&options.CandidateBundleDir, "candidate-bundle", "", "audited candidate key bundle directory")
+	fs.StringVar(&options.ReviewCheckpointPath, "review-checkpoint", "", "V4 exact signed review checkpoint under operational-evidence-root")
+	fs.StringVar(&options.ReviewSignaturePath, "review-checkpoint-signature", "", "V4 review checkpoint signature under operational-evidence-root")
 	fs.Var(&auditReports, "audit-report", "independent audit report path; repeat in auditor order")
 	fs.Var(&auditSignatures, "audit-signature", "detached audit signature path; repeat in matching order")
 	fs.StringVar(&options.OperationalEvidenceRoot, "operational-evidence-root", "", "local root containing the complete operational evidence tree")
@@ -1252,7 +1289,6 @@ func parseReleaseSign(args []string) (ReleaseSignOptions, error) {
 		pathValue("--ceremony", options.CeremonyPath),
 		pathValue("--ceremony-signature", options.CeremonySignaturePath),
 		pathValue("--coordinator-public-key-file", options.CoordinatorPublicKeyFile),
-		pathValue("--candidate-bundle", options.CandidateBundleDir),
 		pathValue("--operational-evidence-root", options.OperationalEvidenceRoot),
 		pathValue("--operational-bundle", options.OperationalBundlePath),
 		pathValue("--operational-bundle-signature", options.OperationalSignaturePath),
@@ -1261,6 +1297,15 @@ func parseReleaseSign(args []string) (ReleaseSignOptions, error) {
 		value("--released-at", options.ReleasedAt),
 		pathValue("--release-dir", options.ReleaseDir),
 	); err != nil {
+		return options, err
+	}
+	if options.ReviewCheckpointPath != "" || options.ReviewSignaturePath != "" {
+		if err := requireValues(pathValue("--review-checkpoint", options.ReviewCheckpointPath), pathValue("--review-checkpoint-signature", options.ReviewSignaturePath)); err != nil {
+			return options, err
+		}
+		return options, validateReleaseSignShapeV4(options)
+	}
+	if err := requireValues(pathValue("--candidate-bundle", options.CandidateBundleDir)); err != nil {
 		return options, err
 	}
 	if err := validateAuditArtifacts(options.AuditReportPaths, options.AuditSignaturePaths); err != nil {

@@ -866,7 +866,7 @@ func ValidatePublicWitnessReceipt(
 	closeBytes []byte,
 	receipt PublicWitnessReceipt,
 ) error {
-	if definition.Schema == DefinitionSchema && definition.AssurancePolicy != nil && definition.AssurancePolicy.PublicWitnessesPerPhase == 0 {
+	if definition.UsesSignedAssurancePolicy() && definition.AssurancePolicy != nil && definition.AssurancePolicy.PublicWitnessesPerPhase == 0 {
 		return errors.New("public witnessing is disabled by the signed assurance policy")
 	}
 	if err := validatePublicWitnessCloseBinding(definition, close); err != nil {
@@ -1043,7 +1043,7 @@ func verifyEnrollmentBinding(definition CeremonyDefinition, definitionBytes []by
 	identity, role, index, ok := definitionRoleAt(definition, record.Identity.ID)
 	switch record.Role {
 	case EnrollmentPublicWitness, EnrollmentMirrorOperator:
-		if definition.Schema == DefinitionSchema && definition.AssurancePolicy != nil {
+		if definition.UsesSignedAssurancePolicy() && definition.AssurancePolicy != nil {
 			if record.Role == EnrollmentPublicWitness && definition.AssurancePolicy.PublicWitnessesPerPhase == 0 {
 				return errors.New("public-witness enrollment is disabled by the signed assurance policy")
 			}

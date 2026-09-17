@@ -112,6 +112,10 @@ func writeExecutionError(invocation Invocation, err error, args []string, stdout
 	if errors.Is(err, errExecutorNotWired) {
 		code = "engine_not_wired"
 	}
+	var candidateInvalid interface{ CandidateInvalid() }
+	if errors.As(err, &candidateInvalid) {
+		code = "candidate_invalid"
+	}
 	message := redactCLIError(err.Error(), args)
 	if invocation.Global.Format == "json" {
 		payload := struct {
@@ -271,16 +275,16 @@ command:
 			"contribute": {}, "help": {}, "init": {}, "verify": {},
 		},
 		"decision":   {"help": {}, "prepare": {}, "sign": {}, "verify": {}},
-		"checkpoint": {"help": {}, "prepare": {}, "sign": {}, "verify": {}, "verify-stored": {}},
+		"checkpoint": {"help": {}, "prepare": {}, "sign": {}, "verify": {}, "verify-stored": {}, "prepare-v4": {}, "sign-v4": {}, "allocate-v4": {}, "accept-candidate-v4": {}, "reject-candidate-v4": {}, "verify-stored-v4": {}, "verify-release-v4": {}, "inspect-signed-v4": {}, "inspect-enrollments-v4": {}},
 		"inspect": {
-			"chain": {}, "checkpoint": {}, "checkpoint-transition": {}, "definition": {}, "enrollment": {}, "help": {}, "participant": {},
+			"chain": {}, "checkpoint": {}, "checkpoint-transition": {}, "definition": {}, "definition-protocol": {}, "enrollment": {}, "help": {}, "participant": {},
 		},
 		"ops": {
 			"export-signing": {}, "help": {}, "import-signature": {}, "sign": {}, "prepare-enrollment": {}, "prepare-handoff": {}, "prepare-receipt": {},
-			"prepare-mirror-receipt": {}, "prepare-public-witness-receipt": {}, "prepare-bundle": {}, "verify": {},
+			"prepare-mirror-receipt": {}, "prepare-public-witness-receipt": {}, "prepare-bundle": {}, "prepare-bundle-v4": {}, "sign-bundle-v4": {}, "verify": {},
 		},
 		"finalize":  {"prepare": {}, "complete": {}, "rehearsal-evidence": {}},
-		"release":   {"help": {}, "sign": {}, "verify": {}},
+		"release":   {"help": {}, "sign": {}, "verify": {}, "review-v4": {}},
 		"rehearsal": {"help": {}, "init": {}},
 	}
 	allowed, hasSubcommands := subcommands[args[index]]
@@ -346,7 +350,9 @@ func writeParseError(message string, args []string, stdout, stderr io.Writer) in
 // redacted, including values following a recognized flag.
 func markOperationalGrammar(args []string, safe map[int]struct{}) {
 	for index, arg := range args {
-		if arg == "--related-record" || arg == "--record-type" || arg == "--reviewed-sha256" || arg == "--evidence-root" {
+		switch arg {
+		case "--related-record", "--record-type", "--reviewed-sha256", "--evidence-root",
+			"--release-verification", "--review-checkpoint", "--review-checkpoint-signature", "--proposal", "--rejected-candidate-dir", "--assembled-at", "--inventory-out":
 			safe[index] = struct{}{}
 		}
 		if index > 0 && args[index-1] == "--record-type" {

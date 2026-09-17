@@ -1076,6 +1076,43 @@ func TestRunCLIRejectsResultOutputFailure(t *testing.T) {
 	}
 }
 
+type candidateInvalidTestError struct{}
+
+func (candidateInvalidTestError) Error() string     { return "candidate semantic validation failed" }
+func (candidateInvalidTestError) CandidateInvalid() {}
+
+func TestWriteExecutionErrorJSONClassifiesCandidateInvalidOnly(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "semantic candidate failure", err: candidateInvalidTestError{}, want: "candidate_invalid"},
+		{name: "operational failure", err: errors.New("candidate file missing"), want: "internal_error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			exitCode := writeExecutionError(Invocation{Global: GlobalOptions{Format: "json"}, Command: CommandInspectContributionInventoryV4}, tc.err, []string{"--format=json", "inspect", "contribution-inventory-v4"}, &stdout, &stderr)
+			if exitCode != 6 || stderr.Len() != 0 {
+				t.Fatalf("exit/stderr = %d/%q", exitCode, stderr.String())
+			}
+			var result struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+				t.Fatalf("decode JSON error = %v; stdout = %q", err, stdout.String())
+			}
+			if result.Error.Code != tc.want {
+				t.Fatalf("error code = %q, want %q", result.Error.Code, tc.want)
+			}
+		})
+	}
+}
+
 type failingWriter struct{}
 
 func (failingWriter) Write([]byte) (int, error) {

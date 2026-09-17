@@ -53,6 +53,7 @@ type TrustPaths struct {
 // externally supplied coordinator trust anchor.
 type TrustedCeremony struct {
 	Definition           CeremonyDefinition
+	DefinitionRefs       SignedArtifactRefs
 	CoordinatorPublicKey ed25519.PublicKey
 	RunningSoftware      SoftwareBinding
 }
@@ -276,7 +277,11 @@ func LoadSignedDefinition(paths TrustPaths) (*TrustedCeremony, error) {
 		return nil, errors.New("external coordinator public key does not match the signed coordinator identity")
 	}
 	return &TrustedCeremony{
-		Definition:           definition,
+		Definition: definition,
+		DefinitionRefs: SignedArtifactRefs{
+			Record:    ArtifactRef{Name: "ceremony.json", Digest: modelDigest(artifactDigestBytes(definitionBytes))},
+			Signature: ArtifactRef{Name: "ceremony.sig", Digest: modelDigest(artifactDigestBytes(signatureBytes))},
+		},
 		CoordinatorPublicKey: bytes.Clone(publicKey),
 	}, nil
 }
@@ -782,6 +787,10 @@ type ContributionFilesOptions struct {
 	Environment               ContributionEnvironment
 	ContributedAt             string
 	CandidateDir              string
+	// ExpectedScope is set by the V4 allocation-aware entry point. It is
+	// checked after the signed chain is loaded and before contribution
+	// randomness is sampled. Legacy callers leave it nil.
+	ExpectedScope *ContributionScope
 }
 
 type ContributionFilesResult struct {
@@ -875,6 +884,25 @@ func CreateContributionCandidate(options ContributionFilesOptions) (result Contr
 	index := len(chain.Records) + 1
 	if index > len(policy.Participants) || policy.Participants[index-1] != options.ParticipantID {
 		return result, fmt.Errorf("participant %q is not scheduled at contribution index %d", options.ParticipantID, index)
+	}
+	if options.ExpectedScope != nil {
+		if index > 255 {
+			return result, errors.New("contribution index exceeds protocol limit")
+		}
+		head, headErr := chain.HeadRecordID()
+		if headErr != nil {
+			return result, headErr
+		}
+		actual := ContributionScope{
+			CeremonyID:    trusted.Definition.CeremonyID,
+			Phase:         options.Phase,
+			Index:         uint8(index),
+			ParticipantID: options.ParticipantID,
+			ParentHeadID:  head,
+		}
+		if actual != *options.ExpectedScope {
+			return result, errors.New("authenticated allocation does not match the exact contribution input snapshot")
+		}
 	}
 	if _, statErr := os.Lstat(options.CandidateDir); statErr == nil {
 		return result, fmt.Errorf("fresh candidate directory already exists: %w", fs.ErrExist)
@@ -1064,6 +1092,10 @@ type AcceptContributionFilesOptions struct {
 	CandidateDir              string
 	CoordinatorPrivateKeyPath string
 	AcceptedAt                string
+	// ClassifyCandidateInvalid is set only by the authenticated V4 allocation
+	// boundary. It exposes stable candidate-content failures to the recovery
+	// protocol without relabeling trust, predecessor, or filesystem failures.
+	ClassifyCandidateInvalid bool
 }
 
 type AcceptContributionFilesResult struct {
@@ -1083,6 +1115,12 @@ type AcceptContributionFilesResult struct {
 // immutable evidence, and writes a new signed chain document last. The input
 // chain is never overwritten.
 func VerifyAndAcceptContribution(options AcceptContributionFilesOptions) (result AcceptContributionFilesResult, err error) {
+	candidateFailure := func(err error) error {
+		if options.ClassifyCandidateInvalid {
+			return candidateInvalid(err)
+		}
+		return err
+	}
 	trusted, err := loadOperationalCeremony(options.Trust)
 	if err != nil {
 		return result, err
@@ -1210,6 +1248,9 @@ func VerifyAndAcceptContribution(options AcceptContributionFilesOptions) (result
 			Phase1Shape{DomainN: options.Circuit.Binding.DomainSize, ChallengeLength: contributionChallengeSize},
 		)
 		if readErr != nil {
+			if options.ClassifyCandidateInvalid && isCandidateArtifactContent(readErr) {
+				return result, candidateInvalid(readErr)
+			}
 			return result, readErr
 		}
 		phase1Candidate = candidate
@@ -1241,11 +1282,14 @@ func VerifyAndAcceptContribution(options AcceptContributionFilesOptions) (result
 			previous,
 			verifyCandidate,
 		); err != nil {
-			return result, fmt.Errorf("verify candidate Phase 1 transition: %w", err)
+			return result, candidateFailure(fmt.Errorf("verify candidate Phase 1 transition: %w", err))
 		}
 	case Phase2:
 		candidate, digest, readErr := ReadPhase2File(candidatePayloadPath, contributionPhase2Shape(options.Circuit.Binding.Phase2Shape))
 		if readErr != nil {
+			if options.ClassifyCandidateInvalid && isCandidateArtifactContent(readErr) {
+				return result, candidateInvalid(readErr)
+			}
 			return result, readErr
 		}
 		phase2Candidate = candidate
@@ -1271,14 +1315,14 @@ func VerifyAndAcceptContribution(options AcceptContributionFilesOptions) (result
 			return result, fmt.Errorf("clone Phase 2 candidate for verification: %w", err)
 		}
 		if err := verifyPhase2Transition(previous, verifyCandidate); err != nil {
-			return result, fmt.Errorf("verify candidate Phase 2 transition: %w", err)
+			return result, candidateFailure(fmt.Errorf("verify candidate Phase 2 transition: %w", err))
 		}
 	}
 	if modelDigest(candidateDigest) != attestation.OutputPayload.Digest {
-		return result, errors.New("candidate contribution digest does not match attestation")
+		return result, candidateFailure(errors.New("candidate contribution digest does not match attestation"))
 	}
 	if err := requireChallengeMatchesDigest(candidateChallenge, previousPayload.Digest); err != nil {
-		return result, err
+		return result, candidateFailure(err)
 	}
 
 	attestationRef := ArtifactRef{Name: names.Attestation, Digest: digestBytes(attestationBytes)}

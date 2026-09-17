@@ -27,18 +27,18 @@ func ReadPhase1File(path string, shape Phase1Shape) (*gnarkmpc.Phase1, ArtifactD
 
 	digest, err := PreflightPhase1(io.NewSectionReader(f, 0, expected), shape)
 	if err != nil {
-		return nil, ArtifactDigest{}, fmt.Errorf("preflight Phase 1 %q: %w", path, err)
+		return nil, ArtifactDigest{}, candidateArtifactContent(fmt.Errorf("preflight Phase 1 %q: %w", path, err))
 	}
 
 	var artifact gnarkmpc.Phase1
 	if err := nativeReadExact(io.NewSectionReader(f, 0, expected), expected, &artifact); err != nil {
-		return nil, ArtifactDigest{}, fmt.Errorf("decode Phase 1 %q: %w", path, err)
+		return nil, ArtifactDigest{}, candidateArtifactContent(fmt.Errorf("decode Phase 1 %q: %w", path, err))
 	}
 	if len(artifact.Challenge) != int(shape.ChallengeLength) {
-		return nil, ArtifactDigest{}, fmt.Errorf("%w: decoded Phase 1 challenge length %d, expected %d", ErrInvalidShape, len(artifact.Challenge), shape.ChallengeLength)
+		return nil, ArtifactDigest{}, candidateArtifactContent(fmt.Errorf("%w: decoded Phase 1 challenge length %d, expected %d", ErrInvalidShape, len(artifact.Challenge), shape.ChallengeLength))
 	}
 	if err := requireCanonicalRoundTrip(&artifact, digest); err != nil {
-		return nil, ArtifactDigest{}, fmt.Errorf("canonical Phase 1 %q: %w", path, err)
+		return nil, ArtifactDigest{}, candidateArtifactContent(fmt.Errorf("canonical Phase 1 %q: %w", path, err))
 	}
 	return &artifact, digest, nil
 }
@@ -84,18 +84,18 @@ func ReadPhase2File(path string, shape Phase2Shape) (*gnarkmpc.Phase2, ArtifactD
 
 	digest, err := PreflightPhase2(io.NewSectionReader(f, 0, expected), shape)
 	if err != nil {
-		return nil, ArtifactDigest{}, fmt.Errorf("preflight Phase 2 %q: %w", path, err)
+		return nil, ArtifactDigest{}, candidateArtifactContent(fmt.Errorf("preflight Phase 2 %q: %w", path, err))
 	}
 
 	var artifact gnarkmpc.Phase2
 	if err := nativeReadExact(io.NewSectionReader(f, 0, expected), expected, &artifact); err != nil {
-		return nil, ArtifactDigest{}, fmt.Errorf("decode Phase 2 %q: %w", path, err)
+		return nil, ArtifactDigest{}, candidateArtifactContent(fmt.Errorf("decode Phase 2 %q: %w", path, err))
 	}
 	if err := validateDecodedPhase2(&artifact, shape); err != nil {
-		return nil, ArtifactDigest{}, err
+		return nil, ArtifactDigest{}, candidateArtifactContent(err)
 	}
 	if err := requireCanonicalRoundTrip(&artifact, digest); err != nil {
-		return nil, ArtifactDigest{}, fmt.Errorf("canonical Phase 2 %q: %w", path, err)
+		return nil, ArtifactDigest{}, candidateArtifactContent(fmt.Errorf("canonical Phase 2 %q: %w", path, err))
 	}
 	return &artifact, digest, nil
 }

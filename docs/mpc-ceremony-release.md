@@ -136,7 +136,7 @@ The next checkpoint fully replays that sealed Phase 1 state and accepts only
 the deterministic zero-contribution Phase 2 tree at
 `phase2/chain-0000.json`, `phase2/chain-0000.sig`, and
 `phase2/genesis.bin`. Merely uploading files with those names is insufficient.
-Phase 2 participant checkpoints then use the same ordered
+For released V1–V3 definitions, Phase 2 participant checkpoints use the same ordered
 outbound-handoff, signed-receipt, and accepted-candidate transitions as Phase 1.
 Each accepted candidate is fully replayed against the sealed Phase 1 commons.
 After the configured minimum is met, the graph accepts the canonical signed
@@ -148,8 +148,10 @@ closed `final/candidate` tree: the coordinator-signed candidate, exact checksum
 inventory, final keys, Phase 2 seal, and public proof-verification evidence.
 Extra, missing, symbolic-link, nonregular or changed files are rejected.
 
-For current definitions, release signing also independently replays both
+For released V3 definitions, release signing also independently replays both
 phases on the release signer's machine even when ceremony audits are disabled.
+Definition V4 instead requires the release signer to verify the coordinator's
+exact full-replay binding and final files; an additional signer replay is optional.
 The following checkpoint accepts only the strictly verified closed
 `final/release` tree, including its release-signer manifest signature,
 operational evidence, explicit audit inventory, transcript, keys and checksums.

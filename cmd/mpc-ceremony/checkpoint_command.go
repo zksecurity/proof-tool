@@ -28,6 +28,15 @@ type builtCheckpointEvidence struct {
 	request    mpcceremony.CheckpointSigningRequest
 }
 
+type checkpointAcceptanceSigner func(
+	trusted *mpcceremony.TrustedCeremony,
+	checkpoint mpcceremony.Checkpoint,
+	slot mpcceremony.CheckpointSubmissionSlot,
+	envelope mpcceremony.SubmissionEnvelopeV1,
+	envelopeRefs mpcceremony.SignedArtifactRefs,
+	manifest mpcceremony.ArtifactRef,
+) ([]byte, []byte, mpcceremony.SignedArtifactRefs, error)
+
 func parseCheckpoint(invocation Invocation, args []string) (Invocation, error) {
 	if len(args) == 0 {
 		return Invocation{}, &usageError{message: "missing checkpoint command", topic: []string{"checkpoint"}}
@@ -36,6 +45,14 @@ func parseCheckpoint(invocation Invocation, args []string) (Invocation, error) {
 		return Invocation{}, &helpRequest{topic: append([]string{"checkpoint"}, args[1:]...)}
 	}
 	switch args[0] {
+	case "verify-release-v4":
+		options, err := parseEvidenceV4(CommandCheckpointVerifyReleaseV4, args[1:])
+		invocation.Command, invocation.Options = CommandCheckpointVerifyReleaseV4, options
+		return invocation, wrapCommandError(err, "checkpoint", args[0])
+	case "prepare-v4", "sign-v4", "initialize-v4", "record-v4", "allocate-v4", "accept-candidate-v4", "reject-candidate-v4", "verify-stored-v4", "inspect-signed-v4", "inspect-enrollments-v4":
+		options, err := parseCheckpointV4(args[0], args[1:])
+		invocation.Command, invocation.Options = Command("checkpoint "+args[0]), options
+		return invocation, wrapCommandError(err, "checkpoint", args[0])
 	case "prepare":
 		options, err := parseCheckpointPrepare(args[1:])
 		invocation.Command, invocation.Options = CommandCheckpointPrepare, options
@@ -579,6 +596,9 @@ func buildCheckpointEvidenceWithParent(options CheckpointEvidenceOptions, verify
 	trusted, definitionBytes, definitionSignatureBytes, err := loadExactInspectionCeremony(options.InspectDefinitionOptions)
 	if err != nil {
 		return builtCheckpointEvidence{}, err
+	}
+	if trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+		return builtCheckpointEvidence{}, errors.New("definition v4 requires the explicit V4 checkpoint commands")
 	}
 	definitionRefs, err := checkpointPairRefs(options.ArtifactRoot, options.CeremonyPath, options.CeremonySignaturePath)
 	if err != nil {
@@ -1372,7 +1392,7 @@ func buildPhase1ClosedCheckpoint(options CheckpointEvidenceOptions, trusted *mpc
 }
 
 func checkpointSchemaForDefinition(definition mpcceremony.CeremonyDefinition) string {
-	if definition.Schema == mpcceremony.DefinitionSchema {
+	if definition.Schema == mpcceremony.DefinitionSchemaV3 {
 		return mpcceremony.CheckpointSchema
 	}
 	return mpcceremony.CheckpointSchemaV1
@@ -1446,12 +1466,18 @@ func buildReceiptCheckpoint(options CheckpointEvidenceOptions, trusted *mpccerem
 	if err != nil {
 		return builtCheckpointEvidence{}, err
 	}
+	if err := requireSubmissionEnvelopeNames(slot, envelopeRefs); err != nil {
+		return builtCheckpointEvidence{}, err
+	}
 	envelope, err := mpcceremony.VerifySignedSubmissionEnvelope(trusted.Definition, previous, slot, envelopeBytes, envelopeSignatureBytes)
 	if err != nil {
 		return builtCheckpointEvidence{}, err
 	}
 	if envelope.Kind != mpcceremony.CheckpointSubmissionReceipt {
 		return builtCheckpointEvidence{}, errors.New("receipt-accepted checkpoint requires a receipt submission envelope")
+	}
+	if err := requireReceiptPayloadNames(slot, envelope.Payloads); err != nil {
+		return builtCheckpointEvidence{}, err
 	}
 	if err := verifyReceiptEnvelopePayloads(options.ArtifactRoot, trusted, previous, envelope); err != nil {
 		return builtCheckpointEvidence{}, err
@@ -1460,7 +1486,13 @@ func buildReceiptCheckpoint(options CheckpointEvidenceOptions, trusted *mpccerem
 	if err != nil {
 		return builtCheckpointEvidence{}, fmt.Errorf("submission manifest: %w", err)
 	}
-	ackBytes, ackSignatureBytes, ackRefs, err := checkpointSignedBytes(options.ArtifactRoot, options.AcknowledgementPath, options.AcknowledgementSignaturePath)
+	var ackBytes, ackSignatureBytes []byte
+	var ackRefs mpcceremony.SignedArtifactRefs
+	if options.AcceptanceSigner != nil {
+		ackBytes, ackSignatureBytes, ackRefs, err = options.AcceptanceSigner(trusted, previous, slot, envelope, envelopeRefs, manifest)
+	} else {
+		ackBytes, ackSignatureBytes, ackRefs, err = checkpointAcknowledgementBytes(options)
+	}
 	if err != nil {
 		return builtCheckpointEvidence{}, fmt.Errorf("submission acknowledgement: %w", err)
 	}
@@ -1539,6 +1571,9 @@ func buildCandidateCheckpoint(options CheckpointEvidenceOptions, trusted *mpccer
 	if err != nil {
 		return builtCheckpointEvidence{}, err
 	}
+	if err := requireSubmissionEnvelopeNames(slot, envelopeRefs); err != nil {
+		return builtCheckpointEvidence{}, err
+	}
 	if slot.Kind != mpcceremony.CheckpointSubmissionCandidate {
 		return builtCheckpointEvidence{}, errors.New("candidate-accepted checkpoint requires a candidate submission slot")
 	}
@@ -1558,7 +1593,13 @@ func buildCandidateCheckpoint(options CheckpointEvidenceOptions, trusted *mpccer
 	if err != nil {
 		return builtCheckpointEvidence{}, fmt.Errorf("candidate manifest: %w", err)
 	}
-	ackBytes, ackSignatureBytes, ackRefs, err := checkpointSignedBytes(options.ArtifactRoot, options.AcknowledgementPath, options.AcknowledgementSignaturePath)
+	var ackBytes, ackSignatureBytes []byte
+	var ackRefs mpcceremony.SignedArtifactRefs
+	if options.AcceptanceSigner != nil {
+		ackBytes, ackSignatureBytes, ackRefs, err = options.AcceptanceSigner(trusted, previous, slot, envelope, envelopeRefs, manifest)
+	} else {
+		ackBytes, ackSignatureBytes, ackRefs, err = checkpointAcknowledgementBytes(options)
+	}
 	if err != nil {
 		return builtCheckpointEvidence{}, fmt.Errorf("candidate acknowledgement: %w", err)
 	}
@@ -1787,6 +1828,29 @@ func findAllocatedSubmission(checkpoint mpcceremony.Checkpoint, envelope mpccere
 	return mpcceremony.CheckpointSubmissionSlot{}, errors.New("submission envelope does not match an allocated checkpoint slot")
 }
 
+func requireSubmissionEnvelopeNames(slot mpcceremony.CheckpointSubmissionSlot, refs mpcceremony.SignedArtifactRefs) error {
+	base := strings.TrimSuffix(slot.ManifestKey, "/manifest.json")
+	if refs.Record.Name != base+"/envelope.json" || refs.Signature.Name != base+"/envelope.sig" {
+		return errors.New("submission envelope does not use the preallocated storage path")
+	}
+	return nil
+}
+
+func requireReceiptPayloadNames(slot mpcceremony.CheckpointSubmissionSlot, refs []mpcceremony.ArtifactRef) error {
+	base := fmt.Sprintf("%s/custody/%04d", slot.Phase, slot.Index)
+	want := []string{base + "/outbound-receipt.json", base + "/outbound-receipt.sig"}
+	got := make([]string, len(refs))
+	for i := range refs {
+		got[i] = refs[i].Name
+	}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		return errors.New("receipt submission does not use the deterministic ceremony evidence paths")
+	}
+	return nil
+}
+
 func checkpointSignedBytes(root, recordPath, signaturePath string) ([]byte, []byte, mpcceremony.SignedArtifactRefs, error) {
 	recordBytes, recordRef, err := checkpointArtifactBytes(root, recordPath, maxOperationalRecordBytes)
 	if err != nil {
@@ -1798,6 +1862,31 @@ func checkpointSignedBytes(root, recordPath, signaturePath string) ([]byte, []by
 	}
 	refs := mpcceremony.SignedArtifactRefs{Record: recordRef, Signature: signatureRef}
 	return recordBytes, signatureBytes, refs, nil
+}
+
+func checkpointAcknowledgementBytes(options CheckpointEvidenceOptions) ([]byte, []byte, mpcceremony.SignedArtifactRefs, error) {
+	if options.AcknowledgementRecordName == "" && options.AcknowledgementSignatureName == "" {
+		return checkpointSignedBytes(options.ArtifactRoot, options.AcknowledgementPath, options.AcknowledgementSignaturePath)
+	}
+	if options.AcknowledgementRecordName == "" || options.AcknowledgementSignatureName == "" {
+		return nil, nil, mpcceremony.SignedArtifactRefs{}, errors.New("both intended acknowledgement names are required")
+	}
+	record, err := readRegularOperationalFile(options.AcknowledgementPath, maxOperationalRecordBytes)
+	if err != nil {
+		return nil, nil, mpcceremony.SignedArtifactRefs{}, err
+	}
+	signature, err := readRegularOperationalFile(options.AcknowledgementSignaturePath, 4096)
+	if err != nil {
+		return nil, nil, mpcceremony.SignedArtifactRefs{}, err
+	}
+	refs := mpcceremony.SignedArtifactRefs{
+		Record:    mpcceremony.ArtifactRef{Name: options.AcknowledgementRecordName, Digest: mpcceremony.NewDigest(record)},
+		Signature: mpcceremony.ArtifactRef{Name: options.AcknowledgementSignatureName, Digest: mpcceremony.NewDigest(signature)},
+	}
+	if err := refs.Validate(); err != nil {
+		return nil, nil, mpcceremony.SignedArtifactRefs{}, err
+	}
+	return record, signature, refs, nil
 }
 
 func requireCheckpointArtifactName(ref mpcceremony.ArtifactRef, expected, label string) error {

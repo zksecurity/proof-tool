@@ -61,7 +61,10 @@ Commands:
   checkpoint verify    Fully verify a signed ceremony checkpoint and its evidence
   checkpoint verify-stored  Infer and fully verify a fetched checkpoint ancestry
   inspect definition   Authenticate and describe a ceremony definition
+  inspect definition-protocol  Authenticate its protocol selector and schedules
   inspect chain        Authenticate and describe an accepted chain
+  inspect contribution-inventory-v4  Reconstruct retained V4 candidate files
+  inspect computation-output-v4     Check generated files before cleanup signing
   inspect participant  Match an existing key to the participant roster
   inspect enrollment   Authenticate an operational enrollment
   inspect checkpoint   Authenticate a storage-first workflow checkpoint
@@ -181,12 +184,47 @@ Authenticated record projections are also available as subcommands:
 These subcommands are read-only and machine-readable. They perform no network
 access, replay, signing, or writes.
 `,
+	"inspect definition-protocol": `Usage:
+  mpc-ceremony --format json inspect definition-protocol --ceremony FILE \
+    --ceremony-signature FILE --coordinator-public-key-file KEY
+
+Authenticates the definition before reporting its exact format, derived storage
+workflow, release verification policy and schedules. This does not authenticate
+backend progress or replay contributions. Failure must not trigger legacy fallback.
+`,
 	"inspect definition": `Usage:
   mpc-ceremony --format json inspect definition --ceremony FILE \
     --ceremony-signature FILE --coordinator-public-key-file KEY
 
 Authenticates the exact canonical ceremony definition against the out-of-band
 coordinator public key and reports its identity, mode, schedules, and circuit.
+`,
+	"inspect computation-output-v4": `Usage:
+  mpc-ceremony --format json inspect computation-output-v4 --ceremony FILE \
+    --ceremony-signature FILE --coordinator-public-key-file KEY \
+    --transcript-root DIR --chain FILE --chain-signature FILE \
+    --scope FILE --candidate-dir DIR
+
+Read-only. Checks attestation.json, attestation.sig and contribution.bin against
+the exact signed predecessor and canonical expected scope. No candidate inventory
+ID is returned. Extra files, including cleanup records, are not inspected here.
+Does not verify cleanup, process exit, mathematics, acceptance, freshness or
+physical erasure. The controller must check container absence separately before
+using this result to finish an interrupted computation operation.
+`,
+	"inspect contribution-inventory-v4": `Usage:
+  mpc-ceremony --format json inspect contribution-inventory-v4 --ceremony FILE \
+    --ceremony-signature FILE --coordinator-public-key-file KEY \
+    --transcript-root DIR --chain FILE --chain-signature FILE \
+    --scope FILE --candidate-dir DIR
+
+Read-only. The canonical scope must come from authenticated ceremony state or
+the exact retained operation. Verifies the signed predecessor, participant
+signatures, cleanup claim and streamed payload digest. Returns the five-file
+inventory and, when complete, the seven-file signed return inventory. A partial
+return pair is an error. Other local files are ignored, not approved for upload.
+Does not verify mathematics, acceptance, freshness or physical erasure. Recheck
+returned digests when uploading; paths are not frozen by this inspection.
 `,
 	"inspect chain": `Usage:
   mpc-ceremony --format json inspect chain --ceremony FILE \
@@ -238,15 +276,152 @@ exact parent record and detached signature, and enforces the legal structural
 transition. It does not fetch or replay the protocol artifacts referenced by
 that transition.
 `,
+	"checkpoint prepare-v4": `Usage:
+  mpc-ceremony checkpoint prepare-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR --proposal FILE \
+    [--rejected-candidate-dir DIR] --out FRESH_FILE
+
+Checks the exact canonical V4 proposal and its required evidence. Mathematical
+transitions use the authenticated stored circuit. The output is an unsigned
+checked draft, not published state. Existing files are never overwritten.
+The private rejected-candidate directory is required only for a rejection.
+Keep it separate from the public artifact root. Proposal/output files must stay
+outside the closed final candidate, release, and rejected-candidate directories.
+`,
+	"checkpoint sign-v4": `Usage:
+  mpc-ceremony checkpoint sign-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR --proposal FILE \
+    [--rejected-candidate-dir DIR] --coordinator-signing-key KEY --out FRESH_FILE
+
+Repeats all proposal checks before loading the coordinator key and signs the
+exact checked bytes. Keep the proposal and detached signature together. Neither
+is the published current head until the delivery service uploads both and
+successfully updates the head. Existing outputs require inspection, not overwrite.
+`,
+	"checkpoint allocate-v4": `Usage:
+  mpc-ceremony checkpoint allocate-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE --attempt-id HEX \
+    --allocated-at RFC3339 --coordinator-signing-key KEY --out-dir FRESH_DIR
+
+Authenticates the complete retained checkpoint ancestry, derives the exact next
+phase, participant, index and input head from signed ceremony state, and creates
+a signed candidate-allocation checkpoint. The caller cannot override the turn.
+The output is not current until the delivery service uploads the pair and
+conditionally advances the ceremony head.
+The output directory must be fresh and its parent must already exist.
+`,
+	"checkpoint initialize-v4": `Usage:
+  mpc-ceremony checkpoint initialize-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --coordinator-signing-key KEY --out-dir FRESH_DIR
+
+Authenticates the signed V4 definition and stored circuit, fully checks the
+Phase 1 genesis chain and derives the only valid sequence-zero checkpoint.
+Creates a signed pair atomically. The pair is not current until the delivery
+service publishes its immutable files and creates the ceremony root.
+The output directory must be fresh and its parent must already exist.
+`,
+	"checkpoint record-v4": `Usage:
+  mpc-ceremony checkpoint record-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE --transition KIND \
+    --record FILE --record-signature FILE [--evidence FILE ...] \
+    --coordinator-signing-key KEY --out-dir FRESH_DIR
+
+Authenticates the complete current V4 state and the supplied signed protocol
+record, derives the only legal descendant and signs it atomically. This covers
+enrollment, optional assurance evidence, phase closure/beacon/seal/init, final
+candidate review, final release, incidents and aborts. Allocation and candidate
+acceptance use their dedicated commands. The output is not current until the
+delivery service conditionally publishes it.
+The output directory must be fresh and its parent must already exist.
+`,
+	"checkpoint accept-candidate-v4": `Usage:
+  mpc-ceremony checkpoint accept-candidate-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE --attempt-id HEX \
+    --candidate-dir DIR --accepted-at RFC3339 \
+    --coordinator-signing-key KEY --out-dir FRESH_DIR
+
+Authenticates the active allocation, independently verifies the exact candidate
+and contribution mathematics against its immutable input snapshot, writes the
+accepted transcript artifacts, then creates the signed descendant checkpoint.
+The output is not current until the delivery service conditionally advances the
+ceremony head. No participant transport envelope or custody receipt is used.
+The output directory must be fresh and its parent must already exist.
+`,
+	"checkpoint reject-candidate-v4": `Usage:
+  mpc-ceremony checkpoint reject-candidate-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE --attempt-id HEX \
+    --rejected-candidate-dir PRIVATE_DIR --coordinator-signing-key KEY --out-dir FRESH_DIR
+
+Authenticates the active allocation and records hashes of exactly the five
+private candidate files without accepting their signatures, cleanup claim, or
+contribution mathematics. It retires this allocation without creating a
+replacement. A later allocation requires a fresh contribution in a new
+directory. The output is not current until the delivery service conditionally
+advances the ceremony head. The output directory must be fresh and its parent
+must already exist.
+`,
+	"checkpoint inspect-enrollments-v4": `Usage:
+  mpc-ceremony checkpoint inspect-enrollments-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE
+
+Verifies signed ancestry and the exact committed enrollment record/signature
+set in one pass. Returns separately labelled structural commitments and
+authenticated identities bound to this head. Does not read
+disclosure contents, prove independent operators, or check roster completeness.
+No signing, contribution replay, network access or writes occur.
+`,
+	"checkpoint inspect-signed-v4": `Usage:
+  mpc-ceremony checkpoint inspect-signed-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE
+
+Authenticates only this checkpoint pair for discovery of its predecessor and
+bounded verification dependencies. It does not load ancestry or contribution
+files. Run verify-stored-v4 on the complete ancestry before using its progress.
+`,
+	"checkpoint verify-stored-v4": `Usage:
+  mpc-ceremony checkpoint verify-stored-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE
+
+Authenticates retained checkpoint ancestry and legal metadata transitions.
+This does not verify every referenced artifact, the final release package,
+contribution mathematics, or whether a newer head exists on the delivery service.
+`,
+	"checkpoint verify-release-v4": `Usage:
+  mpc-ceremony checkpoint verify-release-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE --inventory-out FRESH_FILE
+
+Verifies the exact final-release checkpoint and complete private package, including
+required evidence and the coordinator replay binding. The bounded inventory is an
+unsigned local report with package-relative names, not a trusted download list.
+No contribution replay, global freshness, production approval or publication is
+performed. Keep the report outside final/candidate and final/release.
+`,
 	"checkpoint": `Usage:
   mpc-ceremony checkpoint <prepare|sign|verify|verify-stored> [flags]
+	  mpc-ceremony checkpoint <prepare-v4|sign-v4|initialize-v4|record-v4|allocate-v4|accept-candidate-v4> [flags]
+	  mpc-ceremony checkpoint <verify-stored-v4|verify-release-v4> [flags]
+  mpc-ceremony checkpoint inspect-signed-v4 [flags]
+  mpc-ceremony checkpoint inspect-enrollments-v4 [flags]
 
-Guarded storage-first checkpoint operations. Every operation re-authenticates
+Legacy storage-first checkpoint operations re-authenticate
 the exact signed definition, predecessor, both phase chains and all records
 that cause the transition. The authenticated lifecycle runs from initialization
 through both phases, the fully replayed final candidate, and the exact signed
 release tree. Candidate acceptance and finalization replay the contribution
 mathematics and cleanup evidence.
+The explicit V4 commands use candidate allocations and coordinator acceptance
+rather than participant transport envelopes. prepare-v4 and sign-v4 verify required transition evidence;
+verify-stored-v4 checks signed ancestry/metadata only, not all artifact bytes,
+mathematics or freshness. See each command's help for its exact boundary.
 `,
 	"checkpoint prepare": `Usage:
   mpc-ceremony checkpoint prepare --ceremony FILE --ceremony-signature FILE \
@@ -322,7 +497,8 @@ fully_verified=true. Structural inspect output is diagnostics-only.
     --participants ROSTER.json --policy POLICY.json \
     --coordinator-key-id ID --coordinator-signing-key KEY \
     --created-at RFC3339 --out-dir DIR [--mode rehearsal|production] \
-    [--session-nonce-hex HEX] [--allowed-binary FILE ...]
+    [--session-nonce-hex HEX] [--allowed-binary FILE ...] \
+    [--release-verification coordinator-full-replay-v1]
 
 Compiles a registered repository circuit and writes a fresh signed ceremony
 definition. The authoritative ceremony ID is derived from canonical content,
@@ -330,6 +506,10 @@ including a 32-byte session nonce securely generated when omitted. Production
 mode requires exact clean source builds. The running binary is always allowed;
 each repeated --allowed-binary adds one authenticated binary for another
 platform to the signed definition.
+Omitting --release-verification preserves Definition V3. The explicit value
+opts a fresh ceremony into Definition V4: coordinator full replay remains
+mandatory; the required release signer verifies its exact binding without a
+second contribution replay. This never upgrades an existing ceremony.
 `,
 	"phase1": `Usage:
   mpc-ceremony phase1 <contribute|attest-erasure|verify|close|beacon|seal> [flags]
@@ -342,10 +522,14 @@ the exact accepted chain; the command never discovers a "latest" state.
     --ceremony-signature FILE --coordinator-public-key-file KEY \
     --transcript-dir DIR --chain FILE --chain-signature FILE \
     --participant-id ID --participant-signing-key KEY \
-    --environment FILE --contributed-at RFC3339 --out-dir FRESH_DIR
+    --environment FILE --contributed-at RFC3339 --out-dir FRESH_DIR \
+    [--artifact-root DIR --checkpoint FILE --checkpoint-signature FILE \
+     --attempt-id HEX]
 
 Replays the complete accepted phase 1 chain before adding OS-generated
-randomness. The input chain is never modified.
+randomness. The input chain is never modified. Definition V4 requires the four
+allocation flags; it derives and rechecks the exact input snapshot from that
+signed checkpoint in this same process before generating randomness.
 `,
 	"phase1 attest-erasure": `Usage:
   mpc-ceremony phase1 attest-erasure --ceremony FILE \
@@ -424,7 +608,12 @@ Phase 2 is bound to the exact compiled R1CS and verified phase 1 seal.
     --phase1-seal FILE --phase1-seal-signature FILE \
     --transcript-dir DIR --chain FILE --participant-id ID \
     --chain-signature FILE --participant-signing-key KEY \
-    --environment FILE --contributed-at RFC3339 --out-dir FRESH_DIR
+    --environment FILE --contributed-at RFC3339 --out-dir FRESH_DIR \
+    [--artifact-root DIR --checkpoint FILE --checkpoint-signature FILE \
+     --attempt-id HEX]
+
+Definition V4 requires the four allocation flags and derives the exact Phase 2
+chain and Phase 1 seal from the authenticated checkpoint before randomness.
 `,
 	"phase2 attest-erasure": `Usage:
   mpc-ceremony phase2 attest-erasure --ceremony FILE \
@@ -533,9 +722,23 @@ two-phase replay. It emits a signed passing record only after reproducing the
 candidate's native keys, Cardano export, and coherence evidence.
 `,
 	"release": `Usage:
-  mpc-ceremony release <sign|verify> [flags]
+  mpc-ceremony release <sign|verify|review-v4> [flags]
 
 Release authenticity is separate from MPC contribution identity.
+`,
+	"release review-v4": `Usage:
+  mpc-ceremony release review-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE \
+    --operational-bundle DIR/operational/evidence-bundle.json \
+    --operational-bundle-signature DIR/operational/evidence-bundle.sig \
+    --released-at RFC3339_UTC --out FRESH_FILE
+
+Checks the exact unreleased checkpoint, candidate, bundle, required evidence and
+coordinator replay binding. Writes an unsigned bounded local review report;
+release sign does not accept this report as input and recomputes the review.
+No contribution replay or publication occurs. Keep the report outside the
+closed final/candidate and final/release directories. Parent must exist.
 `,
 	"release sign": `Usage:
   mpc-ceremony release sign --ceremony FILE --ceremony-signature FILE \
@@ -550,11 +753,22 @@ Release authenticity is separate from MPC contribution identity.
 
 	Requires at least the signed minimum number of passing ceremony audits
 	assurance policy, plus the coordinator-signed Phase 1 and Phase 2 operational
-	bundle. Witness and mirror evidence likewise follows that signed policy;
-	multi-relay beacon evidence remains required. The candidate is
-	never mutated; all verified evidence is atomically published into a fresh
-	release directory. For current ceremonies, the release signer independently
-	replays both phases even when the signed audit minimum is zero.
+	bundle. Witness and mirror evidence likewise follows that signed policy.
+	Definitions V1-V3 retain their multi-relay beacon-evidence requirement. The candidate is
+	never mutated; all verified evidence is assembled into a fresh local
+	release directory. Definition V3 requires independent signer replay of both
+	phases even when the signed audit minimum is zero.
+
+For Definition V4, replace --candidate-bundle, audit and replay flags with:
+  --review-checkpoint FILE --review-checkpoint-signature FILE
+Both files and the operational bundle pair must be under --operational-evidence-root.
+The signed review determines the candidate and required audits. The signer checks
+the exact coordinator replay binding, public proof, key exports and required
+evidence, including each phase's signed beacon and raw verified response,
+without replaying contributions or requiring a separate multi-relay record.
+The approved executable is checked
+before loading the release key. The output must be outside the evidence root.
+This creates a local signed package, not a storage publication or production GO.
 `,
 	"release verify": `Usage:
   mpc-ceremony release verify --ceremony FILE --ceremony-signature FILE \
@@ -564,6 +778,8 @@ Release authenticity is separate from MPC contribution identity.
 Authenticates the release using the out-of-band release public key, then
 strictly verifies the bundled audit evidence, transcript, native keys, Cardano
 export, candidate signature, and checksums.
+Definition V4 selects the new exact review/package verifier automatically after
+authenticating the definition. This does not publish or approve production use.
 `,
 	"decision": `Usage:
   mpc-ceremony decision <prepare|sign|verify> [flags]
@@ -574,13 +790,17 @@ entropy quality, erasure, public witnessing, mirrors, or attendance.
 `,
 	"decision prepare": `Usage:
   mpc-ceremony decision prepare --ceremony FILE --ceremony-signature FILE \
-    --coordinator-public-key-file KEY --draft FILE --out FRESH_FILE
+    --coordinator-public-key-file KEY --draft FILE --out FRESH_FILE \
+    [--evidence-root DIR]
 
 Strictly parses a production decision draft matching the authenticated
 ceremony schema, derives
 the release_id and decision_id, and checks ceremony, source, exact K=21
 circuit, and signer-role bindings. The fresh output is the only byte string
 the accountable roles should sign.
+Definition V4 requires --evidence-root and verifies its complete local release
+package and decision evidence before writing. Keep --out outside final/release.
+Older definitions do not accept this preparation flag.
 `,
 	"decision sign": `Usage:
   mpc-ceremony decision sign --ceremony FILE --ceremony-signature FILE \
@@ -594,9 +814,10 @@ A GO record requires the coordinator, every auditor named by the record,
 and the distinct release signer to sign the same bytes — one signature per
 named auditor, so a ceremony with three auditors needs five signatures. Before loading a GO
 signing key, the command hashes and semantically verifies the full local
-evidence set. Evidence verification is optional for a NO-GO record so an
-accountable role can sign a fail-closed decision that reports unavailable
-evidence.
+evidence set. Definition V4 requires verified evidence for both GO and post-package
+NO-GO; use the authenticated abort procedure for an earlier stop without a package.
+Keep --out outside final/release. Older definitions retain optional evidence
+verification for NO-GO records reporting unavailable evidence.
 `,
 	"decision verify": `Usage:
   mpc-ceremony decision verify --ceremony FILE --ceremony-signature FILE \
@@ -606,15 +827,22 @@ evidence.
 
 Strictly parses the record and detached role signatures, hashes every local
 evidence artifact, checks release/candidate/transcript/operational/audit
-coherence, and fail-closes GO unless all gates PASS and all four roles signed.
-Evidence URIs are content bindings only; the command performs no network fetch.
+coherence. GO requires every applicable gate to PASS and signatures from the
+coordinator, release signer and every required ceremony auditor. Disabled optional
+gates must explicitly be NOT_REQUIRED. V4 evidence uses local logical names;
+legacy evidence URIs are content bindings only. No network fetch or publication
+occurs. Verification of external reports binds reviewed claims, not independent
+proof that the reported real-world actions happened.
 `,
 	"ops": `Usage:
   mpc-ceremony ops <prepare-public-witness-receipt|prepare-mirror-receipt|export-signing|import-signature|verify> [flags]
+  mpc-ceremony ops <prepare-bundle-v4|sign-bundle-v4> [flags]
 
 Operational records cover proof-of-possession enrollment, transfers and
-receipts, immutable mirrors, pre-beacon public witnesses, multi-operator relay
-evidence, governance events, and the release-bound operational evidence bundle.
+receipts, immutable mirrors, pre-beacon public witnesses, legacy multi-operator
+relay evidence, governance events, and the release-bound operational evidence
+bundle. V4 binds the already signed beacon record and its one verified raw
+response instead of adding a separate relay-evidence record.
 `,
 	"ops prepare-public-witness-receipt": `Usage:
   mpc-ceremony ops prepare-public-witness-receipt \
@@ -696,6 +924,31 @@ The reviewed hash binds signing to bytes previously shown by a helper. It is
 required for handoff, receipt, beacon-evidence and evidence-bundle signing.
 Run ops verify afterwards; receipts require --related-record and bundles require
 --evidence-root. A signature alone does not verify a complete ceremony.
+Definition V4 evidence bundles require ops sign-bundle-v4 instead.
+`,
+	"ops prepare-bundle-v4": `Usage:
+  mpc-ceremony ops prepare-bundle-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE --assembled-at RFC3339_UTC \
+    --out DIR/operational/evidence-bundle.json
+
+Derives an unsigned bundle only from this exact authenticated V4 checkpoint and
+verifies its required operational evidence. The operational directory must exist
+and be real; output must be fresh. Keep the exact checkpoint pair for signing.
+No contribution replay, release approval or publication occurs.
+`,
+	"ops sign-bundle-v4": `Usage:
+  mpc-ceremony ops sign-bundle-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE \
+    --operational-bundle DIR/operational/evidence-bundle.json \
+    --coordinator-signing-key KEY --reviewed --reviewed-sha256 HEX \
+    --out DIR/operational/evidence-bundle.sig
+
+Review the canonical bundle first. Before loading the coordinator key, rederives
+the bundle against this exact checkpoint and its saved assembly time, and requires
+identical reviewed bytes. The signature output must be fresh in the existing real
+operational directory. This is not final release approval or global freshness.
 `,
 	"ops prepare-bundle": `Usage:
   mpc-ceremony ops prepare-bundle --ceremony FILE --ceremony-signature FILE \
@@ -714,6 +967,7 @@ If complete, independently verifies all referenced evidence and exports an
 UNSIGNED canonical bundle and signing request. It does not invent records,
 backdate observations, or sign for other roles. Release still requires the
 coordinator's bundle signature and successful signed-bundle verification.
+Definition V4 requires ops prepare-bundle-v4 with an exact checkpoint instead.
 `,
 	"ops export-signing": `Usage:
   mpc-ceremony ops export-signing --record-type TYPE --record FILE \
@@ -722,6 +976,8 @@ coordinator's bundle signature and successful signed-bundle verification.
 
 Strictly verifies the canonical record and ceremony binding, then exports
 canonical.json and signing-request.json. No private signing key is read.
+Definition V4 evidence bundles must use ops sign-bundle-v4; this legacy export
+does not bind an exact checkpoint.
 `,
 	"ops import-signature": `Usage:
   mpc-ceremony ops import-signature --record-type TYPE --canonical FILE \
@@ -732,6 +988,7 @@ canonical.json and signing-request.json. No private signing key is read.
 Accepts 64 raw signature bytes or 128 lowercase hex characters, verifies the
 offline Ed25519 signature over exact canonical bytes and signer identity, then
 writes the repository detached-signature format without replacement.
+Definition V4 evidence bundles require ops sign-bundle-v4 with an exact checkpoint.
 `,
 	"ops verify": `Usage:
   mpc-ceremony ops verify --record-type TYPE --record FILE --signature FILE \
@@ -742,7 +999,9 @@ writes the repository detached-signature format without replacement.
 Authenticates canonical bytes, immutable ceremony fields, enrolled signer, and
 detached signature. Receipt verification requires the exact related handoff.
 Evidence-bundle verification requires the complete local evidence root and
-validates both authenticated chains, every custody transfer, independent
-mirrors and public witnesses, and at least two distinct beacon relay operators.
+validates both authenticated chains, required custody, mirror and witness records,
+and the required beacon relay evidence. It does not prove independent operators.
+For V4 it does not establish equivalence to a particular checkpoint or authorize
+release; use release review-v4 for the exact pre-release review.
 `,
 }

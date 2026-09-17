@@ -90,11 +90,12 @@ is used.
 
 ## Beacon relay evidence
 
-Final release requires matching, cryptographically verified responses from at
-least **two distinct relay operators** for each phase's committed drand round.
-Relay IDs and endpoint digests must also differ; multiple hostnames belonging
-to one operator do not count as different operators. Every supplied response
-must verify against the pinned network and exact committed round.
+Released V1-V3 ceremonies require matching, cryptographically verified
+responses from at least **two distinct relay operators** for each phase's
+committed drand round. Relay IDs and endpoint digests must also differ;
+multiple hostnames belonging to one operator do not count as different
+operators. Every supplied response must verify against the pinned network and
+exact committed round.
 
 This reduces the operational minimum from three operators to two, trading one
 source of retrieval redundancy for availability during a relay outage. It does
@@ -106,6 +107,38 @@ Existing three-operator evidence remains valid. Older binaries still require
 three; use an explicitly reviewed compatible release. Do not edit an existing
 signed ceremony's software allowlist or replace its pinned binary to force an
 in-progress ceremony through a changed verifier policy.
+
+Definition V4 instead retains the coordinator-signed beacon record and the
+single raw drand response authenticated by that record. The delivery tool may
+try another endpoint when the first is unavailable, but it accepts the first
+cryptographically valid response for the committed round and does not create a
+separate multi-relay evidence claim. This changes only explicitly signed V4
+ceremonies.
+
+## Experimental V4 retained-candidate inspection
+
+`inspect computation-output-v4` checks the three generated public files before
+cleanup signing: `attestation.json`, `attestation.sig` and `contribution.bin`.
+It checks the expected signed predecessor, participant, software and file bytes,
+but not cleanup or process exit. It returns no candidate inventory ID. This lets
+the controller recognize completed computation without rerunning it, then record
+and execute cleanup signing as a separate operation. The controller must verify
+the original container is absent before making that recovery decision.
+
+`inspect contribution-inventory-v4` reconstructs a retained contribution from
+its exact signed predecessor and expected turn. It returns the fixed five-file
+inventory after computation and cleanup attestation. V4 has no signed return
+packet or participant transport envelope. Partial or inconsistent candidates
+are errors and must not trigger another computation.
+
+This read-only inspection checks signatures, file hashes and locally checkable
+chronology—not contribution mathematics, backend freshness, physical erasure or
+acceptance. `checkpoint allocate-v4` and the V4 contribution flags bind the turn
+to the exact authenticated checkpoint before randomness is generated.
+Uploaders must recheck the returned file hashes. Extra local files
+are not part of the upload inventory. Existing ceremony formats retain their
+existing commands and verification requirements; V4 remains explicit opt-in
+while the downstream workflow is being completed.
 
 ## Toxic Waste Handling
 

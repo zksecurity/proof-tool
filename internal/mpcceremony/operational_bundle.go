@@ -10,8 +10,10 @@ import (
 )
 
 const (
+	maxEnrollmentDisclosureBytes      = 1 << 20
 	OperationalEvidenceBundleSchemaV2 = "proof-tool-mpc-operational-evidence-bundle-v2"
 	OperationalEvidenceBundleSchema   = "proof-tool-mpc-operational-evidence-bundle-v3"
+	OperationalEvidenceBundleSchemaV4 = "proof-tool-mpc-operational-evidence-bundle-v4"
 )
 
 type SignedArtifactRefs struct {
@@ -36,15 +38,15 @@ type AcceptedHeadOperationalEvidence struct {
 	Index               uint8                `json:"index"`
 	PredecessorHeadID   string               `json:"predecessor_head_id"`
 	AcceptedHeadID      string               `json:"accepted_head_id"`
-	OutboundHandoff     SignedArtifactRefs   `json:"outbound_handoff"`
-	OutboundReceipt     SignedArtifactRefs   `json:"outbound_receipt"`
-	ReturnHandoff       SignedArtifactRefs   `json:"return_handoff"`
-	ReturnReceipt       SignedArtifactRefs   `json:"return_receipt"`
+	OutboundHandoff     SignedArtifactRefs   `json:"outbound_handoff,omitempty"`
+	OutboundReceipt     SignedArtifactRefs   `json:"outbound_receipt,omitempty"`
+	ReturnHandoff       SignedArtifactRefs   `json:"return_handoff,omitempty"`
+	ReturnReceipt       SignedArtifactRefs   `json:"return_receipt,omitempty"`
 	AcceptedChainPrefix SignedArtifactRefs   `json:"accepted_chain_prefix"`
 	MirrorReceipts      []SignedArtifactRefs `json:"mirror_receipts"`
 }
 
-func (e AcceptedHeadOperationalEvidence) Validate() error {
+func (e AcceptedHeadOperationalEvidence) validate(custodyRequired bool) error {
 	if e.Index == 0 || e.Index > MaxParticipants {
 		return fmt.Errorf("accepted head index must be between 1 and %d", MaxParticipants)
 	}
@@ -57,17 +59,21 @@ func (e AcceptedHeadOperationalEvidence) Validate() error {
 	if e.PredecessorHeadID == e.AcceptedHeadID {
 		return errors.New("accepted head must differ from predecessor head")
 	}
-	if err := e.OutboundHandoff.Validate(); err != nil {
-		return fmt.Errorf("outbound_handoff: %w", err)
-	}
-	if err := e.OutboundReceipt.Validate(); err != nil {
-		return fmt.Errorf("outbound_receipt: %w", err)
-	}
-	if err := e.ReturnHandoff.Validate(); err != nil {
-		return fmt.Errorf("return_handoff: %w", err)
-	}
-	if err := e.ReturnReceipt.Validate(); err != nil {
-		return fmt.Errorf("return_receipt: %w", err)
+	if custodyRequired {
+		if err := e.OutboundHandoff.Validate(); err != nil {
+			return fmt.Errorf("outbound_handoff: %w", err)
+		}
+		if err := e.OutboundReceipt.Validate(); err != nil {
+			return fmt.Errorf("outbound_receipt: %w", err)
+		}
+		if err := e.ReturnHandoff.Validate(); err != nil {
+			return fmt.Errorf("return_handoff: %w", err)
+		}
+		if err := e.ReturnReceipt.Validate(); err != nil {
+			return fmt.Errorf("return_receipt: %w", err)
+		}
+	} else if e.OutboundHandoff != (SignedArtifactRefs{}) || e.OutboundReceipt != (SignedArtifactRefs{}) || e.ReturnHandoff != (SignedArtifactRefs{}) || e.ReturnReceipt != (SignedArtifactRefs{}) {
+		return errors.New("operational evidence v4 forbids custody records")
 	}
 	if err := e.AcceptedChainPrefix.Validate(); err != nil {
 		return fmt.Errorf("accepted_chain_prefix: %w", err)
@@ -78,6 +84,8 @@ func (e AcceptedHeadOperationalEvidence) Validate() error {
 	return validateSignedArtifactSet("mirror_receipts", e.MirrorReceipts)
 }
 
+func (e AcceptedHeadOperationalEvidence) Validate() error { return e.validate(true) }
+
 type PhaseOperationalEvidence struct {
 	Phase                    Phase                             `json:"phase"`
 	AcceptedChain            SignedArtifactRefs                `json:"accepted_chain"`
@@ -85,11 +93,12 @@ type PhaseOperationalEvidence struct {
 	AcceptedHeads            []AcceptedHeadOperationalEvidence `json:"accepted_heads"`
 	PublicWitnessQuorum      uint8                             `json:"public_witness_quorum"`
 	PublicWitnessReceipts    []SignedArtifactRefs              `json:"public_witness_receipts"`
-	MultiRelayBeaconEvidence SignedArtifactRefs                `json:"multi_relay_beacon_evidence"`
+	Beacon                   SignedArtifactRefs                `json:"beacon,omitempty"`
+	MultiRelayBeaconEvidence SignedArtifactRefs                `json:"multi_relay_beacon_evidence,omitempty"`
 	RawBeaconResponses       []ArtifactRef                     `json:"raw_beacon_responses"`
 }
 
-func (p PhaseOperationalEvidence) Validate() error {
+func (p PhaseOperationalEvidence) validate(custodyRequired, singleBeacon bool) error {
 	if err := p.Phase.Validate(); err != nil {
 		return err
 	}
@@ -103,7 +112,7 @@ func (p PhaseOperationalEvidence) Validate() error {
 		return fmt.Errorf("accepted_heads must contain between 1 and %d entries", MaxParticipants)
 	}
 	for index, head := range p.AcceptedHeads {
-		if err := head.Validate(); err != nil {
+		if err := head.validate(custodyRequired); err != nil {
 			return fmt.Errorf("accepted head %d: %w", index, err)
 		}
 		if head.Index != uint8(index+1) {
@@ -120,8 +129,23 @@ func (p PhaseOperationalEvidence) Validate() error {
 	if err := validateSignedArtifactSet("public_witness_receipts", p.PublicWitnessReceipts); err != nil {
 		return err
 	}
-	if err := p.MultiRelayBeaconEvidence.Validate(); err != nil {
-		return fmt.Errorf("multi_relay_beacon_evidence: %w", err)
+	if singleBeacon {
+		if err := p.Beacon.Validate(); err != nil {
+			return fmt.Errorf("beacon: %w", err)
+		}
+		if p.MultiRelayBeaconEvidence != (SignedArtifactRefs{}) {
+			return errors.New("operational evidence v4 forbids separate multi-relay beacon evidence")
+		}
+		if len(p.RawBeaconResponses) != 1 {
+			return errors.New("operational evidence v4 requires exactly one raw beacon response")
+		}
+	} else {
+		if p.Beacon != (SignedArtifactRefs{}) {
+			return errors.New("legacy operational evidence forbids the v4 beacon field")
+		}
+		if err := p.MultiRelayBeaconEvidence.Validate(); err != nil {
+			return fmt.Errorf("multi_relay_beacon_evidence: %w", err)
+		}
 	}
 	if err := validateArtifactSet("raw_beacon_responses", p.RawBeaconResponses); err != nil {
 		return err
@@ -129,10 +153,14 @@ func (p PhaseOperationalEvidence) Validate() error {
 	return nil
 }
 
-// OperationalEvidenceBundle is the one canonical release input for
-// independently witnessed pre-beacon publication and multi-relay beacon
-// retrieval in both phases. Every referenced byte string is content-addressed
-// and resolved below one caller-supplied evidence root.
+func (p PhaseOperationalEvidence) Validate() error { return p.validate(true, false) }
+
+// OperationalEvidenceBundle is the one canonical release input for operational
+// evidence in both phases. Released formats retain independently witnessed
+// pre-beacon publication and multi-relay retrieval. Definition V4 instead binds
+// each signed beacon and its one verified raw response, verifies historical
+// payload references through signed records rather than payload bytes, and
+// separately requires the coordinator's full-replay claim in final review.
 type OperationalEvidenceBundle struct {
 	Schema            string                   `json:"schema"`
 	CeremonyID        string                   `json:"ceremony_id"`
@@ -148,14 +176,14 @@ type OperationalEvidenceBundle struct {
 
 func (b OperationalEvidenceBundle) Validate() error {
 	switch b.Schema {
-	case OperationalEvidenceBundleSchema:
+	case OperationalEvidenceBundleSchema, OperationalEvidenceBundleSchemaV4:
 		if b.AssurancePolicy == nil {
-			return errors.New("operational evidence v3 requires assurance_policy")
+			return errors.New("operational evidence v3/v4 requires assurance_policy")
 		}
 		if b.Enrollments == nil || b.GovernanceRecords == nil ||
 			b.Phase1.AcceptedHeads == nil || b.Phase1.PublicWitnessReceipts == nil || b.Phase1.RawBeaconResponses == nil ||
 			b.Phase2.AcceptedHeads == nil || b.Phase2.PublicWitnessReceipts == nil || b.Phase2.RawBeaconResponses == nil {
-			return errors.New("operational evidence v3 requires explicit arrays; use [] for enabled collections with no records")
+			return errors.New("operational evidence v3/v4 requires explicit arrays; use [] for enabled collections with no records")
 		}
 		for _, phase := range []PhaseOperationalEvidence{b.Phase1, b.Phase2} {
 			for _, head := range phase.AcceptedHeads {
@@ -189,19 +217,21 @@ func (b OperationalEvidenceBundle) Validate() error {
 			return err
 		}
 	}
-	if err := b.Phase1.Validate(); err != nil {
+	custodyRequired := b.Schema != OperationalEvidenceBundleSchemaV4
+	singleBeacon := b.Schema == OperationalEvidenceBundleSchemaV4
+	if err := b.Phase1.validate(custodyRequired, singleBeacon); err != nil {
 		return fmt.Errorf("phase1: %w", err)
 	}
 	if b.Phase1.Phase != Phase1 {
 		return errors.New("phase1 evidence has wrong phase")
 	}
-	if err := b.Phase2.Validate(); err != nil {
+	if err := b.Phase2.validate(custodyRequired, singleBeacon); err != nil {
 		return fmt.Errorf("phase2: %w", err)
 	}
 	if b.Phase2.Phase != Phase2 {
 		return errors.New("phase2 evidence has wrong phase")
 	}
-	if b.Schema == OperationalEvidenceBundleSchema {
+	if b.Schema == OperationalEvidenceBundleSchema || b.Schema == OperationalEvidenceBundleSchemaV4 {
 		for _, phase := range []PhaseOperationalEvidence{b.Phase1, b.Phase2} {
 			if phase.PublicWitnessQuorum != b.AssurancePolicy.PublicWitnessesPerPhase {
 				return fmt.Errorf("%s public witness quorum does not match assurance_policy", phase.Phase)
@@ -281,6 +311,8 @@ type VerifiedOperationalEvidence struct {
 // authenticated close records, witness signatures/quorum/timing, every raw
 // relay response, the pinned drand verification policy, and contribution-bound
 // signed cleanup claims. These claims do not establish physical erasure.
+// V4 checks historical payload bindings, not presence or hashes of their bytes.
+// V1–V3 continue to require and hash every genesis/contribution payload.
 func VerifyOperationalEvidenceBundle(options VerifyOperationalEvidenceOptions) (VerifiedOperationalEvidence, error) {
 	if err := options.Definition.Validate(); err != nil {
 		return VerifiedOperationalEvidence{}, err
@@ -328,9 +360,13 @@ func verifyOperationalEvidenceContents(options VerifyOperationalEvidenceOptions,
 		return VerifiedOperationalEvidence{}, errors.New("operational evidence bundle does not bind ceremony coordinator")
 	}
 	expectedAssurance := defaultAssurancePolicy(options.Definition.Mode)
-	if options.Definition.Schema == DefinitionSchema {
-		if bundle.Schema != OperationalEvidenceBundleSchema {
-			return VerifiedOperationalEvidence{}, errors.New("definition v3 requires operational evidence bundle v3")
+	if options.Definition.UsesSignedAssurancePolicy() {
+		expectedSchema := OperationalEvidenceBundleSchema
+		if options.Definition.Schema == DefinitionSchemaV4 {
+			expectedSchema = OperationalEvidenceBundleSchemaV4
+		}
+		if bundle.Schema != expectedSchema {
+			return VerifiedOperationalEvidence{}, fmt.Errorf("definition %s requires operational evidence schema %s", options.Definition.Schema, expectedSchema)
 		}
 		expectedAssurance = *options.Definition.AssurancePolicy
 		if bundle.AssurancePolicy == nil || *bundle.AssurancePolicy != expectedAssurance {
@@ -373,7 +409,7 @@ func verifyOperationalEvidenceContents(options VerifyOperationalEvidenceOptions,
 		options.EvidenceRoot,
 		bundle.Phase1,
 		options.Phase1Close,
-		enrollments, expectedAssurance, options.Definition.Schema != DefinitionSchema,
+		enrollments, expectedAssurance, !options.Definition.UsesSignedAssurancePolicy(), bundle.Schema == OperationalEvidenceBundleSchemaV4,
 	)
 	if err != nil {
 		return VerifiedOperationalEvidence{}, fmt.Errorf("phase1 operational evidence: %w", err)
@@ -384,7 +420,7 @@ func verifyOperationalEvidenceContents(options VerifyOperationalEvidenceOptions,
 		options.EvidenceRoot,
 		bundle.Phase2,
 		options.Phase2Close,
-		enrollments, expectedAssurance, options.Definition.Schema != DefinitionSchema,
+		enrollments, expectedAssurance, !options.Definition.UsesSignedAssurancePolicy(), bundle.Schema == OperationalEvidenceBundleSchemaV4,
 	)
 	if err != nil {
 		return VerifiedOperationalEvidence{}, fmt.Errorf("phase2 operational evidence: %w", err)
@@ -486,27 +522,29 @@ func latestOperationalTimestamp(root string, bundle OperationalEvidenceBundle) (
 		}
 		advance(close.ClosedAt)
 		for _, head := range phase.AcceptedHeads {
-			for _, pair := range []SignedArtifactRefs{head.OutboundHandoff, head.ReturnHandoff} {
-				raw, err := verifyArtifactBytes(root, pair.Record, maxSignedRecordBytes)
-				if err != nil {
-					return time.Time{}, err
+			if bundle.Schema != OperationalEvidenceBundleSchemaV4 {
+				for _, pair := range []SignedArtifactRefs{head.OutboundHandoff, head.ReturnHandoff} {
+					raw, err := verifyArtifactBytes(root, pair.Record, maxSignedRecordBytes)
+					if err != nil {
+						return time.Time{}, err
+					}
+					var record TransferHandoff
+					if err := UnmarshalCanonical(raw, &record); err != nil {
+						return time.Time{}, err
+					}
+					advance(record.CreatedAt)
 				}
-				var record TransferHandoff
-				if err := UnmarshalCanonical(raw, &record); err != nil {
-					return time.Time{}, err
+				for _, pair := range []SignedArtifactRefs{head.OutboundReceipt, head.ReturnReceipt} {
+					raw, err := verifyArtifactBytes(root, pair.Record, maxSignedRecordBytes)
+					if err != nil {
+						return time.Time{}, err
+					}
+					var record TransferReceipt
+					if err := UnmarshalCanonical(raw, &record); err != nil {
+						return time.Time{}, err
+					}
+					advance(record.ReceivedAt)
 				}
-				advance(record.CreatedAt)
-			}
-			for _, pair := range []SignedArtifactRefs{head.OutboundReceipt, head.ReturnReceipt} {
-				raw, err := verifyArtifactBytes(root, pair.Record, maxSignedRecordBytes)
-				if err != nil {
-					return time.Time{}, err
-				}
-				var record TransferReceipt
-				if err := UnmarshalCanonical(raw, &record); err != nil {
-					return time.Time{}, err
-				}
-				advance(record.ReceivedAt)
 			}
 			for _, pair := range head.MirrorReceipts {
 				raw, err := verifyArtifactBytes(root, pair.Record, maxSignedRecordBytes)
@@ -531,17 +569,29 @@ func latestOperationalTimestamp(root string, bundle OperationalEvidenceBundle) (
 			}
 			advance(record.ObservedAt)
 		}
-		beaconBytes, err := verifyArtifactBytes(root, phase.MultiRelayBeaconEvidence.Record, maxSignedRecordBytes)
+		beaconPair := phase.MultiRelayBeaconEvidence
+		if bundle.Schema == OperationalEvidenceBundleSchemaV4 {
+			beaconPair = phase.Beacon
+		}
+		beaconBytes, err := verifyArtifactBytes(root, beaconPair.Record, maxSignedRecordBytes)
 		if err != nil {
 			return time.Time{}, err
 		}
-		var beacon MultiRelayBeaconEvidence
-		if err := UnmarshalCanonical(beaconBytes, &beacon); err != nil {
-			return time.Time{}, err
-		}
-		advance(beacon.RecordedAt)
-		for _, observation := range beacon.Observations {
-			advance(observation.RetrievedAt)
+		if bundle.Schema == OperationalEvidenceBundleSchemaV4 {
+			var beacon BeaconRecord
+			if err := UnmarshalCanonical(beaconBytes, &beacon); err != nil {
+				return time.Time{}, err
+			}
+			advance(beacon.PublishedAt)
+		} else {
+			var beacon MultiRelayBeaconEvidence
+			if err := UnmarshalCanonical(beaconBytes, &beacon); err != nil {
+				return time.Time{}, err
+			}
+			advance(beacon.RecordedAt)
+			for _, observation := range beacon.Observations {
+				advance(observation.RetrievedAt)
+			}
 		}
 	}
 	if latest.IsZero() {
@@ -559,6 +609,7 @@ func verifyPhaseOperationalEvidence(
 	enrollments map[string]EnrollmentRecord,
 	assurance AssurancePolicy,
 	legacy bool,
+	singleBeacon bool,
 ) ([]ArtifactRef, error) {
 	if err := authenticated.Record.Validate(); err != nil {
 		return nil, err
@@ -608,15 +659,20 @@ func verifyPhaseOperationalEvidence(
 		return nil, fmt.Errorf("accepted chain/close coherence: %w", err)
 	}
 	payloadRefs := make([]ArtifactRef, 0, len(chain.Records)+1)
-	if err := verifyLargeOperationalArtifact(root, chain.Genesis); err != nil {
-		return nil, fmt.Errorf("accepted chain genesis: %w", err)
-	}
-	payloadRefs = append(payloadRefs, chain.Genesis)
-	for index, record := range chain.Records {
-		if err := verifyLargeOperationalArtifact(root, record.OutputPayload); err != nil {
-			return nil, fmt.Errorf("accepted head %d output payload: %w", index+1, err)
+	// Only the signed V4 trust model delegates full contribution replay to the
+	// coordinator. All signed metadata and custody checks below still apply.
+	// This is not a caller-selectable option and does not relax legacy formats.
+	if definition.Schema != DefinitionSchemaV4 {
+		if err := verifyLargeOperationalArtifact(root, chain.Genesis); err != nil {
+			return nil, fmt.Errorf("accepted chain genesis: %w", err)
 		}
-		payloadRefs = append(payloadRefs, record.OutputPayload)
+		payloadRefs = append(payloadRefs, chain.Genesis)
+		for index, record := range chain.Records {
+			if err := verifyLargeOperationalArtifact(root, record.OutputPayload); err != nil {
+				return nil, fmt.Errorf("accepted head %d output payload: %w", index+1, err)
+			}
+			payloadRefs = append(payloadRefs, record.OutputPayload)
+		}
 	}
 	acceptedHeadIDs := make([]string, len(chain.Records))
 	for index, record := range chain.Records {
@@ -703,6 +759,40 @@ func verifyPhaseOperationalEvidence(
 		int(phaseEvidence.PublicWitnessQuorum),
 	); err != nil {
 		return nil, err
+	}
+
+	if singleBeacon {
+		beaconBytes, err := verifyArtifactBytes(root, phaseEvidence.Beacon.Record, maxSignedRecordBytes)
+		if err != nil {
+			return nil, err
+		}
+		beaconSignatureBytes, err := verifyArtifactBytes(root, phaseEvidence.Beacon.Signature, maxSignedRecordBytes)
+		if err != nil {
+			return nil, err
+		}
+		var beacon BeaconRecord
+		if err := VerifySignedRecord(beaconBytes, beaconSignatureBytes, &beacon, definition.Coordinator.KeyID, coordinatorPublicKey); err != nil {
+			return nil, fmt.Errorf("beacon signature: %w", err)
+		}
+		if err := ValidateBeacon(definition, authenticated.Record, beacon); err != nil {
+			return nil, err
+		}
+		if len(phaseEvidence.RawBeaconResponses) != 1 || phaseEvidence.RawBeaconResponses[0] != beacon.RawResponse {
+			return nil, errors.New("raw beacon response does not exactly match the signed beacon record")
+		}
+		raw, err := verifyArtifactBytes(root, beacon.RawResponse, maxDrandResponseBytes)
+		if err != nil {
+			return nil, err
+		}
+		randomness, err := VerifyDrandBeaconResponse(definition.BeaconPolicy, beacon.Round, raw)
+		if err != nil {
+			return nil, err
+		}
+		if randomness != beacon.RandomnessHex {
+			return nil, errors.New("signed beacon randomness differs from verified archived response")
+		}
+		refs = append(refs, phaseEvidence.Beacon.Record, phaseEvidence.Beacon.Signature, beacon.RawResponse)
+		return refs, nil
 	}
 
 	beaconBytes, err := verifyArtifactBytes(
@@ -811,7 +901,7 @@ func verifyEnrollmentEvidence(
 			return nil, nil, fmt.Errorf("enrollment %d proof of possession: %w", index, err)
 		}
 		signer := record.Identity
-		if _, err := verifyArtifactBytes(root, record.IndependenceDisclosure, 1<<20); err != nil {
+		if _, err := verifyArtifactBytes(root, record.IndependenceDisclosure, maxEnrollmentDisclosureBytes); err != nil {
 			return nil, nil, fmt.Errorf("enrollment %d independence disclosure: %w", index, err)
 		}
 		if _, duplicate := enrollments[signer.ID]; duplicate {
@@ -895,6 +985,7 @@ func verifyAcceptedHeadEvidence(
 		return nil, err
 	}
 	refs := make([]ArtifactRef, 0, len(heads)*10)
+	custodyRequired := definition.Schema != DefinitionSchemaV4
 	for index, evidence := range heads {
 		record := chain.Records[index]
 		if evidence.AcceptedHeadID != record.RecordID ||
@@ -1003,125 +1094,127 @@ func verifyAcceptedHeadEvidence(
 			record.ErasureSignature,
 			record.Verification,
 		)
-
-		outboundAny, pairRefs, err := verifyOperationalPair(
-			definition,
-			definitionBytes,
-			root,
-			evidence.OutboundHandoff,
-			RecordHandoff,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("accepted head %d outbound handoff: %w", index+1, err)
-		}
-		outbound := outboundAny.(*TransferHandoff)
-		if outbound.Phase != phase || outbound.Index != uint8(index+1) ||
-			outbound.PredecessorHeadID != record.PreviousRecordID ||
-			outbound.SenderID != definition.Coordinator.ID ||
-			outbound.SenderKeyID != definition.Coordinator.KeyID ||
-			outbound.RecipientID != participant.Identity.ID ||
-			outbound.RecipientKeyID != participant.Identity.KeyID ||
-			!slices.Equal(outbound.Files, []ArtifactRef{record.PreviousPayload}) {
-			return nil, fmt.Errorf("accepted head %d outbound handoff does not bind coordinator, participant, predecessor, and input", index+1)
-		}
-		refs = append(refs, pairRefs...)
-
-		outboundReceiptAny, outboundReceiptRefs, err := verifyOperationalPair(
-			definition,
-			definitionBytes,
-			root,
-			evidence.OutboundReceipt,
-			RecordReceipt,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("accepted head %d outbound receipt: %w", index+1, err)
-		}
-		outboundReceipt := outboundReceiptAny.(*TransferReceipt)
-		if outboundReceipt.Kind != ReceiptReceiver {
-			return nil, fmt.Errorf("accepted head %d outbound receipt has wrong kind", index+1)
-		}
-		outboundBytes, err := verifyArtifactBytes(root, evidence.OutboundHandoff.Record, maxSignedRecordBytes)
-		if err != nil {
-			return nil, err
-		}
-		if err := VerifyTransferReceipt(outboundBytes, *outbound, *outboundReceipt); err != nil {
-			return nil, err
-		}
-		refs = append(refs, outboundReceiptRefs...)
-
-		returnHandoffAny, returnHandoffRefs, err := verifyOperationalPair(
-			definition,
-			definitionBytes,
-			root,
-			evidence.ReturnHandoff,
-			RecordHandoff,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("accepted head %d return handoff: %w", index+1, err)
-		}
-		returnHandoff := returnHandoffAny.(*TransferHandoff)
-		expectedReturnFiles := []ArtifactRef{
-			record.Attestation,
-			record.AttestationSignature,
-			record.Erasure,
-			record.ErasureSignature,
-			record.OutputPayload,
-		}
-		slices.SortFunc(expectedReturnFiles, compareArtifactRefName)
-		if returnHandoff.Phase != phase || returnHandoff.Index != uint8(index+1) ||
-			returnHandoff.PredecessorHeadID != record.PreviousRecordID ||
-			returnHandoff.SenderID != participant.Identity.ID ||
-			returnHandoff.SenderKeyID != participant.Identity.KeyID ||
-			returnHandoff.RecipientID != definition.Coordinator.ID ||
-			returnHandoff.RecipientKeyID != definition.Coordinator.KeyID ||
-			!slices.Equal(returnHandoff.Files, expectedReturnFiles) {
-			return nil, fmt.Errorf("accepted head %d return handoff does not bind participant, coordinator, predecessor head, and output evidence", index+1)
-		}
-		refs = append(refs, returnHandoffRefs...)
-
-		returnReceiptAny, returnReceiptRefs, err := verifyOperationalPair(
-			definition,
-			definitionBytes,
-			root,
-			evidence.ReturnReceipt,
-			RecordReceipt,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("accepted head %d return receipt: %w", index+1, err)
-		}
-		returnReceipt := returnReceiptAny.(*TransferReceipt)
-		if returnReceipt.Kind != ReceiptReceiver {
-			return nil, fmt.Errorf("accepted head %d return receipt has wrong kind", index+1)
-		}
-		returnHandoffBytes, err := verifyArtifactBytes(root, evidence.ReturnHandoff.Record, maxSignedRecordBytes)
-		if err != nil {
-			return nil, err
-		}
-		if err := VerifyTransferReceipt(returnHandoffBytes, *returnHandoff, *returnReceipt); err != nil {
-			return nil, err
-		}
-		refs = append(refs, returnReceiptRefs...)
-
-		predecessorAcceptedAt := definition.CreatedAt
-		if index > 0 {
-			predecessorAcceptedAt = chain.Records[index-1].AcceptedAt
-		}
-		predecessorAccepted, _ := time.Parse(time.RFC3339Nano, predecessorAcceptedAt)
-		outboundCreated, _ := time.Parse(time.RFC3339Nano, outbound.CreatedAt)
-		outboundReceived, _ := time.Parse(time.RFC3339Nano, outboundReceipt.ReceivedAt)
-		contributed, _ := time.Parse(time.RFC3339Nano, attestation.ContributedAt)
-		destroyed, _ := time.Parse(time.RFC3339Nano, erasure.DestroyedAt)
-		returnCreated, _ := time.Parse(time.RFC3339Nano, returnHandoff.CreatedAt)
-		returnReceived, _ := time.Parse(time.RFC3339Nano, returnReceipt.ReceivedAt)
 		accepted, _ := time.Parse(time.RFC3339Nano, record.AcceptedAt)
-		if !outboundCreated.After(predecessorAccepted) ||
-			!outboundReceived.After(outboundCreated) ||
-			!contributed.After(outboundReceived) ||
-			!returnCreated.After(contributed) ||
-			!returnCreated.After(destroyed) ||
-			!returnReceived.After(returnCreated) ||
-			!accepted.After(returnReceived) {
-			return nil, fmt.Errorf("accepted head %d custody/contribution/erasure/acceptance timestamps are not strictly ordered", index+1)
+
+		if custodyRequired {
+			outboundAny, pairRefs, err := verifyOperationalPair(
+				definition,
+				definitionBytes,
+				root,
+				evidence.OutboundHandoff,
+				RecordHandoff,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("accepted head %d outbound handoff: %w", index+1, err)
+			}
+			outbound := outboundAny.(*TransferHandoff)
+			if outbound.Phase != phase || outbound.Index != uint8(index+1) ||
+				outbound.PredecessorHeadID != record.PreviousRecordID ||
+				outbound.SenderID != definition.Coordinator.ID ||
+				outbound.SenderKeyID != definition.Coordinator.KeyID ||
+				outbound.RecipientID != participant.Identity.ID ||
+				outbound.RecipientKeyID != participant.Identity.KeyID ||
+				!slices.Equal(outbound.Files, []ArtifactRef{record.PreviousPayload}) {
+				return nil, fmt.Errorf("accepted head %d outbound handoff does not bind coordinator, participant, predecessor, and input", index+1)
+			}
+			refs = append(refs, pairRefs...)
+
+			outboundReceiptAny, outboundReceiptRefs, err := verifyOperationalPair(
+				definition,
+				definitionBytes,
+				root,
+				evidence.OutboundReceipt,
+				RecordReceipt,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("accepted head %d outbound receipt: %w", index+1, err)
+			}
+			outboundReceipt := outboundReceiptAny.(*TransferReceipt)
+			if outboundReceipt.Kind != ReceiptReceiver {
+				return nil, fmt.Errorf("accepted head %d outbound receipt has wrong kind", index+1)
+			}
+			outboundBytes, err := verifyArtifactBytes(root, evidence.OutboundHandoff.Record, maxSignedRecordBytes)
+			if err != nil {
+				return nil, err
+			}
+			if err := VerifyTransferReceipt(outboundBytes, *outbound, *outboundReceipt); err != nil {
+				return nil, err
+			}
+			refs = append(refs, outboundReceiptRefs...)
+
+			returnHandoffAny, returnHandoffRefs, err := verifyOperationalPair(
+				definition,
+				definitionBytes,
+				root,
+				evidence.ReturnHandoff,
+				RecordHandoff,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("accepted head %d return handoff: %w", index+1, err)
+			}
+			returnHandoff := returnHandoffAny.(*TransferHandoff)
+			expectedReturnFiles := []ArtifactRef{
+				record.Attestation,
+				record.AttestationSignature,
+				record.Erasure,
+				record.ErasureSignature,
+				record.OutputPayload,
+			}
+			slices.SortFunc(expectedReturnFiles, compareArtifactRefName)
+			if returnHandoff.Phase != phase || returnHandoff.Index != uint8(index+1) ||
+				returnHandoff.PredecessorHeadID != record.PreviousRecordID ||
+				returnHandoff.SenderID != participant.Identity.ID ||
+				returnHandoff.SenderKeyID != participant.Identity.KeyID ||
+				returnHandoff.RecipientID != definition.Coordinator.ID ||
+				returnHandoff.RecipientKeyID != definition.Coordinator.KeyID ||
+				!slices.Equal(returnHandoff.Files, expectedReturnFiles) {
+				return nil, fmt.Errorf("accepted head %d return handoff does not bind participant, coordinator, predecessor head, and output evidence", index+1)
+			}
+			refs = append(refs, returnHandoffRefs...)
+
+			returnReceiptAny, returnReceiptRefs, err := verifyOperationalPair(
+				definition,
+				definitionBytes,
+				root,
+				evidence.ReturnReceipt,
+				RecordReceipt,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("accepted head %d return receipt: %w", index+1, err)
+			}
+			returnReceipt := returnReceiptAny.(*TransferReceipt)
+			if returnReceipt.Kind != ReceiptReceiver {
+				return nil, fmt.Errorf("accepted head %d return receipt has wrong kind", index+1)
+			}
+			returnHandoffBytes, err := verifyArtifactBytes(root, evidence.ReturnHandoff.Record, maxSignedRecordBytes)
+			if err != nil {
+				return nil, err
+			}
+			if err := VerifyTransferReceipt(returnHandoffBytes, *returnHandoff, *returnReceipt); err != nil {
+				return nil, err
+			}
+			refs = append(refs, returnReceiptRefs...)
+
+			predecessorAcceptedAt := definition.CreatedAt
+			if index > 0 {
+				predecessorAcceptedAt = chain.Records[index-1].AcceptedAt
+			}
+			predecessorAccepted, _ := time.Parse(time.RFC3339Nano, predecessorAcceptedAt)
+			outboundCreated, _ := time.Parse(time.RFC3339Nano, outbound.CreatedAt)
+			outboundReceived, _ := time.Parse(time.RFC3339Nano, outboundReceipt.ReceivedAt)
+			contributed, _ := time.Parse(time.RFC3339Nano, attestation.ContributedAt)
+			destroyed, _ := time.Parse(time.RFC3339Nano, erasure.DestroyedAt)
+			returnCreated, _ := time.Parse(time.RFC3339Nano, returnHandoff.CreatedAt)
+			returnReceived, _ := time.Parse(time.RFC3339Nano, returnReceipt.ReceivedAt)
+			if !outboundCreated.After(predecessorAccepted) ||
+				!outboundReceived.After(outboundCreated) ||
+				!contributed.After(outboundReceived) ||
+				!returnCreated.After(contributed) ||
+				!returnCreated.After(destroyed) ||
+				!returnReceived.After(returnCreated) ||
+				!accepted.After(returnReceived) {
+				return nil, fmt.Errorf("accepted head %d custody/contribution/erasure/acceptance timestamps are not strictly ordered", index+1)
+			}
 		}
 
 		mirrorIDs := make(map[string]struct{}, len(evidence.MirrorReceipts))

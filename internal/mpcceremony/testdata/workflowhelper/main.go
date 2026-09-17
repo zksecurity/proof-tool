@@ -21,6 +21,7 @@ import (
 	"github.com/consensys/gnark/frontend/cs/r1cs"
 	"golang.org/x/crypto/blake2b"
 
+	"proof-tool/internal/circuit/rehearsal"
 	"proof-tool/internal/mpcceremony"
 	"proof-tool/internal/prover"
 )
@@ -65,11 +66,12 @@ func main() {
 }
 
 func run(outputRoot, operationalEvidenceHelper string) error {
+	checkpointV4 := os.Getenv("MPC_WORKFLOW_CHECKPOINT_V4") == "1"
 	zeroAssurance := os.Getenv("PROOF_TOOL_TEST_ZERO_ASSURANCE") == "1"
 	checkpointPhase2One := os.Getenv("MPC_WORKFLOW_PHASE2_ONE") == "1"
 	var circuit *mpcceremony.CompiledCircuit
 	var err error
-	if checkpointPhase2One {
+	if checkpointPhase2One || checkpointV4 {
 		circuit, err = mpcceremony.CompileForKeyVersion(mpcceremony.KeyVersionRehearsal)
 	} else {
 		compiled, compileErr := frontend.Compile(
@@ -99,6 +101,16 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		software, err = mpcceremony.RunningSoftwareBindingForMode(prover.ProofToolVersion, mpcceremony.ModeRehearsal)
 		if err != nil {
 			return fmt.Errorf("bind helper executable: %w", err)
+		}
+	}
+
+	// Test-only companion CLI: a distinct architecture variant lets integration
+	// tests exercise the real command executable without changing this helper's
+	// own approved identity. All normal allowlist checks still apply.
+	if binary := os.Getenv("MPC_WORKFLOW_ALLOWED_CLI"); binary != "" {
+		software, err = mpcceremony.SoftwareBindingWithAllowedBinaryFiles(software, prover.ProofToolVersion, mpcceremony.ModeRehearsal, []string{binary})
+		if err != nil {
+			return fmt.Errorf("bind test companion CLI: %w", err)
 		}
 	}
 
@@ -176,7 +188,7 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		return err
 	}
 	auditor1KeyPath, auditor2KeyPath := "", ""
-	if !zeroAssurance {
+	if !zeroAssurance || os.Getenv("MPC_WORKFLOW_V4_AUDITS") == "1" {
 		auditor1KeyPath, err = writePrivateKey("auditor-01", auditor1Private)
 		if err != nil {
 			return err
@@ -214,10 +226,10 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	ceremonyRoot := filepath.Join(outputRoot, "ceremony")
 	phaseMinimum := uint8(2)
 	phase2Minimum := uint8(2)
-	if os.Getenv("MPC_WORKFLOW_PHASE1_ONE") == "1" || checkpointPhase2One {
+	if os.Getenv("MPC_WORKFLOW_PHASE1_ONE") == "1" || checkpointPhase2One || checkpointV4 {
 		phaseMinimum = 1
 	}
-	if checkpointPhase2One {
+	if checkpointPhase2One || checkpointV4 {
 		phase2Minimum = 1
 	}
 	auditors := []mpcceremony.Identity{}
@@ -228,18 +240,31 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		assurance.MirrorsPerAcceptedHead = 1
 		assurance.PassingCeremonyAudits = 1
 	}
+	releaseVerification := ""
+	if checkpointV4 {
+		releaseVerification = mpcceremony.CoordinatorReplayReleaseV1
+		if os.Getenv("MPC_WORKFLOW_V4_AUDITS") == "1" {
+			auditors = []mpcceremony.Identity{auditor1, auditor2}
+			assurance.PassingCeremonyAudits = 2
+		}
+		if os.Getenv("MPC_WORKFLOW_V4_MIRROR") == "1" {
+			assurance.MirrorsPerAcceptedHead = 1
+			assurance.PublicWitnessesPerPhase = 1
+		}
+	}
 	initialized, err := mpcceremony.InitializeCeremonyFiles(mpcceremony.InitFilesOptions{
 		RootDir: ceremonyRoot,
 		Circuit: circuit,
 		Definition: mpcceremony.DefinitionOptions{
-			Mode:            mpcceremony.ModeRehearsal,
-			CreatedAt:       "2023-08-23T15:00:00Z",
-			SessionNonceHex: "abababababababababababababababababababababababababababababababab",
-			Software:        software,
-			Coordinator:     coordinator,
-			ReleaseSigner:   releaseSigner,
-			Auditors:        auditors,
-			AssurancePolicy: assurance,
+			ReleaseVerification: releaseVerification,
+			Mode:                mpcceremony.ModeRehearsal,
+			CreatedAt:           "2023-08-23T15:00:00Z",
+			SessionNonceHex:     "abababababababababababababababababababababababababababababababab",
+			Software:            software,
+			Coordinator:         coordinator,
+			ReleaseSigner:       releaseSigner,
+			Auditors:            auditors,
+			AssurancePolicy:     assurance,
 			Roster: []mpcceremony.Participant{
 				{Identity: participant1},
 				{Identity: participant2},
@@ -279,6 +304,9 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	trusted, err := mpcceremony.LoadSignedDefinition(trust)
 	if err != nil {
 		return err
+	}
+	if checkpointV4 {
+		return runCheckpointV4Turn(outputRoot, ceremonyRoot, trust, circuit, trusted.Definition, coordinatorPrivate, coordinatorKeyPath, participant1Private, participant1KeyPath)
 	}
 	writeHistoricalClose := func(
 		phase mpcceremony.Phase,
@@ -1166,7 +1194,21 @@ func writeTinyPublicEvidence(
 	}
 	scalar := new(big.Int).SetBytes(reversed)
 	scalar.Mod(scalar, ecc.BLS12_381.ScalarField())
-	assignment := &tinyCommittedCircuit{Public: scalar, Secret: scalar}
+	var assignment frontend.Circuit = &tinyCommittedCircuit{Public: scalar, Secret: scalar}
+	if circuit.Binding.KeyVersion == mpcceremony.KeyVersionRehearsal {
+		field := ecc.BLS12_381.ScalarField()
+		q := new(big.Int).Sub(field, big.NewInt(1))
+		q.Div(q, big.NewInt(3))
+		exponent := new(big.Int).ModInverse(big.NewInt(3), q)
+		if exponent == nil {
+			return errors.New("unexpected rehearsal cube subgroup")
+		}
+		cubeRoot := new(big.Int).Exp(scalar, exponent, field)
+		if new(big.Int).Exp(cubeRoot, big.NewInt(3), field).Cmp(scalar) != 0 {
+			return errors.New("rehearsal golden scalar is not a cube")
+		}
+		assignment = &rehearsal.Circuit{X: cubeRoot, Pub: scalar}
+	}
 	fullWitness, err := frontend.NewWitness(assignment, ecc.BLS12_381.ScalarField())
 	if err != nil {
 		return err

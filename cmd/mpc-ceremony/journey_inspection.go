@@ -48,7 +48,7 @@ type JourneyInspection struct {
 
 func inspectDefinitionJourney(d mpcceremony.CeremonyDefinition) *DefinitionJourneyInspection {
 	r := &DefinitionJourneyInspection{Schema: "proof-tool-mpc-definition-journey-v2", MinimumPublicWitnesses: 1, MinimumMirrorsPerAcceptedHead: 1, MinimumPassingCeremonyAudits: 1, MinimumExternalAuditSignoffs: 1, BeaconRoundLeadSeconds: d.BeaconPolicy.MinimumWitnessLeadSeconds, ObserverRequirementSource: "legacy verifier minimums"}
-	if d.Schema == mpcceremony.DefinitionSchema && d.AssurancePolicy != nil {
+	if d.UsesSignedAssurancePolicy() && d.AssurancePolicy != nil {
 		r.MinimumPublicWitnesses = int(d.AssurancePolicy.PublicWitnessesPerPhase)
 		r.MinimumMirrorsPerAcceptedHead = int(d.AssurancePolicy.MirrorsPerAcceptedHead)
 		r.MinimumPassingCeremonyAudits = int(d.AssurancePolicy.PassingCeremonyAudits)

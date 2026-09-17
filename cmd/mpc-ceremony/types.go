@@ -39,11 +39,14 @@ const (
 	CommandReplay                           Command = "replay"
 	CommandReleaseSign                      Command = "release sign"
 	CommandReleaseVerify                    Command = "release verify"
+	CommandReleaseReviewV4                  Command = "release review-v4"
 	CommandOpsPrepareMirrorReceipt          Command = "ops prepare-mirror-receipt"
 	CommandOpsPreparePublicWitnessReceipt   Command = "ops prepare-public-witness-receipt"
 	CommandOpsExportSigning                 Command = "ops export-signing"
 	CommandOpsPrepareEnrollment             Command = "ops prepare-enrollment"
 	CommandOpsPrepareBundle                 Command = "ops prepare-bundle"
+	CommandOpsPrepareBundleV4               Command = "ops prepare-bundle-v4"
+	CommandOpsSignBundleV4                  Command = "ops sign-bundle-v4"
 	CommandOpsSign                          Command = "ops sign"
 	CommandOpsImportSig                     Command = "ops import-signature"
 	CommandOpsVerify                        Command = "ops verify"
@@ -51,7 +54,10 @@ const (
 	CommandDecisionSign                     Command = "decision sign"
 	CommandDecisionVerify                   Command = "decision verify"
 	CommandInspectDefinition                Command = "inspect definition"
+	CommandInspectDefinitionProtocol        Command = "inspect definition-protocol"
 	CommandInspectChain                     Command = "inspect chain"
+	CommandInspectContributionInventoryV4   Command = "inspect contribution-inventory-v4"
+	CommandInspectComputationOutputV4       Command = "inspect computation-output-v4"
 	CommandInspectParticipant               Command = "inspect participant"
 	CommandInspectEnrollment                Command = "inspect enrollment"
 	CommandInspectCheckpoint                Command = "inspect checkpoint"
@@ -62,6 +68,17 @@ const (
 	CommandCheckpointSign                   Command = "checkpoint sign"
 	CommandCheckpointVerify                 Command = "checkpoint verify"
 	CommandCheckpointVerifyStored           Command = "checkpoint verify-stored"
+	CommandCheckpointPrepareV4              Command = "checkpoint prepare-v4"
+	CommandCheckpointSignV4                 Command = "checkpoint sign-v4"
+	CommandCheckpointInitializeV4           Command = "checkpoint initialize-v4"
+	CommandCheckpointRecordV4               Command = "checkpoint record-v4"
+	CommandCheckpointAllocateV4             Command = "checkpoint allocate-v4"
+	CommandCheckpointAcceptCandidateV4      Command = "checkpoint accept-candidate-v4"
+	CommandCheckpointRejectCandidateV4      Command = "checkpoint reject-candidate-v4"
+	CommandCheckpointVerifyStoredV4         Command = "checkpoint verify-stored-v4"
+	CommandCheckpointInspectSignedV4        Command = "checkpoint inspect-signed-v4"
+	CommandCheckpointInspectEnrollmentsV4   Command = "checkpoint inspect-enrollments-v4"
+	CommandCheckpointVerifyReleaseV4        Command = "checkpoint verify-release-v4"
 )
 
 type GlobalOptions struct {
@@ -83,6 +100,7 @@ type IdentityGenerateOptions struct {
 }
 
 type InitOptions struct {
+	ReleaseVerification   string
 	SessionNonceHex       string
 	CreatedAt             string
 	KeyVersion            string
@@ -117,6 +135,10 @@ type ContributeOptions struct {
 	EnvironmentPath          string
 	ContributedAt            string
 	OutDir                   string
+	ArtifactRoot             string
+	CheckpointPath           string
+	CheckpointSignaturePath  string
+	AttemptID                string
 }
 
 type VerifyContributionOptions struct {
@@ -232,6 +254,8 @@ type ReleaseSignOptions struct {
 	CeremonySignaturePath    string
 	CoordinatorPublicKeyFile string
 	CandidateBundleDir       string
+	ReviewCheckpointPath     string
+	ReviewSignaturePath      string
 	AuditReportPaths         []string
 	AuditSignaturePaths      []string
 	OperationalEvidenceRoot  string
@@ -393,6 +417,9 @@ type CheckpointEvidenceOptions struct {
 	NextManifestKey                 string
 	CandidateDir                    string
 	ReleaseDir                      string
+	AcknowledgementRecordName       string
+	AcknowledgementSignatureName    string
+	AcceptanceSigner                checkpointAcceptanceSigner
 }
 
 type CheckpointPrepareOptions struct {
@@ -560,6 +587,7 @@ type DecisionPrepareOptions struct {
 	CeremonySignaturePath    string
 	CoordinatorPublicKeyFile string
 	DraftPath                string
+	EvidenceRoot             string
 	OutPath                  string
 }
 
@@ -611,12 +639,19 @@ type CommandResult struct {
 	Summary                             string                               `json:"summary,omitempty"`
 	Identity                            *mpcceremony.Identity                `json:"identity,omitempty"`
 	DefinitionInspection                *DefinitionInspection                `json:"definition_inspection,omitempty"`
+	DefinitionProtocolInspection        *DefinitionProtocolInspection        `json:"definition_protocol_inspection,omitempty"`
+	ContributionInventoryV4             *ContributionInventoryInspectionV4   `json:"contribution_inventory_v4,omitempty"`
+	ComputationOutputV4                 *ComputationOutputInspectionV4       `json:"computation_output_v4,omitempty"`
+	CheckpointDiscoveryV4               *CheckpointDiscoveryInspectionV4     `json:"checkpoint_discovery_v4,omitempty"`
+	EnrollmentMetadataV4                *EnrollmentMetadataInspectionV4      `json:"enrollment_metadata_v4,omitempty"`
 	ChainInspection                     *ChainInspection                     `json:"chain_inspection,omitempty"`
 	ParticipantInspection               *ParticipantInspection               `json:"participant_inspection,omitempty"`
 	EnrollmentInspection                *EnrollmentInspection                `json:"enrollment_inspection,omitempty"`
 	CheckpointInspection                *CheckpointInspection                `json:"checkpoint_inspection,omitempty"`
 	CheckpointTransitionInspection      *CheckpointTransitionInspection      `json:"checkpoint_transition_inspection,omitempty"`
 	CheckpointEvidenceInspection        *CheckpointEvidenceInspection        `json:"checkpoint_evidence_inspection,omitempty"`
+	CheckpointInspectionV4              *CheckpointInspectionV4              `json:"checkpoint_inspection_v4,omitempty"`
+	EvidenceInspectionV4                *EvidenceInspectionV4                `json:"evidence_inspection_v4,omitempty"`
 	SubmissionInspection                *SubmissionInspection                `json:"submission_inspection,omitempty"`
 	SubmissionAcknowledgementInspection *SubmissionAcknowledgementInspection `json:"submission_acknowledgement_inspection,omitempty"`
 	JourneyInspection                   *JourneyInspection                   `json:"journey_inspection,omitempty"`

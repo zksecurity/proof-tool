@@ -185,6 +185,9 @@ func executeOpsExportSigning(options OpsExportSigningOptions) (result CommandRes
 	if err != nil {
 		return CommandResult{}, err
 	}
+	if recordType == mpcceremony.RecordEvidenceBundle && trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+		return CommandResult{}, errors.New("definition v4 evidence bundles require ops sign-bundle-v4 with an exact checkpoint pair")
+	}
 	request, err := mpcceremony.NewOperationalSigningRequest(recordType, canonical)
 	if err != nil {
 		return CommandResult{}, err
@@ -260,6 +263,9 @@ func executeOpsImportSignature(options OpsImportSignatureOptions) (CommandResult
 	)
 	if err != nil {
 		return CommandResult{}, err
+	}
+	if recordType == mpcceremony.RecordEvidenceBundle && trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+		return CommandResult{}, errors.New("definition v4 evidence bundles require ops sign-bundle-v4 with an exact checkpoint pair")
 	}
 	definitionBytes, err := canonicalDefinition(trusted)
 	if err != nil {
@@ -401,9 +407,13 @@ func executeOpsVerify(options OpsVerifyOptions) (CommandResult, error) {
 			return CommandResult{}, err
 		}
 	}
+	summary := "verified canonical operational record, ceremony binding, signer identity, and detached signature"
+	if recordType == mpcceremony.RecordEvidenceBundle && trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+		summary += "; bundle evidence checked, but no exact V4 checkpoint equivalence or final release approval was verified"
+	}
 	return CommandResult{
 		CeremonyID: trusted.Definition.CeremonyID,
-		Summary:    "verified canonical operational record, ceremony binding, signer identity, and detached signature",
+		Summary:    summary,
 		Outputs: map[string]string{
 			"record":    options.RecordPath,
 			"signature": options.SignaturePath,

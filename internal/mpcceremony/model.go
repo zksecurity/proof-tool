@@ -21,7 +21,9 @@ import (
 const (
 	DefinitionSchemaV1            = "proof-tool-mpc-ceremony-definition-v1"
 	DefinitionSchemaV2            = "proof-tool-mpc-ceremony-definition-v2"
-	DefinitionSchema              = "proof-tool-mpc-ceremony-definition-v3"
+	DefinitionSchemaV3            = "proof-tool-mpc-ceremony-definition-v3"
+	DefinitionSchemaV4            = "proof-tool-mpc-ceremony-definition-v4"
+	DefinitionSchema              = DefinitionSchemaV3
 	DetachedSignatureSchema       = "proof-tool-mpc-detached-signature-v1"
 	ContributionAttestationSchema = "proof-tool-mpc-contribution-attestation-v2"
 	ErasureAttestationSchema      = "proof-tool-mpc-erasure-attestation-v2"
@@ -33,6 +35,7 @@ const (
 	AuditRecordSchema             = "proof-tool-mpc-audit-record-v1"
 	FinalTranscriptSchemaV1       = "proof-tool-mpc-final-transcript-v1"
 	FinalTranscriptSchema         = "proof-tool-mpc-final-transcript-v2"
+	FinalTranscriptSchemaV3       = "proof-tool-mpc-final-transcript-v3"
 
 	KeyVersionDestinationV2 = "ownership-destination-v2"
 	CircuitIDDestinationV2  = "root-ownership-destination-v2/bls12-381/groth16"

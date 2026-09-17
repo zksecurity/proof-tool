@@ -23,6 +23,12 @@ func executeDecisionPrepare(options DecisionPrepareOptions) (CommandResult, erro
 	if err != nil {
 		return CommandResult{}, err
 	}
+	if trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+		return executeDecisionPrepareV4(options, trusted.Definition.CeremonyID, draftBytes)
+	}
+	if options.EvidenceRoot != "" {
+		return CommandResult{}, fmt.Errorf("decision prepare --evidence-root is only supported for definition v4")
+	}
 	decision, decisionBytes, err := mpcceremony.PrepareProductionDecision(
 		trusted.Definition,
 		draftBytes,
@@ -58,6 +64,9 @@ func executeDecisionSign(options DecisionSignOptions) (CommandResult, error) {
 	decisionBytes, err := readRegularOperationalFile(options.DecisionPath, maxOperationalRecordBytes)
 	if err != nil {
 		return CommandResult{}, err
+	}
+	if trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+		return executeDecisionSignV4(options, trusted.Definition.CeremonyID, decisionBytes)
 	}
 	var decision mpcceremony.ProductionDecision
 	if err := mpcceremony.UnmarshalCanonical(decisionBytes, &decision); err != nil {
@@ -143,11 +152,18 @@ func executeDecisionVerify(options DecisionVerifyOptions) (CommandResult, error)
 		return CommandResult{}, err
 	}
 	signatures := make([][]byte, len(options.SignaturePaths))
+	signatureLimit := int64(maxOperationalRecordBytes)
+	if trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+		signatureLimit = 4096 // Match the V4 decision signature verifier's small-record bound.
+	}
 	for index, path := range options.SignaturePaths {
-		signatures[index], err = readRegularOperationalFile(path, maxOperationalRecordBytes)
+		signatures[index], err = readRegularOperationalFile(path, signatureLimit)
 		if err != nil {
 			return CommandResult{}, fmt.Errorf("decision signature %d: %w", index, err)
 		}
+	}
+	if trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+		return executeDecisionVerifyV4(options, trusted.Definition.CeremonyID, decisionBytes, signatures)
 	}
 	verified, err := mpcceremony.VerifyProductionDecision(mpcceremony.VerifyProductionDecisionOptions{
 		Definition:     trusted.Definition,

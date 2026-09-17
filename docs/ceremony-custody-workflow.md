@@ -1,6 +1,11 @@
-# Supported custody and tiny-proof commands
+# Legacy V1–V3 custody and tiny-proof commands
 
-These commands close the gaps found in the September 2026 same-operator rehearsal.
+These commands apply to ceremonies whose signed definition selects the released
+V1–V3 workflow. Definition V4 replaces per-turn custody packets with a signed
+candidate allocation and coordinator acceptance checkpoint; do not add legacy
+custody records to a V4 turn.
+
+The legacy commands close the gaps found in the September 2026 same-operator rehearsal.
 They do not change the signed protocol, waive operational evidence, prove physical
 independence, or authorize a production release.
 

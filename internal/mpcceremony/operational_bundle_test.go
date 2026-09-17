@@ -256,6 +256,31 @@ func TestVerifyOperationalEvidenceBundleEndToEndAndNegatives(t *testing.T) {
 			t.Fatal("tampered accepted output payload unexpectedly accepted")
 		}
 	})
+	for _, which := range []string{"genesis", "contribution"} {
+		t.Run("v3 missing "+which+" payload", func(t *testing.T) {
+			f := newOperationalBundleFixtureWithAssurance(t, &AssurancePolicy{})
+			if f.definition.Schema != DefinitionSchemaV3 {
+				t.Fatalf("test must retain released v3 semantics, got %s", f.definition.Schema)
+			}
+			if err := verify(f); err != nil {
+				t.Fatal(err)
+			}
+			var chain Chain
+			if _, err := readCanonicalFile(filepath.Join(f.root, f.bundle.Phase1.AcceptedChain.Record.Name), &chain); err != nil {
+				t.Fatal(err)
+			}
+			ref := chain.Genesis
+			if which == "contribution" {
+				ref = chain.Records[0].OutputPayload
+			}
+			if err := os.Remove(filepath.Join(f.root, ref.Name)); err != nil {
+				t.Fatal(err)
+			}
+			if err := verify(f); err == nil {
+				t.Fatal("v3 accepted missing historical payload")
+			}
+		})
+	}
 	t.Run("actor overlap witness", func(t *testing.T) {
 		f := newOperationalBundleFixture(t)
 		pair := f.bundle.Phase1.PublicWitnessReceipts[0]
@@ -434,6 +459,37 @@ func TestVerifyOperationalEvidenceBundleEndToEndAndNegatives(t *testing.T) {
 			t.Fatal("tampered accepted chain unexpectedly accepted")
 		}
 	})
+}
+
+func TestOperationalEvidenceV4UsesOneSignedBeaconAndNoMultiRelayRecord(t *testing.T) {
+	f := newOperationalBundleFixture(t)
+	bundle := f.bundle
+	bundle.Schema = OperationalEvidenceBundleSchemaV4
+	for _, phase := range []*PhaseOperationalEvidence{&bundle.Phase1, &bundle.Phase2} {
+		phase.Beacon = phase.MultiRelayBeaconEvidence
+		phase.MultiRelayBeaconEvidence = SignedArtifactRefs{}
+		phase.RawBeaconResponses = phase.RawBeaconResponses[:1]
+		for index := range phase.AcceptedHeads {
+			phase.AcceptedHeads[index].OutboundHandoff = SignedArtifactRefs{}
+			phase.AcceptedHeads[index].OutboundReceipt = SignedArtifactRefs{}
+			phase.AcceptedHeads[index].ReturnHandoff = SignedArtifactRefs{}
+			phase.AcceptedHeads[index].ReturnReceipt = SignedArtifactRefs{}
+		}
+	}
+	if err := bundle.Validate(); err != nil {
+		t.Fatalf("single-beacon V4 bundle rejected: %v", err)
+	}
+
+	bad := bundle
+	bad.Phase1.MultiRelayBeaconEvidence = f.bundle.Phase1.MultiRelayBeaconEvidence
+	if err := bad.Validate(); err == nil {
+		t.Fatal("V4 accepted a separate multi-relay beacon record")
+	}
+	bad = bundle
+	bad.Phase1.RawBeaconResponses = append(bad.Phase1.RawBeaconResponses, f.bundle.Phase1.RawBeaconResponses[1])
+	if err := bad.Validate(); err == nil {
+		t.Fatal("V4 accepted more than one raw beacon response")
+	}
 }
 
 func newOperationalBundleFixture(t *testing.T) operationalBundleFixture {

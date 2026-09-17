@@ -87,6 +87,8 @@ func (workflowExecutor) Execute(ctx context.Context, invocation Invocation) (Com
 		return executeOpsPrepareEnrollment(invocation.Options.(OpsPrepareEnrollmentOptions))
 	case CommandOpsPrepareBundle:
 		return executeOpsPrepareBundle(invocation.Options.(OpsPrepareBundleOptions))
+	case CommandOpsPrepareBundleV4, CommandOpsSignBundleV4, CommandReleaseReviewV4, CommandCheckpointVerifyReleaseV4:
+		return executeEvidenceV4(invocation.Command, invocation.Options.(EvidenceOptionsV4))
 	case CommandOpsSign:
 		return executeOpsSign(invocation.Options.(OpsSignOptions))
 	case CommandOpsImportSig:
@@ -101,8 +103,14 @@ func (workflowExecutor) Execute(ctx context.Context, invocation Invocation) (Com
 		return executeDecisionVerify(invocation.Options.(DecisionVerifyOptions))
 	case CommandInspectDefinition:
 		return executeInspectDefinition(invocation.Options.(InspectDefinitionOptions))
+	case CommandInspectDefinitionProtocol:
+		return executeInspectDefinitionProtocol(invocation.Options.(InspectDefinitionOptions))
 	case CommandInspectChain:
 		return executeInspectChain(invocation.Options.(InspectChainOptions))
+	case CommandInspectContributionInventoryV4:
+		return executeContributionInventoryV4(invocation.Options.(ContributionInventoryOptionsV4))
+	case CommandInspectComputationOutputV4:
+		return executeComputationOutputV4(invocation.Options.(ContributionInventoryOptionsV4))
 	case CommandInspectParticipant:
 		return executeInspectParticipant(invocation.Options.(InspectParticipantOptions))
 	case CommandInspectEnrollment:
@@ -117,6 +125,8 @@ func (workflowExecutor) Execute(ctx context.Context, invocation Invocation) (Com
 		return executeInspectSubmissionAcknowledgement(invocation.Options.(InspectSubmissionAcknowledgementOptions))
 	case CommandCheckpointPrepare:
 		return executeCheckpointPrepare(invocation.Options.(CheckpointPrepareOptions))
+	case CommandCheckpointPrepareV4, CommandCheckpointSignV4, CommandCheckpointInitializeV4, CommandCheckpointRecordV4, CommandCheckpointAllocateV4, CommandCheckpointAcceptCandidateV4, CommandCheckpointRejectCandidateV4, CommandCheckpointVerifyStoredV4, CommandCheckpointInspectSignedV4, CommandCheckpointInspectEnrollmentsV4:
+		return executeCheckpointV4(invocation.Command, invocation.Options.(CheckpointOptionsV4))
 	case CommandCheckpointSign:
 		return executeCheckpointSign(invocation.Options.(CheckpointSignOptions))
 	case CommandCheckpointVerify:
@@ -184,18 +194,19 @@ func executeInit(options InitOptions) (CommandResult, error) {
 		RootDir: options.OutDir,
 		Circuit: circuit,
 		Definition: mpcceremony.DefinitionOptions{
-			Mode:            options.Mode,
-			CreatedAt:       options.CreatedAt,
-			SessionNonceHex: nonce,
-			Software:        runningSoftware,
-			Coordinator:     participants.Coordinator,
-			ReleaseSigner:   participants.ReleaseSigner,
-			Auditors:        participants.Auditors,
-			Roster:          participants.Roster,
-			Phase1Policy:    policy.Phase1Policy,
-			Phase2Policy:    policy.Phase2Policy,
-			BeaconPolicy:    policy.BeaconPolicy,
-			AssurancePolicy: assurancePolicy,
+			ReleaseVerification: options.ReleaseVerification,
+			Mode:                options.Mode,
+			CreatedAt:           options.CreatedAt,
+			SessionNonceHex:     nonce,
+			Software:            runningSoftware,
+			Coordinator:         participants.Coordinator,
+			ReleaseSigner:       participants.ReleaseSigner,
+			Auditors:            participants.Auditors,
+			Roster:              participants.Roster,
+			Phase1Policy:        policy.Phase1Policy,
+			Phase2Policy:        policy.Phase2Policy,
+			BeaconPolicy:        policy.BeaconPolicy,
+			AssurancePolicy:     assurancePolicy,
 		},
 		CoordinatorPrivateKeyPath: options.CoordinatorSigningKey,
 	})
@@ -226,7 +237,23 @@ func executeContribution(phase mpcceremony.Phase, options ContributeOptions) (Co
 	if err := verifyRunningTrust(trust); err != nil {
 		return CommandResult{}, err
 	}
-	circuit, err := loadOperationalCircuit(trust, options.TranscriptDir)
+	trusted, err := mpcceremony.LoadSignedDefinition(trust)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	circuitRoot := options.TranscriptDir
+	if trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+		if err := requireValues(
+			pathValue("--artifact-root", options.ArtifactRoot),
+			pathValue("--checkpoint", options.CheckpointPath),
+			pathValue("--checkpoint-signature", options.CheckpointSignaturePath),
+			value("--attempt-id", options.AttemptID),
+		); err != nil {
+			return CommandResult{}, err
+		}
+		circuitRoot = options.ArtifactRoot
+	}
+	circuit, err := loadOperationalCircuit(trust, circuitRoot)
 	if err != nil {
 		return CommandResult{}, err
 	}
@@ -234,19 +261,33 @@ func executeContribution(phase mpcceremony.Phase, options ContributeOptions) (Co
 	if err != nil {
 		return CommandResult{}, err
 	}
-	result, err := mpcceremony.CreateContributionCandidate(mpcceremony.ContributionFilesOptions{
-		Trust:                     trust,
-		Circuit:                   circuit,
-		Phase:                     phase,
-		Transcript:                transcriptPaths(options.TranscriptDir, options.ChainPath, options.ChainSignaturePath),
-		Phase1SealPath:            options.Phase1SealPath,
-		Phase1SealSignaturePath:   options.Phase1SealSignaturePath,
-		ParticipantID:             options.ParticipantID,
-		ParticipantPrivateKeyPath: options.ParticipantSigningKey,
-		Environment:               environment,
-		ContributedAt:             options.ContributedAt,
-		CandidateDir:              options.OutDir,
-	})
+	var result mpcceremony.ContributionFilesResult
+	if trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+		_, _, checkpoint, refErr := checkpointSignedBytes(options.ArtifactRoot, options.CheckpointPath, options.CheckpointSignaturePath)
+		if refErr != nil {
+			return CommandResult{}, refErr
+		}
+		result, err = mpcceremony.CreateAllocatedContributionCandidateV4(mpcceremony.AllocatedContributionFilesV4Options{
+			Trust: trust, Circuit: circuit, ArtifactRoot: options.ArtifactRoot,
+			Checkpoint: checkpoint, AttemptID: options.AttemptID,
+			ParticipantPrivateKeyPath: options.ParticipantSigningKey,
+			Environment:               environment, ContributedAt: options.ContributedAt, CandidateDir: options.OutDir,
+		})
+	} else {
+		result, err = mpcceremony.CreateContributionCandidate(mpcceremony.ContributionFilesOptions{
+			Trust:                     trust,
+			Circuit:                   circuit,
+			Phase:                     phase,
+			Transcript:                transcriptPaths(options.TranscriptDir, options.ChainPath, options.ChainSignaturePath),
+			Phase1SealPath:            options.Phase1SealPath,
+			Phase1SealSignaturePath:   options.Phase1SealSignaturePath,
+			ParticipantID:             options.ParticipantID,
+			ParticipantPrivateKeyPath: options.ParticipantSigningKey,
+			Environment:               environment,
+			ContributedAt:             options.ContributedAt,
+			CandidateDir:              options.OutDir,
+		})
+	}
 	if err != nil {
 		return CommandResult{}, err
 	}
@@ -662,8 +703,18 @@ func executeReleaseSign(options ReleaseSignOptions) (CommandResult, error) {
 		options.CeremonySignaturePath,
 		options.CoordinatorPublicKeyFile,
 	)
-	if err := verifyRunningTrust(trust); err != nil {
+	trusted, err := mpcceremony.LoadSignedDefinition(trust)
+	if err != nil {
 		return CommandResult{}, err
+	}
+	if err := mpcceremony.VerifyRunningSoftwareForMode(trusted.Definition.Software, trusted.Definition.Mode); err != nil {
+		return CommandResult{}, err
+	}
+	if trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+		return executeReleaseSignV4(options, trust, trusted.Definition.CeremonyID)
+	}
+	if options.ReviewCheckpointPath != "" || options.ReviewSignaturePath != "" {
+		return CommandResult{}, fmt.Errorf("review checkpoint signing requires definition v4")
 	}
 	coordinatorPublicKey, err := readPublicKeyHex(options.CoordinatorPublicKeyFile)
 	if err != nil {
@@ -720,7 +771,11 @@ func executeReleaseVerify(options ReleaseVerifyOptions) (CommandResult, error) {
 		options.CeremonySignaturePath,
 		options.CoordinatorPublicKeyFile,
 	)
-	if err := verifyRunningTrust(trust); err != nil {
+	trusted, err := mpcceremony.LoadSignedDefinition(trust)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	if err := mpcceremony.VerifyRunningSoftwareForMode(trusted.Definition.Software, trusted.Definition.Mode); err != nil {
 		return CommandResult{}, err
 	}
 	coordinatorPublicKey, err := readPublicKeyHex(options.CoordinatorPublicKeyFile)
@@ -730,6 +785,18 @@ func executeReleaseVerify(options ReleaseVerifyOptions) (CommandResult, error) {
 	releasePublicKey, err := readPublicKeyHex(options.ManifestPublicKeyFile)
 	if err != nil {
 		return CommandResult{}, err
+	}
+	if trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+		result, err := mpcceremony.VerifyReleaseV4(mpcceremony.VerifyReleaseV4Options{Trust: trust, KeysDir: options.KeysDir, TrustedPublicKeyHex: releasePublicKey, ExpectedSignatureKeyID: options.SignatureKeyID})
+		if err != nil {
+			return CommandResult{}, err
+		}
+		if result.Transcript.CeremonyID != trusted.Definition.CeremonyID {
+			return CommandResult{}, fmt.Errorf("authenticated ceremony changed during release verification")
+		}
+		return CommandResult{CeremonyID: result.Transcript.CeremonyID, ReleaseManifestSHA256: result.ManifestSHA256,
+			Summary: "Verified the local signed package, coordinator replay binding, public proof and required evidence; no publication or production approval occurred.",
+			Outputs: map[string]string{"keys_dir": options.KeysDir}}, nil
 	}
 	result, err := mpcceremony.VerifyRelease(mpcceremony.VerifyReleaseOptions{
 		DefinitionPath:          options.CeremonyPath,
