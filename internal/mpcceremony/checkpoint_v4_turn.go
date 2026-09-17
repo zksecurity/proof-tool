@@ -232,9 +232,10 @@ func rejectedCandidateInventoryV4(dir string, scope ContributionScope) (Candidat
 			return CandidateInventory{}, errors.New("rejected directory has missing or extra candidate files")
 		}
 		limit := int64(maxSignedRecordBytes)
-		if name == "contribution.bin" {
+		switch name {
+		case "contribution.bin":
 			limit = MaxArtifactSize
-		} else if name == "attestation.sig" || name == "erasure.sig" {
+		case "attestation.sig", "erasure.sig":
 			limit = 4096
 		}
 		ref, err := rejectedCandidateFileRefV4(reader, name, limit)

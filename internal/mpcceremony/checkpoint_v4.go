@@ -269,12 +269,16 @@ func (t CheckpointTransitionV4) Validate() error {
 		if err := validateHex(t.AttemptID, 16); err != nil {
 			return err
 		}
-		wantPhase := Phase1
-		if t.Kind == CheckpointPhase2CandidateAllocated || t.Kind == CheckpointPhase2CandidateAccepted {
-			wantPhase = Phase2
-		}
-		if t.Kind != CheckpointDeliveryRetired && t.Kind != CheckpointContributionRejected && t.Kind != CheckpointDeliveryReallocated && t.Scope.Phase != wantPhase {
-			return errors.New("transition kind and phase disagree")
+		switch t.Kind {
+		case CheckpointPhase2CandidateAllocated, CheckpointPhase2CandidateAccepted:
+			if t.Scope.Phase != Phase2 {
+				return errors.New("transition kind and phase disagree")
+			}
+		case CheckpointDeliveryRetired, CheckpointContributionRejected, CheckpointDeliveryReallocated:
+		default:
+			if t.Scope.Phase != Phase1 {
+				return errors.New("transition kind and phase disagree")
+			}
 		}
 		replacement := t.Kind == CheckpointDeliveryReallocated || ((t.Kind == CheckpointDeliveryRetired || t.Kind == CheckpointContributionRejected) && t.NextAttemptID != "")
 		if replacement {
@@ -307,13 +311,13 @@ func (t CheckpointTransitionV4) Validate() error {
 		} else if t.AllocatedAt != "" {
 			return errors.New("only candidate allocation records allocated_at")
 		}
-		if allocated {
+		switch {
+		case allocated:
 			if t.Record != nil || len(t.Evidence) != 0 {
 				return errors.New("candidate allocation is authorized by the checkpoint itself and adds no evidence")
 			}
 			return nil
-		}
-		if t.Kind == CheckpointDeliveryRetired || t.Kind == CheckpointContributionRejected || t.Kind == CheckpointDeliveryReallocated {
+		case t.Kind == CheckpointDeliveryRetired || t.Kind == CheckpointContributionRejected || t.Kind == CheckpointDeliveryReallocated:
 			if t.Record != nil || len(t.Evidence) != 0 {
 				return errors.New("delivery-only changes must not publish payloads as accepted evidence")
 			}
