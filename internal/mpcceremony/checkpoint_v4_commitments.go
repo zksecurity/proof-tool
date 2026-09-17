@@ -80,11 +80,16 @@ func InspectStoredCheckpointV4(trust TrustPaths, root string, head SignedArtifac
 		return CheckpointV4{}, CheckpointCommitmentsV4{}, err
 	}
 	defer func() { _ = c.reader.root.Close() }()
-	index, err := checkpointCommitmentsV4(c.ancestry)
-	if err == nil {
-		index.FinalReleaseArtifacts, err = finalReleaseDownloadArtifactsV4(c.reader, c.ancestry)
-	}
+	index, err := checkpointGuidanceCommitmentsV4(c.reader, c.ancestry)
 	return c.ancestry.head, index, err
+}
+
+func checkpointGuidanceCommitmentsV4(reader *checkpointReaderV4, ancestry checkpointAncestryV4) (CheckpointCommitmentsV4, error) {
+	index, err := checkpointCommitmentsV4(ancestry)
+	if err == nil {
+		index.FinalReleaseArtifacts, err = finalReleaseDownloadArtifactsV4(reader, ancestry)
+	}
+	return index, err
 }
 
 func checkpointCommitmentsV4(a checkpointAncestryV4) (CheckpointCommitmentsV4, error) {

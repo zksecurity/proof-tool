@@ -15,8 +15,10 @@ type CheckpointDiscoveryV4 struct {
 }
 
 // DiscoverSignedCheckpointV4 authenticates one exact pair, without loading its
-// predecessors. Dependencies are precisely the extra files read for this edge
-// by the stored ancestry verifier (governance only), not all accepted artifacts.
+// predecessors. Dependencies are precisely the extra files needed before the
+// stored guidance projection can be derived: governance evidence, or the small
+// signed final-release bootstrap that names the closed download inventory. They
+// are not a cumulative payload inventory.
 func DiscoverSignedCheckpointV4(d CeremonyDefinition, definition, definitionSignature, record, signature []byte) (CheckpointDiscoveryV4, error) {
 	c, err := VerifySignedCheckpointV4(d, definition, definitionSignature, record, signature)
 	if err != nil {
@@ -30,15 +32,23 @@ func DiscoverSignedCheckpointV4(d CeremonyDefinition, definition, definitionSign
 		}
 		r.Enrollment = &pair
 	}
-	if !isGovernanceTransitionV4(c.Transition.Kind) {
-		return r, nil
-	}
 	add := func(ref ArtifactRef, limit int64) error {
 		if ref.Digest.Size <= 0 || ref.Digest.Size > limit {
 			return errors.New("checkpoint discovery dependency exceeds verification limit")
 		}
 		r.VerificationDependencies = append(r.VerificationDependencies, ref)
 		return nil
+	}
+	if c.Transition.Kind == CheckpointFinalReleaseRecorded {
+		for _, ref := range c.Transition.Evidence {
+			if err := add(ref, 1<<20); err != nil {
+				return CheckpointDiscoveryV4{}, err
+			}
+		}
+		return r, nil
+	}
+	if !isGovernanceTransitionV4(c.Transition.Kind) {
+		return r, nil
 	}
 	if err := add(c.Transition.Record.Record, maxSignedRecordBytes); err != nil {
 		return CheckpointDiscoveryV4{}, err
