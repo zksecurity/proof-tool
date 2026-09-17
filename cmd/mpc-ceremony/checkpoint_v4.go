@@ -61,7 +61,7 @@ func parseCheckpointV4(action string, args []string) (CheckpointOptionsV4, error
 	fs := commandFlagSet("checkpoint " + action)
 	addCeremonyTrustFlags(fs, &o.CeremonyPath, &o.CeremonySignaturePath, &o.CoordinatorPublicKeyFile)
 	fs.StringVar(&o.ArtifactRoot, "artifact-root", "", "local root containing protocol artifacts")
-	if checkpointReadOnlyActionV4(action) || action == "initialize-v4" || action == "record-v4" || action == "allocate-v4" || action == "accept-candidate-v4" {
+	if checkpointReadOnlyActionV4(action) || action == "initialize-v4" || action == "record-v4" || action == "allocate-v4" || action == "accept-candidate-v4" || action == "reject-candidate-v4" {
 		if action == "initialize-v4" {
 			fs.StringVar(&o.CoordinatorSigningKey, "coordinator-signing-key", "", "existing coordinator private key")
 			fs.StringVar(&o.OutDir, "out-dir", "", "fresh atomic output directory for the signed initial checkpoint pair")
@@ -76,7 +76,7 @@ func parseCheckpointV4(action string, args []string) (CheckpointOptionsV4, error
 				fs.StringVar(&o.CoordinatorSigningKey, "coordinator-signing-key", "", "existing coordinator private key")
 				fs.StringVar(&o.OutDir, "out-dir", "", "fresh atomic output directory for the signed descendant checkpoint pair")
 			}
-			if action == "allocate-v4" || action == "accept-candidate-v4" {
+			if action == "allocate-v4" || action == "accept-candidate-v4" || action == "reject-candidate-v4" {
 				fs.StringVar(&o.AttemptID, "attempt-id", "", "fresh 32-character hexadecimal delivery attempt ID")
 				fs.StringVar(&o.CoordinatorSigningKey, "coordinator-signing-key", "", "existing coordinator private key")
 				fs.StringVar(&o.OutDir, "out-dir", "", "fresh atomic output directory for the signed checkpoint pair")
@@ -87,6 +87,9 @@ func parseCheckpointV4(action string, args []string) (CheckpointOptionsV4, error
 			if action == "accept-candidate-v4" {
 				fs.StringVar(&o.CandidateDir, "candidate-dir", "", "exact complete candidate directory")
 				fs.StringVar(&o.AcceptedAt, "accepted-at", "", "acceptance time in RFC3339 format")
+			}
+			if action == "reject-candidate-v4" {
+				fs.StringVar(&o.RejectedCandidateDir, "rejected-candidate-dir", "", "exact private rejected candidate directory")
 			}
 		}
 	} else {
@@ -112,12 +115,15 @@ func parseCheckpointV4(action string, args []string) (CheckpointOptionsV4, error
 	if action == "record-v4" {
 		return o, requireValues(pathValue("--checkpoint", o.CheckpointPath), pathValue("--checkpoint-signature", o.CheckpointSignaturePath), value("--transition", o.TransitionKind), pathValue("--record", o.RecordPath), pathValue("--record-signature", o.RecordSignaturePath), pathValue("--coordinator-signing-key", o.CoordinatorSigningKey), pathValue("--out-dir", o.OutDir))
 	}
-	if action == "allocate-v4" || action == "accept-candidate-v4" {
+	if action == "allocate-v4" || action == "accept-candidate-v4" || action == "reject-candidate-v4" {
 		if err := requireValues(pathValue("--checkpoint", o.CheckpointPath), pathValue("--checkpoint-signature", o.CheckpointSignaturePath), value("--attempt-id", o.AttemptID), pathValue("--coordinator-signing-key", o.CoordinatorSigningKey), pathValue("--out-dir", o.OutDir)); err != nil {
 			return o, err
 		}
 		if action == "allocate-v4" {
 			return o, requireValues(value("--allocated-at", o.AllocatedAt))
+		}
+		if action == "reject-candidate-v4" {
+			return o, requireValues(pathValue("--rejected-candidate-dir", o.RejectedCandidateDir))
 		}
 		return o, requireValues(pathValue("--candidate-dir", o.CandidateDir), value("--accepted-at", o.AcceptedAt))
 	}
@@ -253,7 +259,7 @@ func executeCheckpointV4(command Command, o CheckpointOptionsV4) (CommandResult,
 		}
 		return CommandResult{CeremonyID: d.CeremonyID, Sequence: int(prepared.Checkpoint.Sequence), Summary: "verified the exact signed protocol record and derived its signed descendant checkpoint; it is not current until the delivery service publishes it", Outputs: map[string]string{"checkpoint": filepath.Join(o.OutDir, "checkpoint.json"), "checkpoint_signature": filepath.Join(o.OutDir, "checkpoint.sig")}}, nil
 	}
-	if command == CommandCheckpointAllocateV4 || command == CommandCheckpointAcceptCandidateV4 {
+	if command == CommandCheckpointAllocateV4 || command == CommandCheckpointAcceptCandidateV4 || command == CommandCheckpointRejectCandidateV4 {
 		_, _, refs, err := checkpointSignedBytes(o.ArtifactRoot, o.CheckpointPath, o.CheckpointSignaturePath)
 		if err != nil {
 			return CommandResult{}, err
@@ -274,12 +280,18 @@ func executeCheckpointV4(command Command, o CheckpointOptionsV4) (CommandResult,
 				return CommandResult{}, err
 			}
 			canonical, phase, sequence = prepared.Canonical, string(prepared.Scope.Phase), prepared.Checkpoint.Sequence
-		} else {
+		} else if command == CommandCheckpointAcceptCandidateV4 {
 			circuit, err := loadCheckpointCircuitV4(o.ArtifactRoot, d)
 			if err != nil {
 				return CommandResult{}, err
 			}
 			prepared, err := m.VerifyAndAcceptAllocatedCandidateV4(m.AcceptAllocatedCandidateV4Options{Trust: trust, Circuit: circuit, ArtifactRoot: o.ArtifactRoot, Checkpoint: refs, AttemptID: o.AttemptID, CandidateDir: o.CandidateDir, CoordinatorPrivateKeyPath: o.CoordinatorSigningKey, AcceptedAt: o.AcceptedAt})
+			if err != nil {
+				return CommandResult{}, err
+			}
+			canonical, phase, sequence = prepared.Canonical, string(prepared.Scope.Phase), prepared.Checkpoint.Sequence
+		} else {
+			prepared, err := m.RejectAllocatedCandidateV4(m.RejectAllocatedCandidateV4Options{Trust: trust, ArtifactRoot: o.ArtifactRoot, Checkpoint: refs, AttemptID: o.AttemptID, RejectedCandidateDir: o.RejectedCandidateDir})
 			if err != nil {
 				return CommandResult{}, err
 			}
@@ -299,6 +311,8 @@ func executeCheckpointV4(command Command, o CheckpointOptionsV4) (CommandResult,
 		action := "allocated the exact next candidate turn"
 		if command == CommandCheckpointAcceptCandidateV4 {
 			action = "verified and accepted the exact allocated candidate"
+		} else if command == CommandCheckpointRejectCandidateV4 {
+			action = "recorded the exact rejected candidate and retired its allocation; a replacement requires a fresh contribution"
 		}
 		return CommandResult{CeremonyID: d.CeremonyID, Phase: phase, Sequence: int(sequence), Summary: action + "; the signed checkpoint is not current until the delivery service conditionally publishes it", Outputs: map[string]string{"checkpoint": filepath.Join(o.OutDir, "checkpoint.json"), "checkpoint_signature": filepath.Join(o.OutDir, "checkpoint.sig")}}, nil
 	}
@@ -489,6 +503,25 @@ func validateCheckpointAtomicOutputV4(o CheckpointOptionsV4) error {
 	if o.CandidateDir != "" {
 		if err := validatePathOutsideTree(o.CandidateDir, "", o.OutDir); err != nil {
 			return errors.New("checkpoint output must stay outside the fixed candidate directory")
+		}
+	}
+	if o.RejectedCandidateDir != "" {
+		public, err := filepath.EvalSymlinks(o.ArtifactRoot)
+		if err != nil {
+			return err
+		}
+		private, err := filepath.EvalSymlinks(o.RejectedCandidateDir)
+		if err != nil {
+			return err
+		}
+		if err := validatePathOutsideTree(public, "", private); err != nil {
+			return errors.New("private rejected candidate and public artifact root must be disjoint")
+		}
+		if err := validatePathOutsideTree(private, "", public); err != nil {
+			return errors.New("private rejected candidate and public artifact root must be disjoint")
+		}
+		if err := validatePathOutsideTree(private, "", o.OutDir); err != nil {
+			return errors.New("checkpoint output must stay outside the private rejected candidate directory")
 		}
 	}
 	return nil

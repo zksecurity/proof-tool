@@ -351,6 +351,20 @@ The output is not current until the delivery service conditionally advances the
 ceremony head. No participant transport envelope or custody receipt is used.
 The output directory must be fresh and its parent must already exist.
 `,
+	"checkpoint reject-candidate-v4": `Usage:
+  mpc-ceremony checkpoint reject-candidate-v4 --ceremony FILE --ceremony-signature FILE \
+    --coordinator-public-key-file KEY --artifact-root DIR \
+    --checkpoint FILE --checkpoint-signature FILE --attempt-id HEX \
+    --rejected-candidate-dir PRIVATE_DIR --coordinator-signing-key KEY --out-dir FRESH_DIR
+
+Authenticates the active allocation and records hashes of exactly the five
+private candidate files without accepting their signatures, cleanup claim, or
+contribution mathematics. It retires this allocation without creating a
+replacement. A later allocation requires a fresh contribution in a new
+directory. The output is not current until the delivery service conditionally
+advances the ceremony head. The output directory must be fresh and its parent
+must already exist.
+`,
 	"checkpoint inspect-enrollments-v4": `Usage:
   mpc-ceremony checkpoint inspect-enrollments-v4 --ceremony FILE --ceremony-signature FILE \
     --coordinator-public-key-file KEY --artifact-root DIR \

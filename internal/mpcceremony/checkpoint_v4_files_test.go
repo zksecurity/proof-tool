@@ -368,3 +368,26 @@ func TestRejectedInventoryV4ChecksExactPrivateBytes(t *testing.T) {
 		t.Fatal("wrong rejected inventory accepted")
 	}
 }
+
+func TestRejectedCandidateInventoryV4HashesOpaqueFixedFiles(t *testing.T) {
+	root := t.TempDir()
+	scope := ContributionScope{CeremonyID: NewDigest([]byte("ceremony")).SHA256, Phase: Phase1, Index: 1, ParticipantID: "participant-1", ParentHeadID: NewDigest([]byte("head")).SHA256}
+	for name, data := range map[string][]byte{
+		"attestation.json": []byte("not JSON"), "attestation.sig": []byte("not a signature"), "contribution.bin": []byte("unverified contribution"), "erasure.json": []byte("not cleanup"), "erasure.sig": []byte("not a signature"),
+	} {
+		putCheckpointTestFileV4(t, root, name, data)
+	}
+	inventory, err := rejectedCandidateInventoryV4(root, scope)
+	if err != nil {
+		t.Fatalf("opaque rejected candidate rejected: %v", err)
+	}
+	if len(inventory.Files) != 5 || inventory.Files[0].Digest != NewDigest([]byte("not JSON")) {
+		t.Fatalf("wrong opaque inventory: %+v", inventory)
+	}
+	if err := os.WriteFile(filepath.Join(root, "extra"), []byte("extra"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rejectedCandidateInventoryV4(root, scope); err == nil {
+		t.Fatal("rejected candidate inventory accepted an extra file")
+	}
+}
