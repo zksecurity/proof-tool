@@ -282,7 +282,16 @@ func TestCheckpointV4CLIInitialPrepareSignInspectAndMutation(t *testing.T) {
 	if rejectedCheckpoint.Transition.Kind != m.CheckpointContributionRejected || rejectedCheckpoint.Transition.AttemptID != attemptID || rejectedCheckpoint.Transition.NextAttemptID != "" || rejectedCheckpoint.Transition.Contribution == nil || len(rejectedCheckpoint.Transition.Contribution.Files) != 5 {
 		t.Fatalf("direct rejection did not retain the exact terminal allocation: %+v", rejectedCheckpoint.Transition)
 	}
-	assertCheckpointExecutableFails(t, executable, append(reject[:len(reject)-2], "--out-dir", filepath.Join(artifactRoot, "checkpoints", "rejected-again")), "no longer active")
+	// Repeating the exact operation from the same authenticated parent is
+	// idempotent: it must reproduce the same signed child, not invent another
+	// transition. A caller that has advanced to the rejection checkpoint will
+	// observe that the allocation is no longer active there.
+	rejectedAgain := runCheckpointCommandExecutable(t, executable, append(reject[:len(reject)-2], "--out-dir", filepath.Join(artifactRoot, "checkpoints", "rejected-again")))
+	for _, name := range []string{"checkpoint", "checkpoint_signature"} {
+		if !bytes.Equal(mustReadTestFile(t, rejected.Outputs[name]), mustReadTestFile(t, rejectedAgain.Outputs[name])) {
+			t.Fatalf("exact rejection replay changed %s bytes", name)
+		}
+	}
 	// Sign again only after rereading every required byte, not a saved success marker.
 	genesis := filepath.Join(artifactRoot, payload.Name)
 	original := mustReadTestFile(t, genesis)
