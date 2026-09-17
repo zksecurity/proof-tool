@@ -257,6 +257,9 @@ func TestCheckpointV4CLIInitialPrepareSignInspectAndMutation(t *testing.T) {
 	)
 	allocated := runCheckpointCommandExecutable(t, executable, allocate)
 	privateCandidate := filepath.Join(root, "private-rejected-candidate")
+	if err := os.MkdirAll(privateCandidate, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	for name, contents := range map[string]string{
 		"attestation.json": "intentionally invalid attestation", "attestation.sig": "invalid signature", "contribution.bin": "unverified candidate bytes", "erasure.json": "intentionally invalid cleanup", "erasure.sig": "invalid signature",
 	} {

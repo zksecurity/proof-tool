@@ -37,3 +37,49 @@ func IsCandidateInvalid(err error) bool {
 	var invalid *CandidateInvalidError
 	return errors.As(err, &invalid)
 }
+
+// candidateArtifactContentError marks bytes that were opened successfully but
+// cannot be decoded as the required canonical ceremony artifact. Filesystem,
+// path, and short-read failures deliberately remain unmarked.
+type candidateArtifactContentError struct {
+	err error
+}
+
+func (e *candidateArtifactContentError) Error() string { return e.err.Error() }
+
+func (e *candidateArtifactContentError) Unwrap() error { return e.err }
+
+func candidateArtifactContent(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &candidateArtifactContentError{err: err}
+}
+
+func isCandidateArtifactContent(err error) bool {
+	var invalid *candidateArtifactContentError
+	return errors.As(err, &invalid)
+}
+
+// candidateArtifactDigestMismatchError is narrower than an arbitrary read
+// failure: the file was opened and read without changing, but its bytes do not
+// match the participant's signed artifact reference.
+type candidateArtifactDigestMismatchError struct {
+	err error
+}
+
+func (e *candidateArtifactDigestMismatchError) Error() string { return e.err.Error() }
+
+func (e *candidateArtifactDigestMismatchError) Unwrap() error { return e.err }
+
+func candidateArtifactDigestMismatch(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &candidateArtifactDigestMismatchError{err: err}
+}
+
+func isCandidateArtifactDigestMismatch(err error) bool {
+	var invalid *candidateArtifactDigestMismatchError
+	return errors.As(err, &invalid)
+}

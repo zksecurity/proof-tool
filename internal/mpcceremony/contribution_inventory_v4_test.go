@@ -172,6 +172,22 @@ func TestContributionInventoryV4ClassifiesOnlySemanticCandidateFailures(t *testi
 		}
 	})
 
+	t.Run("stable payload digest mismatch", func(t *testing.T) {
+		f := localInventoryFixtureV4(t, Phase1)
+		path := filepath.Join(f.dir, "contribution.bin")
+		payload, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload[len(payload)-1] ^= 1
+		if err := os.WriteFile(path, payload, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.inspect(); err == nil || !IsCandidateInvalid(err) {
+			t.Fatalf("stable payload mismatch classification = %v, want candidate invalid", err)
+		}
+	})
+
 	t.Run("candidate file missing", func(t *testing.T) {
 		f := localInventoryFixtureV4(t, Phase1)
 		if err := os.Remove(filepath.Join(f.dir, "attestation.json")); err != nil {

@@ -336,7 +336,13 @@ func VerifyAndAcceptAllocatedCandidateV4(options AcceptAllocatedCandidateV4Optio
 		state = *previous.Progress.Phase2
 	}
 	paths := PhaseTranscriptPaths{RootDir: options.ArtifactRoot, ChainPath: filepath.Join(options.ArtifactRoot, filepath.FromSlash(state.Chain.Record.Name)), ChainSignaturePath: filepath.Join(options.ArtifactRoot, filepath.FromSlash(state.Chain.Signature.Name))}
-	accept := AcceptContributionFilesOptions{Trust: options.Trust, Circuit: options.Circuit, Phase: scope.Phase, Transcript: paths, CandidateDir: options.CandidateDir, CoordinatorPrivateKeyPath: options.CoordinatorPrivateKeyPath, AcceptedAt: options.AcceptedAt}
+	// Authenticate the complete fixed inventory before mathematical replay.
+	// This is also the boundary that distinguishes stable invalid candidate
+	// bytes from missing, changing, or otherwise operationally uncertain files.
+	if _, err := InspectContributionInventoryV4(options.Trust, paths, scope, options.CandidateDir); err != nil {
+		return AcceptedCandidateCheckpointV4{}, err
+	}
+	accept := AcceptContributionFilesOptions{Trust: options.Trust, Circuit: options.Circuit, Phase: scope.Phase, Transcript: paths, CandidateDir: options.CandidateDir, CoordinatorPrivateKeyPath: options.CoordinatorPrivateKeyPath, AcceptedAt: options.AcceptedAt, ClassifyCandidateInvalid: true}
 	if scope.Phase == Phase2 {
 		if previous.Progress.Phase1Seal == nil {
 			return AcceptedCandidateCheckpointV4{}, errors.New("phase2 acceptance requires the authenticated phase1 seal")

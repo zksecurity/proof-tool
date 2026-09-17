@@ -110,8 +110,11 @@ func (r *checkpointReaderV4) read(ref ArtifactRef, limit int64, capture bool) ([
 		return nil, err
 	}
 	actual := Digest{SHA256: fmt.Sprintf("sha256:%x", sha.Sum(nil)), Blake2b256: fmt.Sprintf("blake2b256:%x", blake.Sum(nil)), Size: size}
-	if actual != ref.Digest || after.Size() != opened.Size() || !after.ModTime().Equal(opened.ModTime()) {
-		return nil, fmt.Errorf("artifact %s differs from its exact committed bytes", ref.Name)
+	if after.Size() != opened.Size() || !after.ModTime().Equal(opened.ModTime()) {
+		return nil, fmt.Errorf("artifact %s changed while being read", ref.Name)
+	}
+	if actual != ref.Digest {
+		return nil, candidateArtifactDigestMismatch(fmt.Errorf("artifact %s differs from its exact committed bytes", ref.Name))
 	}
 	if capture {
 		return buf.Bytes(), nil

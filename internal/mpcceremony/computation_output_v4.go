@@ -61,7 +61,7 @@ func inspectComputationOutputV4(r *checkpointReaderV4, d CeremonyDefinition, cha
 	}
 	participant, ok := d.ParticipantByID(scope.ParticipantID)
 	if !ok {
-		return zero, attestation, errors.New("candidate participant is not scheduled")
+		return zero, attestation, candidateInvalid(errors.New("candidate participant is not scheduled"))
 	}
 	key, err := identityPublicKey(participant.Identity)
 	if err != nil {
@@ -92,6 +92,9 @@ func inspectComputationOutputV4(r *checkpointReaderV4, d CeremonyDefinition, cha
 		return zero, attestation, candidateInvalid(err)
 	}
 	if _, err := r.read(output, MaxArtifactSize, false); err != nil {
+		if isCandidateArtifactDigestMismatch(err) {
+			return zero, attestation, candidateInvalid(err)
+		}
 		return zero, attestation, err
 	}
 	return ComputationOutputInspectionV4{Scope: scope, Files: []ArtifactRef{{Name: "attestation.json", Digest: NewDigest(record)}, {Name: "attestation.sig", Digest: NewDigest(signature)}, output}}, attestation, nil
