@@ -178,41 +178,6 @@ func TestCheckpointV4CLIInitialPrepareSignInspectAndMutation(t *testing.T) {
 	if !bytes.Equal(data, mustReadTestFile(t, initialized.Outputs["checkpoint"])) || initialized.Sequence != 0 {
 		t.Fatal("initialize-v4 did not derive the exact only valid initial checkpoint")
 	}
-	// A rejection intentionally records opaque candidate bytes. The dummy files
-	// below are not valid records or signatures; the direct rejection command
-	// must still bind their exact fixed five-file inventory to the active turn.
-	attemptID := strings.Repeat("a", 32)
-	allocationDir := filepath.Join(artifactRoot, "checkpoints", "allocation")
-	allocate := append([]string{"--format", "json", "checkpoint", "allocate-v4"}, trustArgs...)
-	allocate = append(allocate,
-		"--checkpoint", initialized.Outputs["checkpoint"], "--checkpoint-signature", initialized.Outputs["checkpoint_signature"],
-		"--attempt-id", attemptID, "--allocated-at", "2026-09-16T00:00:01Z", "--coordinator-signing-key", keyPath, "--out-dir", allocationDir,
-	)
-	allocated := runCheckpointCommandExecutable(t, executable, allocate)
-	privateCandidate := filepath.Join(root, "private-rejected-candidate")
-	for name, contents := range map[string]string{
-		"attestation.json": "intentionally invalid attestation", "attestation.sig": "invalid signature", "contribution.bin": "unverified candidate bytes", "erasure.json": "intentionally invalid cleanup", "erasure.sig": "invalid signature",
-	} {
-		writeDecisionTestFile(t, filepath.Join(privateCandidate, name), []byte(contents), 0o600)
-	}
-	rejectionDir := filepath.Join(artifactRoot, "checkpoints", "rejected")
-	reject := append([]string{"--format", "json", "checkpoint", "reject-candidate-v4"}, trustArgs...)
-	reject = append(reject,
-		"--checkpoint", allocated.Outputs["checkpoint"], "--checkpoint-signature", allocated.Outputs["checkpoint_signature"],
-		"--attempt-id", attemptID, "--rejected-candidate-dir", privateCandidate, "--coordinator-signing-key", keyPath, "--out-dir", rejectionDir,
-	)
-	rejected := runCheckpointCommandExecutable(t, executable, reject)
-	if rejected.Sequence != 2 || !strings.Contains(rejected.Summary, "fresh contribution") {
-		t.Fatalf("unexpected rejection result: %+v", rejected)
-	}
-	var rejectedCheckpoint m.CheckpointV4
-	if err := m.UnmarshalCanonical(mustReadTestFile(t, rejected.Outputs["checkpoint"]), &rejectedCheckpoint); err != nil {
-		t.Fatal(err)
-	}
-	if rejectedCheckpoint.Transition.Kind != m.CheckpointContributionRejected || rejectedCheckpoint.Transition.AttemptID != attemptID || rejectedCheckpoint.Transition.NextAttemptID != "" || rejectedCheckpoint.Transition.Contribution == nil || len(rejectedCheckpoint.Transition.Contribution.Files) != 5 {
-		t.Fatalf("direct rejection did not retain the exact terminal allocation: %+v", rejectedCheckpoint.Transition)
-	}
-	assertCheckpointExecutableFails(t, executable, append(reject[:len(reject)-2], "--out-dir", filepath.Join(artifactRoot, "checkpoints", "rejected-again")), "no longer active")
 	prepare := append([]string{"--format", "json", "checkpoint", "prepare-v4"}, trustArgs...)
 	prepare = append(prepare, "--proposal", proposalPath, "--out", checkedPath)
 	runCheckpointCommandExecutable(t, executable, prepare)
@@ -280,6 +245,41 @@ func TestCheckpointV4CLIInitialPrepareSignInspectAndMutation(t *testing.T) {
 	if got := runCheckpointCommandExecutable(t, executable, recordedInspect).CheckpointInspectionV4; got == nil || got.Checkpoint.Transition.Kind != m.CheckpointEnrollmentRecorded {
 		t.Fatalf("recorded enrollment did not authenticate: %+v", got)
 	}
+	// A rejection intentionally records opaque candidate bytes. The dummy files
+	// below are not valid records or signatures; the direct rejection command
+	// must still bind their exact fixed five-file inventory to the active turn.
+	attemptID := strings.Repeat("a", 32)
+	allocationDir := filepath.Join(artifactRoot, "checkpoints", "allocation")
+	allocate := append([]string{"--format", "json", "checkpoint", "allocate-v4"}, trustArgs...)
+	allocate = append(allocate,
+		"--checkpoint", recorded.Outputs["checkpoint"], "--checkpoint-signature", recorded.Outputs["checkpoint_signature"],
+		"--attempt-id", attemptID, "--allocated-at", "2026-09-16T00:00:01Z", "--coordinator-signing-key", keyPath, "--out-dir", allocationDir,
+	)
+	allocated := runCheckpointCommandExecutable(t, executable, allocate)
+	privateCandidate := filepath.Join(root, "private-rejected-candidate")
+	for name, contents := range map[string]string{
+		"attestation.json": "intentionally invalid attestation", "attestation.sig": "invalid signature", "contribution.bin": "unverified candidate bytes", "erasure.json": "intentionally invalid cleanup", "erasure.sig": "invalid signature",
+	} {
+		writeDecisionTestFile(t, filepath.Join(privateCandidate, name), []byte(contents), 0o600)
+	}
+	rejectionDir := filepath.Join(artifactRoot, "checkpoints", "rejected")
+	reject := append([]string{"--format", "json", "checkpoint", "reject-candidate-v4"}, trustArgs...)
+	reject = append(reject,
+		"--checkpoint", allocated.Outputs["checkpoint"], "--checkpoint-signature", allocated.Outputs["checkpoint_signature"],
+		"--attempt-id", attemptID, "--rejected-candidate-dir", privateCandidate, "--coordinator-signing-key", keyPath, "--out-dir", rejectionDir,
+	)
+	rejected := runCheckpointCommandExecutable(t, executable, reject)
+	if rejected.Sequence != 3 || !strings.Contains(rejected.Summary, "fresh contribution") {
+		t.Fatalf("unexpected rejection result: %+v", rejected)
+	}
+	var rejectedCheckpoint m.CheckpointV4
+	if err := m.UnmarshalCanonical(mustReadTestFile(t, rejected.Outputs["checkpoint"]), &rejectedCheckpoint); err != nil {
+		t.Fatal(err)
+	}
+	if rejectedCheckpoint.Transition.Kind != m.CheckpointContributionRejected || rejectedCheckpoint.Transition.AttemptID != attemptID || rejectedCheckpoint.Transition.NextAttemptID != "" || rejectedCheckpoint.Transition.Contribution == nil || len(rejectedCheckpoint.Transition.Contribution.Files) != 5 {
+		t.Fatalf("direct rejection did not retain the exact terminal allocation: %+v", rejectedCheckpoint.Transition)
+	}
+	assertCheckpointExecutableFails(t, executable, append(reject[:len(reject)-2], "--out-dir", filepath.Join(artifactRoot, "checkpoints", "rejected-again")), "no longer active")
 	// Sign again only after rereading every required byte, not a saved success marker.
 	genesis := filepath.Join(artifactRoot, payload.Name)
 	original := mustReadTestFile(t, genesis)

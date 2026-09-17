@@ -274,13 +274,14 @@ func executeCheckpointV4(command Command, o CheckpointOptionsV4) (CommandResult,
 		var canonical []byte
 		var phase string
 		var sequence uint64
-		if command == CommandCheckpointAllocateV4 {
+		switch command {
+		case CommandCheckpointAllocateV4:
 			prepared, err := m.PrepareCandidateAllocationCheckpointV4(m.CandidateAllocationCheckpointV4Options{Trust: trust, ArtifactRoot: o.ArtifactRoot, Checkpoint: refs, AttemptID: o.AttemptID, AllocatedAt: o.AllocatedAt})
 			if err != nil {
 				return CommandResult{}, err
 			}
 			canonical, phase, sequence = prepared.Canonical, string(prepared.Scope.Phase), prepared.Checkpoint.Sequence
-		} else if command == CommandCheckpointAcceptCandidateV4 {
+		case CommandCheckpointAcceptCandidateV4:
 			circuit, err := loadCheckpointCircuitV4(o.ArtifactRoot, d)
 			if err != nil {
 				return CommandResult{}, err
@@ -290,7 +291,7 @@ func executeCheckpointV4(command Command, o CheckpointOptionsV4) (CommandResult,
 				return CommandResult{}, err
 			}
 			canonical, phase, sequence = prepared.Canonical, string(prepared.Scope.Phase), prepared.Checkpoint.Sequence
-		} else {
+		case CommandCheckpointRejectCandidateV4:
 			prepared, err := m.RejectAllocatedCandidateV4(m.RejectAllocatedCandidateV4Options{Trust: trust, ArtifactRoot: o.ArtifactRoot, Checkpoint: refs, AttemptID: o.AttemptID, RejectedCandidateDir: o.RejectedCandidateDir})
 			if err != nil {
 				return CommandResult{}, err
@@ -308,10 +309,13 @@ func executeCheckpointV4(command Command, o CheckpointOptionsV4) (CommandResult,
 		if err := writeAtomicOutputDir(o.OutDir, map[string][]byte{"checkpoint.json": canonical, "checkpoint.sig": signatureBytes}); err != nil {
 			return CommandResult{}, err
 		}
-		action := "allocated the exact next candidate turn"
-		if command == CommandCheckpointAcceptCandidateV4 {
+		action := ""
+		switch command {
+		case CommandCheckpointAllocateV4:
+			action = "allocated the exact next candidate turn"
+		case CommandCheckpointAcceptCandidateV4:
 			action = "verified and accepted the exact allocated candidate"
-		} else if command == CommandCheckpointRejectCandidateV4 {
+		case CommandCheckpointRejectCandidateV4:
 			action = "recorded the exact rejected candidate and retired its allocation; a replacement requires a fresh contribution"
 		}
 		return CommandResult{CeremonyID: d.CeremonyID, Phase: phase, Sequence: int(sequence), Summary: action + "; the signed checkpoint is not current until the delivery service conditionally publishes it", Outputs: map[string]string{"checkpoint": filepath.Join(o.OutDir, "checkpoint.json"), "checkpoint_signature": filepath.Join(o.OutDir, "checkpoint.sig")}}, nil
