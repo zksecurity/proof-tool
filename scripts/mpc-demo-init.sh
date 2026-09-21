@@ -47,7 +47,7 @@ CREATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 echo "==> init (compiles the K=21 circuit; expect several minutes)"
 MPC_CEREMONY_DEBUG=${MPC_CEREMONY_DEBUG:-} "$BIN" --format json init \
-  --key-version ownership-destination-v2 \
+  --key-version ownership-destination-v3 \
   --participants "$CONFIG/participants.json" \
   --policy "$CONFIG/policy.json" \
   --coordinator-key-id "$COORDINATOR_KEY_ID" \

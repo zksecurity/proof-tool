@@ -186,7 +186,7 @@ func executeInit(options InitOptions) (CommandResult, error) {
 		// Fail before allocating and writing the large Phase 1 genesis. The same
 		// invariant is also enforced by CeremonyDefinition validation so no
 		// consumer can bypass it by creating or loading a definition elsewhere.
-		if err := mpcceremony.ValidateCanonicalDestinationV2(circuit.Binding); err != nil {
+		if err := mpcceremony.ValidateCanonicalDestinationV3(circuit.Binding); err != nil {
 			return CommandResult{}, err
 		}
 	}
@@ -242,7 +242,7 @@ func executeContribution(phase mpcceremony.Phase, options ContributeOptions) (Co
 		return CommandResult{}, err
 	}
 	circuitRoot := options.TranscriptDir
-	if trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+	if trusted.Definition.UsesCoordinatorReplay() {
 		if err := requireValues(
 			pathValue("--artifact-root", options.ArtifactRoot),
 			pathValue("--checkpoint", options.CheckpointPath),
@@ -262,7 +262,7 @@ func executeContribution(phase mpcceremony.Phase, options ContributeOptions) (Co
 		return CommandResult{}, err
 	}
 	var result mpcceremony.ContributionFilesResult
-	if trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+	if trusted.Definition.UsesCoordinatorReplay() {
 		_, _, checkpoint, refErr := checkpointSignedBytes(options.ArtifactRoot, options.CheckpointPath, options.CheckpointSignaturePath)
 		if refErr != nil {
 			return CommandResult{}, refErr
@@ -716,7 +716,7 @@ func executeReleaseSign(options ReleaseSignOptions) (CommandResult, error) {
 	if err := mpcceremony.VerifyRunningSoftwareForMode(trusted.Definition.Software, trusted.Definition.Mode); err != nil {
 		return CommandResult{}, err
 	}
-	if trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+	if trusted.Definition.UsesCoordinatorReplay() {
 		return executeReleaseSignV4(options, trust, trusted.Definition.CeremonyID)
 	}
 	if options.ReviewCheckpointPath != "" || options.ReviewSignaturePath != "" {
@@ -792,7 +792,7 @@ func executeReleaseVerify(options ReleaseVerifyOptions) (CommandResult, error) {
 	if err != nil {
 		return CommandResult{}, err
 	}
-	if trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+	if trusted.Definition.UsesCoordinatorReplay() {
 		result, err := mpcceremony.VerifyReleaseV4(mpcceremony.VerifyReleaseV4Options{Trust: trust, KeysDir: options.KeysDir, TrustedPublicKeyHex: releasePublicKey, ExpectedSignatureKeyID: options.SignatureKeyID})
 		if err != nil {
 			return CommandResult{}, err

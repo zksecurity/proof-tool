@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Refuses to start an exact K=21 rehearsal unless the selected local
 # filesystem and current process limits meet explicit, measurable floors.
+# MPC_K21_* environment names are retained for operator compatibility.
 set -euo pipefail
 
 if [[ $# -ne 1 ]]; then

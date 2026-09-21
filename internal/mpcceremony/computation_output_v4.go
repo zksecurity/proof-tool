@@ -18,7 +18,7 @@ func InspectComputationOutputV4(trust TrustPaths, predecessor PhaseTranscriptPat
 		return zero, err
 	}
 	d := trusted.Definition
-	if d.Schema != DefinitionSchemaV4 {
+	if !d.UsesCoordinatorReplay() {
 		return zero, errors.New("computation output inspection requires definition v4")
 	}
 	if err := expected.ValidateAssignment(d); err != nil {

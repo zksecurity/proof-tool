@@ -33,7 +33,7 @@ func executeOpsPrepareBundle(o OpsPrepareBundleOptions) (CommandResult, error) {
 	if err != nil {
 		return CommandResult{}, err
 	}
-	if trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+	if trusted.Definition.UsesCoordinatorReplay() {
 		return CommandResult{}, errors.New("definition v4 requires ops prepare-bundle-v4 with an exact checkpoint pair")
 	}
 	prepared, err := mpcceremony.PrepareOperationalEvidence(trusted.Definition, o.EvidenceRoot, time.Now().UTC().Format(time.RFC3339Nano))

@@ -137,8 +137,8 @@ func TestCheckpointV4CLIInitialPrepareSignInspectAndMutation(t *testing.T) {
 	if err := m.UnmarshalCanonical(mustReadTestFile(t, created.Outputs["ceremony"]), &d); err != nil {
 		t.Fatal(err)
 	}
-	if d.Schema != m.DefinitionSchemaV4 {
-		t.Fatal("explicit V4 option did not bind new schema")
+	if d.Schema != m.DefinitionSchemaV5 {
+		t.Fatal("coordinator replay option did not bind new V5 schema")
 	}
 	assertCheckpointExecutableFails(t, executable, append(append([]string{}, initArgs...), "--out-dir", filepath.Join(root, "invalid"), "--release-verification", "skip-checks"), "must be coordinator-full-replay-v1")
 	ref := func(name string) m.ArtifactRef {

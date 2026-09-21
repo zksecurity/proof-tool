@@ -141,8 +141,8 @@ func TestDefinitionConstructorExplicitReleaseVerification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if current.Schema != DefinitionSchemaV4 || current.CeremonyID == old.CeremonyID {
-		t.Fatal("explicit policy did not select distinct V4 ceremony")
+	if current.Schema != DefinitionSchemaV5 || current.CeremonyID == old.CeremonyID {
+		t.Fatal("explicit replay policy did not select distinct V5 ceremony")
 	}
 	for _, value := range []string{"none", " ", "coordinator-full-replay-v2"} {
 		opts.ReleaseVerification = value

@@ -101,7 +101,7 @@ type VerifyReleaseResult struct {
 // coordinator-signed candidate, and emits a signed passing audit record.
 func Audit(options AuditOptions) (*AuditResult, error) {
 	if options.Circuit == nil || options.Circuit.R1CS == nil {
-		return nil, errors.New("independently compiled destination-v2 circuit is required")
+		return nil, errors.New("independently compiled destination-v3 circuit is required")
 	}
 	if options.AuditedAt.IsZero() || options.AuditedAt.Location() != time.UTC {
 		return nil, errors.New("audited_at must be a non-zero UTC time")
@@ -688,7 +688,7 @@ func VerifyRelease(options VerifyReleaseOptions) (*VerifyReleaseResult, error) {
 	if err := requireIdentityKey(definition.Coordinator, coordinatorPublicKey); err != nil {
 		return nil, err
 	}
-	if definition.Schema == DefinitionSchemaV4 {
+	if definition.UsesCoordinatorReplay() {
 		return nil, errors.New("definition v4 requires the versioned trusted-coordinator release verification path")
 	}
 	if options.ExpectedSignatureKeyID != definition.ReleaseSigner.KeyID {

@@ -29,7 +29,7 @@ func InspectContributionInventoryV4(trust TrustPaths, predecessor PhaseTranscrip
 		return ContributionInventoryInspectionV4{}, err
 	}
 	d := trusted.Definition
-	if d.Schema != DefinitionSchemaV4 {
+	if !d.UsesCoordinatorReplay() {
 		return ContributionInventoryInspectionV4{}, errors.New("contribution inventory inspection requires definition v4")
 	}
 	if err := expected.ValidateAssignment(d); err != nil {

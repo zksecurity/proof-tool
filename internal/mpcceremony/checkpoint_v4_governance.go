@@ -114,7 +114,7 @@ func verifyGovernanceRecordV4(reader *checkpointReaderV4, d CeremonyDefinition, 
 		if err = UnmarshalCanonical(db, &next); err != nil {
 			return GovernanceRecord{}, err
 		}
-		if next.Schema != DefinitionSchemaV4 {
+		if !next.UsesCoordinatorReplay() {
 			return GovernanceRecord{}, errors.New("V4 restart requires a new V4 definition")
 		}
 		newKey, err := identityPublicKey(next.Coordinator)

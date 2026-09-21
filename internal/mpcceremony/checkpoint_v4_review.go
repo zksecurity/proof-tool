@@ -83,7 +83,7 @@ func verifyReleaseReviewV4(trust TrustPaths, artifactRoot string, head, bundleRe
 		return ReleaseReviewV4{}, err
 	}
 	d := trusted.Definition
-	if d.Schema != DefinitionSchemaV4 {
+	if !d.UsesCoordinatorReplay() {
 		return ReleaseReviewV4{}, errors.New("this review API requires definition V4; legacy replay rules are unchanged")
 	}
 	db, err := MarshalCanonical(d)

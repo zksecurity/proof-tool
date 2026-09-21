@@ -47,7 +47,7 @@ func compileEngineCircuit(t *testing.T) *CompiledCircuit {
 	if err != nil {
 		t.Fatalf("compile tiny committed circuit: %v", err)
 	}
-	circuit, err := BindDestinationV2R1CS(compiled)
+	circuit, err := BindDestinationV3R1CS(compiled)
 	if err != nil {
 		t.Fatalf("bind tiny committed circuit: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestEngineRejectsWrongCurveAndInvalidChallenges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compile wrong-curve circuit: %v", err)
 	}
-	if _, err := BindDestinationV2R1CS(wrongCurve); err == nil {
+	if _, err := BindDestinationV3R1CS(wrongCurve); err == nil {
 		t.Fatal("BN254 R1CS unexpectedly accepted as BLS12-381")
 	}
 

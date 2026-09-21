@@ -382,7 +382,7 @@ func VerifySignedCheckpointV4(d CeremonyDefinition, definitionBytes, definitionS
 	if err := d.Validate(); err != nil {
 		return c, err
 	}
-	if d.Schema != DefinitionSchemaV4 {
+	if !d.UsesCoordinatorReplay() {
 		return c, errors.New("checkpoint v4 requires definition v4")
 	}
 	key, err := identityPublicKey(d.Coordinator)
@@ -409,7 +409,7 @@ func validateCheckpointDefinitionBindingV4(d CeremonyDefinition, definitionBytes
 	if err := d.Validate(); err != nil {
 		return err
 	}
-	if d.Schema != DefinitionSchemaV4 {
+	if !d.UsesCoordinatorReplay() {
 		return errors.New("checkpoint v4 requires definition v4")
 	}
 	if err := c.Validate(); err != nil {

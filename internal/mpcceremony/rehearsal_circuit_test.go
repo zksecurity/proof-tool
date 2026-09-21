@@ -10,7 +10,7 @@ import (
 // gets to make.
 func TestCompileForKeyVersionRejectsUnknown(t *testing.T) {
 	for _, keyVersion := range []string{
-		"", "ownership", "ownership-destination-v3",
+		"", "ownership", "ownership-destination-v2", "ownership-destination-v4",
 		"rehearsal-tiny-v2", " rehearsal-tiny-v1",
 	} {
 		if _, err := CompileForKeyVersion(keyVersion); err == nil {
@@ -49,15 +49,15 @@ func TestCircuitBindingChecksIdentityAsAPair(t *testing.T) {
 		t.Fatal(err)
 	}
 	mixed := base.Binding
-	mixed.CircuitID = CircuitIDDestinationV2
+	mixed.CircuitID = CircuitIDDestinationV3
 	if err := mixed.Validate(); err == nil {
-		t.Fatal("Validate accepted a rehearsal key_version with the destination-v2 circuit_id")
+		t.Fatal("Validate accepted a rehearsal key_version with the destination-v3 circuit_id")
 	}
 
 	swapped := base.Binding
-	swapped.KeyVersion = KeyVersionDestinationV2
+	swapped.KeyVersion = KeyVersionDestinationV3
 	if err := swapped.Validate(); err == nil {
-		t.Fatal("Validate accepted a destination-v2 key_version with the rehearsal circuit_id")
+		t.Fatal("Validate accepted a destination-v3 key_version with the rehearsal circuit_id")
 	}
 }
 
@@ -78,7 +78,7 @@ func TestProductionRejectsRehearsalCircuit(t *testing.T) {
 	if err == nil {
 		t.Fatal("a production definition accepted the rehearsal circuit")
 	}
-	if !strings.Contains(err.Error(), KeyVersionDestinationV2) {
+	if !strings.Contains(err.Error(), KeyVersionDestinationV3) {
 		t.Fatalf("error should name the required key version, got: %v", err)
 	}
 }

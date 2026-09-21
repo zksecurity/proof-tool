@@ -31,7 +31,7 @@ func PrepareInitialCheckpointV4(options InitialCheckpointV4Options) (InitialChec
 		return InitialCheckpointV4{}, err
 	}
 	d := trusted.Definition
-	if d.Schema != DefinitionSchemaV4 || d.ReleaseVerification != CoordinatorReplayReleaseV1 {
+	if !d.UsesCoordinatorReplay() || d.ReleaseVerification != CoordinatorReplayReleaseV1 {
 		return InitialCheckpointV4{}, errors.New("initial checkpoint requires the explicit trusted-coordinator definition v4")
 	}
 	chainPath := filepath.Join(options.ArtifactRoot, "phase1", "chain-0000.json")

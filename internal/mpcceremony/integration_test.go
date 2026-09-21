@@ -22,7 +22,7 @@ import (
 )
 
 func TestTinyCommittedCircuitThreeByThreeEndToEnd(t *testing.T) {
-	circuit, err := BindDestinationV2R1CS(adversarialCompileCommitted(t))
+	circuit, err := BindDestinationV3R1CS(adversarialCompileCommitted(t))
 	if err != nil {
 		t.Fatalf("bind tiny committed circuit: %v", err)
 	}
@@ -345,7 +345,7 @@ func TestSignedFileWorkflowRejectsReusedPhase1RoundBeforePublicationAndReplays(t
 		t.Fatalf("run signed workflow helper: %v\n%s", err, output)
 	}
 
-	circuit, err := BindDestinationV2R1CS(adversarialCompileCommitted(t))
+	circuit, err := BindDestinationV3R1CS(adversarialCompileCommitted(t))
 	if err != nil {
 		t.Fatalf("bind replay circuit: %v", err)
 	}

@@ -86,7 +86,7 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		if !ok {
 			return fmt.Errorf("compiled circuit type %T, want *bls12-381.R1CS", compiled)
 		}
-		circuit, err = mpcceremony.BindDestinationV2R1CS(native)
+		circuit, err = mpcceremony.BindDestinationV3R1CS(native)
 	}
 	if err != nil {
 		return fmt.Errorf("compile tiny circuit: %w", err)

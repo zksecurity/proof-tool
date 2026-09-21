@@ -12,7 +12,7 @@ import (
 const maxFinalTranscriptV3Bytes = 64 << 20
 
 func newFinalTranscriptV3(d CeremonyDefinition, candidate CandidateMetadata, review ReleaseReviewV4) (FinalTranscript, error) {
-	if d.Schema != DefinitionSchemaV4 {
+	if !d.UsesCoordinatorReplay() {
 		return FinalTranscript{}, errors.New("final transcript v3 requires definition v4")
 	}
 	audits := make([]ArtifactRef, len(review.Audits))

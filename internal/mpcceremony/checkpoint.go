@@ -687,7 +687,7 @@ func VerifySignedCheckpoint(definition CeremonyDefinition, definitionBytes, defi
 }
 
 func validateCheckpointDefinitionVersion(definition CeremonyDefinition, checkpoint Checkpoint) error {
-	if definition.Schema == DefinitionSchemaV4 {
+	if definition.UsesCoordinatorReplay() {
 		return errors.New("definition v4 requires the versioned trusted-coordinator checkpoint path")
 	}
 	if definition.Schema == DefinitionSchemaV3 {
