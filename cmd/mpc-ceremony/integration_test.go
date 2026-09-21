@@ -149,6 +149,7 @@ func TestParticipantCLIHelpHasExplicitSafeFlagAllowlist(t *testing.T) {
 		"--finalized-at",
 		"--format",
 		"--full",
+		"--full-replay",
 		"--identity-id",
 		"--key-version",
 		"--keys-dir",

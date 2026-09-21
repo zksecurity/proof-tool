@@ -553,24 +553,25 @@ Host/VM remnants are explicitly not excluded by this statement.
 Authenticates the signed chain and candidate evidence, verifies the candidate
 transition directly from the accepted native head, then appends immutable
 numbered artifacts and a new signed chain record. Participant contribution and
-phase close perform the independent full-prefix replays.
+finalization retain independent full-prefix replay. Phase 1 close and seal
+authenticate accepted evidence by default; --full-replay adds full replay.
 `,
 	"phase1 close": `Usage:
   mpc-ceremony phase1 close --ceremony FILE --ceremony-signature FILE \
     --coordinator-public-key-file KEY --transcript-dir DIR --chain FILE \
     --chain-signature FILE --coordinator-signing-key KEY \
-    --beacon-round N | --beacon-round-lead SECONDS
+    --beacon-round N | --beacon-round-lead SECONDS [--full-replay]
 
-Replays the full phase, derives the exact Quicknet schedule from the round,
-samples closed_at inside the core after replay, and atomically publishes the
-signed closure only while the policy lead still holds.
+Authenticates the entire signed chain, native payload digests, challenge links,
+participant attestations, cleanup evidence, and coordinator verification
+receipts. --full-replay additionally replays every contribution from genesis.
+Finalization and fresh participants retain their independent full replay.
 
-At K=21 the replay takes hours, so --beacon-round asks you to predict it: a
-round named too near is already public when the closure is written and the
-whole replay is discarded. --beacon-round-lead instead derives the round from
-the clock sampled after the replay, at least SECONDS ahead and never below the
-signed witness lead. The round is not published or observable until the closure
-record is written either way, so deriving it later commits to nothing sooner.
+Samples closed_at after verification and atomically publishes the signed
+closure only while the policy lead still holds. --beacon-round-lead derives
+the round from that clock, at least SECONDS ahead and never below the signed
+witness lead, avoiding a prediction of verification duration. The round is
+not published or observable until the closure record is written.
 `,
 	"phase1 beacon": `Usage:
   mpc-ceremony phase1 beacon --ceremony FILE --ceremony-signature FILE \
@@ -586,10 +587,12 @@ network fetch and accepts neither randomness nor a challenge from the operator.
   mpc-ceremony phase1 seal --ceremony FILE --ceremony-signature FILE \
     --coordinator-public-key-file KEY --transcript-dir DIR --closure FILE \
     --closure-signature FILE --beacon FILE --beacon-signature FILE \
-    --coordinator-signing-key KEY --out-dir FRESH_DIR
+    --coordinator-signing-key KEY --out-dir FRESH_DIR [--full-replay]
 
 The beacon is supplied as offline evidence and must satisfy the signed policy
-and postdate the signed closure.
+and postdate the signed closure. The complete accepted chain and its evidence
+are authenticated before a private clone of its head receives the beacon.
+--full-replay independently replays every transition before applying the beacon.
 `,
 	"phase2": `Usage:
   mpc-ceremony phase2 <init|contribute|attest-erasure|verify|close|beacon> [flags]

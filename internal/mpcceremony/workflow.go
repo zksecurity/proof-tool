@@ -463,9 +463,10 @@ func initializeCeremonyFilesInRoot(options InitFilesOptions) (result InitFilesRe
 	return result, nil
 }
 
-// ReplayProgress reports how far a chain replay has advanced. It is called once
-// per accepted contribution, immediately before that contribution is read, with
-// a one-based index and the total the replay will process.
+// ReplayProgress reports native contribution loads, immediately before each
+// read, with its one-based index and the total accepted contribution count.
+// Full replay visits every contribution; coordinator Phase 1 sealing visits
+// only the head unless FullReplay is requested.
 //
 // This package deliberately has no logger: it handles signing keys and secret
 // contribution state, so having no output path at all is stronger than having a
@@ -474,7 +475,7 @@ func initializeCeremonyFilesInRoot(options InitFilesOptions) (result InitFilesRe
 // caller's business. The CLI writes them to stderr, never stdout, which is
 // reserved for the result contract.
 //
-// A K=21 close replays for hours. Without progress an operator cannot tell
+// A K=21 full replay can take hours. Without progress an operator cannot tell
 // running from hung, and cannot measure how long a close takes on their
 // hardware. That measurement is what makes it possible to choose a beacon round
 // far enough ahead; misjudging it is what caused the 2026-07-24 closure-timing
@@ -613,8 +614,9 @@ func VerifyAcceptedPhase2Chain(trust TrustPaths, circuit *CompiledCircuit, trans
 	return chain, refs, nil
 }
 
-// LoadReplayPhase1Files strictly reads all accepted evidence and replays every
-// native Phase 1 transition while retaining at most the states needed by gnark.
+// loadVerifiedPhase1Files authenticates the signed chain, native payload bytes,
+// challenge links, attestations, cleanup evidence, and verification receipts.
+// It does not replay contribution mathematics.
 func loadVerifiedPhase1Files(
 	trusted *TrustedCeremony,
 	circuit *CompiledCircuit,
@@ -651,6 +653,8 @@ func loadVerifiedPhase1Files(
 	return chain, nil
 }
 
+// LoadReplayPhase1Files authenticates all accepted evidence and independently
+// replays every native Phase 1 transition.
 func LoadReplayPhase1Files(
 	trusted *TrustedCeremony,
 	circuit *CompiledCircuit,
@@ -1614,6 +1618,8 @@ func validateContributionVerification(record ChainRecord, verification Contribut
 }
 
 type ClosePhaseFilesOptions struct {
+	// FullReplay additionally replays Phase 1 mathematics. Phase 2 always replays.
+	FullReplay                bool
 	Trust                     TrustPaths
 	Circuit                   *CompiledCircuit
 	Phase                     Phase
@@ -1624,21 +1630,11 @@ type ClosePhaseFilesOptions struct {
 	// BeaconRound names the future round explicitly. Exactly one of this and
 	// BeaconRoundLeadSeconds must be set.
 	BeaconRound uint64
-	// BeaconRoundLeadSeconds derives the round instead of naming it, using the
-	// clock sampled after the replay.
-	//
-	// A close replays the entire accepted phase before it stamps closed_at, and
-	// at domain 2^21 that takes hours. An explicit round therefore forces the
-	// coordinator to predict their own replay duration: name a round too near
-	// and the whole replay is discarded for naming a round that was no longer
-	// in the future. That is what caused the 2026-07-24 closure-timing
-	// incident.
-	//
-	// Deriving here is not weaker. The round is not published, signed, or
-	// observable until the closure record is written at the end of this
-	// function, so choosing it before or after the replay is indistinguishable
-	// to every observer, and under either ordering the round is still in the
-	// future and its randomness does not yet exist.
+	// BeaconRoundLeadSeconds derives the round from the clock sampled after
+	// verification. This avoids predicting verification duration, including
+	// full replay when requested or required by Phase 2. The round remains
+	// unpublished until the signed closure is committed, and must still be
+	// in the future at publication time.
 	BeaconRoundLeadSeconds uint32
 }
 
@@ -1648,10 +1644,11 @@ type ClosePhaseFilesResult struct {
 	SignaturePath string
 }
 
-// ClosePhaseFiles replays the exact signed chain and publishes a signed
-// closure as one atomic directory at the fixed per-phase path. Closure time is
-// sampled only after replay, and the future-round lead is checked again
-// immediately before the directory is committed.
+// ClosePhaseFiles authenticates the exact signed chain and publishes a signed
+// closure as one atomic directory at the fixed per-phase path. Phase 1 relies
+// on the authenticated acceptance receipts unless FullReplay is requested;
+// Phase 2 always replays. Closure time is sampled after verification, and the
+// future-round lead is checked again immediately before directory commit.
 func ClosePhaseFiles(options ClosePhaseFilesOptions) (ClosePhaseFilesResult, error) {
 	return closePhaseFiles(options, time.Now)
 }
@@ -1690,7 +1687,11 @@ func closePhaseFilesAuthenticated(
 	var phase1Close *CloseRecord
 	switch options.Phase {
 	case Phase1:
-		chain, err = LoadReplayPhase1Files(trusted, options.Circuit, options.Transcript)
+		if options.FullReplay {
+			chain, err = LoadReplayPhase1Files(trusted, options.Circuit, options.Transcript)
+		} else {
+			chain, err = loadVerifiedPhase1Files(trusted, options.Circuit, options.Transcript)
+		}
 	case Phase2:
 		var commons *gnarkmpc.SrsCommons
 		var phase1Seal SealRecord
@@ -2069,6 +2070,8 @@ func RecordBeaconFiles(options RecordBeaconFilesOptions) (result RecordBeaconFil
 }
 
 type SealPhase1FilesOptions struct {
+	// FullReplay independently replays the accepted prefix before sealing.
+	FullReplay                bool
 	Trust                     TrustPaths
 	Circuit                   *CompiledCircuit
 	TranscriptRoot            string
@@ -2078,11 +2081,8 @@ type SealPhase1FilesOptions struct {
 	BeaconSignaturePath       string
 	CoordinatorPrivateKeyPath string
 	OutputDir                 string
-	// Progress is optional and reports the replay this seal performs before it
-	// applies the beacon contribution. The seal replays the whole phase and
-	// then does strictly more work than a close, so at domain 2^21 it is the
-	// longest operation in the ceremony; without this it is also the only long
-	// one that is completely silent.
+	// Progress reports native contribution loads: the head by default, or
+	// every contribution when FullReplay is requested.
 	Progress ReplayProgress
 }
 
@@ -2234,8 +2234,35 @@ func VerifyPhase1SealFiles(options VerifyPhase1SealFilesOptions) (VerifyPhase1Se
 	return VerifyPhase1SealFilesResult{Seal: seal, Close: closeRecord, Commons: commons}, nil
 }
 
-// SealPhase1Files verifies the signed closure and future beacon, replays Phase
-// 1 from immutable files, and publishes native commons plus a signed seal.
+// loadCoordinatorPhase1SealHead is only for coordinator sealing. Participant
+// and independent verification paths must retain loadReplayPhase1FilesState.
+func loadCoordinatorPhase1SealHead(trusted *TrustedCeremony, circuit *CompiledCircuit, paths PhaseTranscriptPaths, fullReplay bool) (Chain, *gnarkmpc.Phase1, error) {
+	if fullReplay {
+		return loadReplayPhase1FilesState(trusted, circuit, paths)
+	}
+	chain, err := loadVerifiedPhase1Files(trusted, circuit, paths)
+	if err != nil {
+		return Chain{}, nil, err
+	}
+	if len(chain.Records) == 0 {
+		return Chain{}, nil, errors.New("seal Phase 1: at least one contribution is required")
+	}
+	head, err := phase1FileLoader(paths.RootDir, chain, circuit.Binding.DomainSize, paths.Progress)(len(chain.Records) - 1)
+	if err != nil {
+		return Chain{}, nil, err
+	}
+	// Seal mutates its input and returns commons that alias it. Keep the
+	// authenticated archived head separate from the consumed state.
+	owned := new(gnarkmpc.Phase1)
+	if err := streamClone(head, owned); err != nil {
+		return Chain{}, nil, fmt.Errorf("clone accepted Phase 1 head: %w", err)
+	}
+	return chain, owned, nil
+}
+
+// SealPhase1Files authenticates the signed Phase 1 chain, closure, and future
+// beacon, then seals a private clone of the accepted head. FullReplay retains
+// the independent replay lane. It publishes native commons plus a signed seal.
 func SealPhase1Files(options SealPhase1FilesOptions) (result SealPhase1FilesResult, err error) {
 	trusted, err := loadOperationalCeremony(options.Trust)
 	if err != nil {
@@ -2262,7 +2289,7 @@ func SealPhase1Files(options SealPhase1FilesOptions) (result SealPhase1FilesResu
 		ChainSignaturePath: DefaultSignaturePath(chainPath),
 		Progress:           options.Progress,
 	}
-	chain, replayedHead, err := loadReplayPhase1FilesState(trusted, options.Circuit, chainPaths)
+	chain, sealHead, err := loadCoordinatorPhase1SealHead(trusted, options.Circuit, chainPaths, options.FullReplay)
 	if err != nil {
 		return result, err
 	}
@@ -2286,7 +2313,7 @@ func SealPhase1Files(options SealPhase1FilesOptions) (result SealPhase1FilesResu
 	commons, err := sealReplayedPhase1Head(
 		options.Circuit.Binding.DomainSize,
 		challenge,
-		replayedHead,
+		sealHead,
 	)
 	if err != nil {
 		return result, err
@@ -3332,8 +3359,14 @@ func phase1FileLoader(root string, chain Chain, domainN uint64, progress ReplayP
 		if err != nil {
 			return nil, err
 		}
-		artifact, _, err := ReadPhase1File(path, Phase1Shape{DomainN: domainN, ChallengeLength: contributionChallengeSize})
-		return artifact, err
+		artifact, digest, err := ReadPhase1File(path, Phase1Shape{DomainN: domainN, ChallengeLength: contributionChallengeSize})
+		if err != nil {
+			return nil, err
+		}
+		if modelDigest(digest) != chain.Records[index].OutputPayload.Digest {
+			return nil, fmt.Errorf("Phase 1 contribution %d digest differs from signed chain", index)
+		}
+		return artifact, nil
 	}
 }
 

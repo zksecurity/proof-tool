@@ -401,6 +401,7 @@ func executeClose(phase mpcceremony.Phase, options CloseOptions) (CommandResult,
 		return CommandResult{}, err
 	}
 	result, err := mpcceremony.ClosePhaseFiles(mpcceremony.ClosePhaseFilesOptions{
+		FullReplay:                options.FullReplay,
 		Trust:                     trust,
 		Circuit:                   circuit,
 		Phase:                     phase,
@@ -474,7 +475,12 @@ func executePhase1Seal(options Phase1SealOptions) (CommandResult, error) {
 	if err != nil {
 		return CommandResult{}, err
 	}
+	progress := contributionProgressReporter("loading accepted")
+	if options.FullReplay {
+		progress = replayProgressReporter()
+	}
 	result, err := mpcceremony.SealPhase1Files(mpcceremony.SealPhase1FilesOptions{
+		FullReplay:                options.FullReplay,
 		Trust:                     trust,
 		Circuit:                   circuit,
 		TranscriptRoot:            options.TranscriptDir,
@@ -484,7 +490,7 @@ func executePhase1Seal(options Phase1SealOptions) (CommandResult, error) {
 		BeaconSignaturePath:       options.BeaconSignaturePath,
 		CoordinatorPrivateKeyPath: options.CoordinatorSigningKey,
 		OutputDir:                 options.OutDir,
-		Progress:                  replayProgressReporter(),
+		Progress:                  progress,
 	})
 	if err != nil {
 		return CommandResult{}, err
@@ -854,12 +860,16 @@ func transcriptPaths(root, chain, signature string) mpcceremony.PhaseTranscriptP
 // ahead. Output goes to stderr because stdout carries the result contract, and
 // it reports only a phase, an index and a count — never a path or key material.
 func replayProgressReporter() mpcceremony.ReplayProgress {
+	return contributionProgressReporter("replaying")
+}
+
+func contributionProgressReporter(action string) mpcceremony.ReplayProgress {
 	start := time.Now()
 	return func(phase mpcceremony.Phase, index, total int) {
 		fmt.Fprintf(
 			os.Stderr,
-			"replaying %s contribution %d/%d (%s elapsed)\n",
-			phase, index, total, time.Since(start).Round(time.Second),
+			"%s %s contribution %d/%d (%s elapsed)\n",
+			action, phase, index, total, time.Since(start).Round(time.Second),
 		)
 	}
 }
