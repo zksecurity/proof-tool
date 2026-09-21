@@ -114,7 +114,8 @@ func SealPhase1Loaded(
 	return sealReplayedPhase1Head(domainN, beaconChallenge, head)
 }
 
-// sealReplayedPhase1Head consumes a freshly replayed head. gnark's Seal
+// sealReplayedPhase1Head consumes an owned, authenticated head, obtained by
+// independent replay or coordinator acceptance verification. gnark's Seal
 // intentionally mutates that head, so callers must not retain or reuse it.
 //
 // The returned commons also aliases the head: Seal returns p.parameters by

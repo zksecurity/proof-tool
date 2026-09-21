@@ -166,6 +166,7 @@ type ErasureOptions struct {
 }
 
 type CloseOptions struct {
+	FullReplay               bool
 	CeremonyPath             string
 	CeremonySignaturePath    string
 	CoordinatorPublicKeyFile string
@@ -180,6 +181,7 @@ type CloseOptions struct {
 }
 
 type Phase1SealOptions struct {
+	FullReplay               bool
 	CeremonyPath             string
 	CeremonySignaturePath    string
 	CoordinatorPublicKeyFile string

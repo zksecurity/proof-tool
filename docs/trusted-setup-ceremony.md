@@ -88,6 +88,23 @@ constitute production approval; each production ceremony requires an explicit,
 independently reviewed go/no-go record before any ceremony binary or artifact
 is used.
 
+## Coordinator Phase 1 close and seal
+
+`phase1 close` authenticates the coordinator-signed accepted chain and every
+referenced native payload, challenge link, participant attestation, cleanup
+acknowledgement, and verification receipt. It relies on the contribution
+mathematics already checked when each contribution was accepted. `phase1 seal`
+performs the same structural verification, loads the exact signed head, clones
+it, and applies the authenticated future beacon.
+
+Use `--full-replay` on either command to additionally verify every Phase 1
+transition from genesis. Both lanes bind the same accepted chain and derive
+identical sealed commons for the same head and beacon. Closure timestamps and
+derived future beacon rounds depend on when verification finishes. Finalization, fresh participant replay,
+and independent reconstruction/release verification retain their full replay.
+Phase 2 verification is unchanged. Structural failures are always fatal; the
+coordinator path does not fall back to unverified bytes.
+
 ## Beacon relay evidence
 
 Released V1-V3 ceremonies require matching, cryptographically verified

@@ -1126,3 +1126,29 @@ func joinArgs(parts ...[]string) []string {
 	}
 	return result
 }
+
+func TestPhase1CoordinatorFullReplayFlags(t *testing.T) {
+	trust := []string{"--ceremony", "ceremony.json", "--ceremony-signature", "ceremony.sig", "--coordinator-public-key-file", "coordinator.pub", "--transcript-dir", "transcript", "--coordinator-signing-key", "coordinator.key"}
+	closeArgs := append(append([]string{}, trust...), "--chain", "chain.json", "--chain-signature", "chain.sig", "--beacon-round-lead", "60")
+	sealArgs := append(append([]string{}, trust...), "--closure", "close.json", "--closure-signature", "close.sig", "--beacon", "beacon.json", "--beacon-signature", "beacon.sig", "--out-dir", "sealed")
+	for _, enabled := range []bool{false, true} {
+		closeFlags := append([]string{}, closeArgs...)
+		sealFlags := append([]string{}, sealArgs...)
+		if enabled {
+			closeFlags = append(closeFlags, "--full-replay")
+			sealFlags = append(sealFlags, "--full-replay")
+		}
+		closeOptions, err := parseClose("phase1 close", closeFlags, false)
+		if err != nil || closeOptions.FullReplay != enabled {
+			t.Fatalf("close full replay %t: %+v, %v", enabled, closeOptions, err)
+		}
+		sealOptions, err := parsePhase1Seal(sealFlags)
+		if err != nil || sealOptions.FullReplay != enabled {
+			t.Fatalf("seal full replay %t: %+v, %v", enabled, sealOptions, err)
+		}
+	}
+	phase2Args := append(append([]string{}, closeArgs...), "--phase1-seal", "seal.json", "--phase1-seal-signature", "seal.sig", "--full-replay")
+	if _, err := parseClose("phase2 close", phase2Args, true); err == nil {
+		t.Fatal("Phase 1-only replay flag accepted for Phase 2")
+	}
+}

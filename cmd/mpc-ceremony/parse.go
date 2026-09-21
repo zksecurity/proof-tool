@@ -1026,6 +1026,9 @@ func parseErasure(name string, args []string) (ErasureOptions, error) {
 func parseClose(name string, args []string, phase2 bool) (CloseOptions, error) {
 	var options CloseOptions
 	fs := commandFlagSet(name)
+	if !phase2 {
+		fs.BoolVar(&options.FullReplay, "full-replay", false, "independently replay all Phase 1 transitions before closing")
+	}
 	addCeremonyTrustFlags(fs, &options.CeremonyPath, &options.CeremonySignaturePath, &options.CoordinatorPublicKeyFile)
 	if phase2 {
 		fs.StringVar(&options.Phase1SealPath, "phase1-seal", "", "verified phase 1 seal JSON path")
@@ -1037,7 +1040,7 @@ func parseClose(name string, args []string, phase2 bool) (CloseOptions, error) {
 	fs.StringVar(&options.CoordinatorSigningKey, "coordinator-signing-key", "", "existing Ed25519 coordinator private key path")
 	fs.Uint64Var(&options.BeaconRound, "beacon-round", 0, "precommitted future beacon round")
 	fs.UintVar(&options.BeaconRoundLeadSeconds, "beacon-round-lead", 0,
-		"derive the beacon round this many seconds past the clock sampled after replay")
+		"derive the beacon round this many seconds past the clock sampled after verification")
 	if err := parseFlags(fs, args); err != nil {
 		return options, err
 	}
@@ -1050,9 +1053,8 @@ func parseClose(name string, args []string, phase2 bool) (CloseOptions, error) {
 		pathValue("--chain-signature", options.ChainSignaturePath),
 		pathValue("--coordinator-signing-key", options.CoordinatorSigningKey),
 	}
-	// A close replays for hours at K=21 before it stamps closed_at, so naming
-	// the round up front asks the operator to predict their own replay time.
-	// --beacon-round-lead derives it from the clock sampled after the replay.
+	// Naming the round up front requires predicting verification time.
+	// --beacon-round-lead derives it from the clock sampled after verification.
 	if (options.BeaconRound == 0) == (options.BeaconRoundLeadSeconds == 0) {
 		return options, errors.New(
 			"exactly one of --beacon-round and --beacon-round-lead is required")
@@ -1070,6 +1072,7 @@ func parseClose(name string, args []string, phase2 bool) (CloseOptions, error) {
 func parsePhase1Seal(args []string) (Phase1SealOptions, error) {
 	var options Phase1SealOptions
 	fs := commandFlagSet("phase1 seal")
+	fs.BoolVar(&options.FullReplay, "full-replay", false, "independently replay all Phase 1 transitions before sealing")
 	addCeremonyTrustFlags(fs, &options.CeremonyPath, &options.CeremonySignaturePath, &options.CoordinatorPublicKeyFile)
 	fs.StringVar(&options.TranscriptDir, "transcript-dir", "", "complete ceremony transcript root containing closed phase 1")
 	fs.StringVar(&options.ClosurePath, "closure", "", "signed phase 1 closure JSON path")
