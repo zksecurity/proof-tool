@@ -23,7 +23,7 @@ func executeDecisionPrepare(options DecisionPrepareOptions) (CommandResult, erro
 	if err != nil {
 		return CommandResult{}, err
 	}
-	if trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+	if trusted.Definition.UsesCoordinatorReplay() {
 		return executeDecisionPrepareV4(options, trusted.Definition.CeremonyID, draftBytes)
 	}
 	if options.EvidenceRoot != "" {
@@ -65,7 +65,7 @@ func executeDecisionSign(options DecisionSignOptions) (CommandResult, error) {
 	if err != nil {
 		return CommandResult{}, err
 	}
-	if trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+	if trusted.Definition.UsesCoordinatorReplay() {
 		return executeDecisionSignV4(options, trusted.Definition.CeremonyID, decisionBytes)
 	}
 	var decision mpcceremony.ProductionDecision
@@ -153,7 +153,7 @@ func executeDecisionVerify(options DecisionVerifyOptions) (CommandResult, error)
 	}
 	signatures := make([][]byte, len(options.SignaturePaths))
 	signatureLimit := int64(maxOperationalRecordBytes)
-	if trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+	if trusted.Definition.UsesCoordinatorReplay() {
 		signatureLimit = 4096 // Match the V4 decision signature verifier's small-record bound.
 	}
 	for index, path := range options.SignaturePaths {
@@ -162,7 +162,7 @@ func executeDecisionVerify(options DecisionVerifyOptions) (CommandResult, error)
 			return CommandResult{}, fmt.Errorf("decision signature %d: %w", index, err)
 		}
 	}
-	if trusted.Definition.Schema == mpcceremony.DefinitionSchemaV4 {
+	if trusted.Definition.UsesCoordinatorReplay() {
 		return executeDecisionVerifyV4(options, trusted.Definition.CeremonyID, decisionBytes, signatures)
 	}
 	verified, err := mpcceremony.VerifyProductionDecision(mpcceremony.VerifyProductionDecisionOptions{

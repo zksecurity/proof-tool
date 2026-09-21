@@ -78,9 +78,11 @@ key outside the published bundle. Do not label such a bundle "multi-party",
 The dedicated MPC command uses gnark's BLS12-381 `mpcsetup` package, requires
 ordered contributions in both phases, uses separate future public beacons for
 Phase 1 and Phase 2, and supports full independent transcript replay. Software
-verification alone is still insufficient: participant independence, host
-controls, entropy quality, erasure, public archival, and independent audits are
-operational requirements. See Relay's
+verification alone does not establish participant independence, host controls,
+entropy quality, or erasure. New definition-v5 ceremonies no longer require
+participant-independence or live twenty-party evidence as production approval
+gates; operator control must still be described accurately. Other signed policy
+and release checks continue to apply. See Relay's
 [coordinator runbook](https://github.com/zksecurity/relay/blob/main/docs/roles/coordinator.md)
 and [role runbook](https://github.com/zksecurity/relay/blob/main/docs/README.md)
 for the deployed workflow. Relay's bundled rehearsal is test-only and does not

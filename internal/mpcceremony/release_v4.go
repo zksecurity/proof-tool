@@ -225,7 +225,7 @@ func VerifyReleaseV4(o VerifyReleaseV4Options) (*VerifyReleaseResult, error) {
 		return nil, err
 	}
 	d := trusted.Definition
-	if d.Schema != DefinitionSchemaV4 {
+	if !d.UsesCoordinatorReplay() {
 		return nil, errors.New("V4 release verifier requires definition v4")
 	}
 	public, err := keybundle.DecodePublicKeyHex(o.TrustedPublicKeyHex)

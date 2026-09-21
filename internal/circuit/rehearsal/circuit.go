@@ -1,7 +1,7 @@
 // Package rehearsal defines a deliberately tiny circuit used only to exercise
 // the MPC ceremony machinery.
 //
-// The production destination-v2 circuit has roughly 1.79 million constraints,
+// The production destination-v3 circuit has roughly 1.79 million constraints,
 // which forces an FFT domain of 2^21. That makes every ceremony operation
 // expensive: a single contribution moves 604 MiB and takes minutes, a phase
 // close replays the whole accepted chain and takes over an hour, and a full
@@ -45,7 +45,7 @@ func (c *Circuit) Define(api frontend.API) error {
 	cube := api.Mul(api.Mul(c.X, c.X), c.X)
 	api.AssertIsEqual(cube, c.Pub)
 
-	// Exactly one Groth16 commitment, matching destination-v2.
+	// Exactly one Groth16 commitment, matching destination-v3.
 	//
 	// This is not decoration. Finalization exports a Cardano-format verifying
 	// key whose BSB22 encoding assumes a single commitment, so a circuit with

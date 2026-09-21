@@ -15,10 +15,10 @@ import (
 )
 
 func TestDefinitionProtocolAuthenticatedDispatch(t *testing.T) {
-	for _, schema := range []string{m.DefinitionSchemaV1, m.DefinitionSchemaV2, m.DefinitionSchemaV3, m.DefinitionSchemaV4} {
+	for _, schema := range []string{m.DefinitionSchemaV1, m.DefinitionSchemaV2, m.DefinitionSchemaV3, m.DefinitionSchemaV4, m.DefinitionSchemaV5} {
 		d, _, key := decisionSignFixture(t)
 		d.Schema = schema
-		v4 := schema == m.DefinitionSchemaV4
+		v4 := schema == m.DefinitionSchemaV4 || schema == m.DefinitionSchemaV5
 		if schema == m.DefinitionSchemaV1 || schema == m.DefinitionSchemaV2 {
 			d.AssurancePolicy = nil
 		}

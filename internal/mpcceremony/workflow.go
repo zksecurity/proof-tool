@@ -151,6 +151,7 @@ func (p legacyInitPolicy) Validate() error {
 }
 
 func (p InitPolicy) Validate() error {
+
 	if err := validateUnboundPhasePolicy(p.Phase1Policy); err != nil {
 		return fmt.Errorf("phase1_policy: %w", err)
 	}

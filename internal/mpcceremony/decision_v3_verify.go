@@ -34,8 +34,15 @@ func validateProductionDecisionBindingV4(d CeremonyDefinition, decision Producti
 	if err := d.Validate(); err != nil {
 		return err
 	}
-	if d.Schema != DefinitionSchemaV4 {
+	if !d.UsesCoordinatorReplay() {
 		return errors.New("decision v3 requires definition v4")
+	}
+	if d.Schema == DefinitionSchemaV5 {
+		if decision.Schema != ProductionDecisionSchemaV4 {
+			return errors.New("decision production requirements differ from signed definition")
+		}
+	} else if decision.Schema != ProductionDecisionSchemaV3 {
+		return errors.New("historical definition requires historical decision requirements")
 	}
 	if d.Mode != ModeProduction {
 		return errors.New("production decisions require a production-mode signed definition")

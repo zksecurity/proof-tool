@@ -362,7 +362,7 @@ func verifyOperationalEvidenceContents(options VerifyOperationalEvidenceOptions,
 	expectedAssurance := defaultAssurancePolicy(options.Definition.Mode)
 	if options.Definition.UsesSignedAssurancePolicy() {
 		expectedSchema := OperationalEvidenceBundleSchema
-		if options.Definition.Schema == DefinitionSchemaV4 {
+		if options.Definition.UsesCoordinatorReplay() {
 			expectedSchema = OperationalEvidenceBundleSchemaV4
 		}
 		if bundle.Schema != expectedSchema {
@@ -662,7 +662,7 @@ func verifyPhaseOperationalEvidence(
 	// Only the signed V4 trust model delegates full contribution replay to the
 	// coordinator. All signed metadata and custody checks below still apply.
 	// This is not a caller-selectable option and does not relax legacy formats.
-	if definition.Schema != DefinitionSchemaV4 {
+	if !definition.UsesCoordinatorReplay() {
 		if err := verifyLargeOperationalArtifact(root, chain.Genesis); err != nil {
 			return nil, fmt.Errorf("accepted chain genesis: %w", err)
 		}
@@ -985,7 +985,7 @@ func verifyAcceptedHeadEvidence(
 		return nil, err
 	}
 	refs := make([]ArtifactRef, 0, len(heads)*10)
-	custodyRequired := definition.Schema != DefinitionSchemaV4
+	custodyRequired := !definition.UsesCoordinatorReplay()
 	for index, evidence := range heads {
 		record := chain.Records[index]
 		if evidence.AcceptedHeadID != record.RecordID ||

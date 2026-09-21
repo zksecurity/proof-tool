@@ -57,7 +57,7 @@ const (
 	GoldenPublicDestinationHex = "010038ff22c6562b1277ef0d3eb3b8b4892523eeba04d0ef0c9d7da111" +
 		"0000000000000000000000000000000000000000000000000000000000"
 	expectedCardanoBSB22  = "groth16-bls12-381-bsb22"
-	PublicEvidenceFixture = "repository-golden-destination-v2"
+	PublicEvidenceFixture = "repository-golden-destination-v3"
 )
 
 // ReplayPaths names every immutable input required to independently replay
@@ -477,7 +477,7 @@ type replayedKeys struct {
 // release commands.
 func PrepareFinalization(options PrepareFinalizationOptions) (*PrepareFinalizationResult, error) {
 	if options.Circuit == nil || options.Circuit.R1CS == nil {
-		return nil, errors.New("compiled destination-v2 circuit is required")
+		return nil, errors.New("compiled destination-v3 circuit is required")
 	}
 	if options.PreparedAt.IsZero() || options.PreparedAt.Location() != time.UTC {
 		return nil, errors.New("prepared_at must be a non-zero UTC time")
@@ -727,7 +727,7 @@ func VerifyPreliminaryFinalKeys(
 // release manifest.
 func Finalize(options FinalizeOptions) (*FinalizeResult, error) {
 	if options.Circuit == nil || options.Circuit.R1CS == nil {
-		return nil, errors.New("compiled destination-v2 circuit is required")
+		return nil, errors.New("compiled destination-v3 circuit is required")
 	}
 	if options.FinalizedAt.IsZero() {
 		return nil, errors.New("finalized_at is required")

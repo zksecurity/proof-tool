@@ -153,7 +153,8 @@ func rehearsalBundleFixture(t *testing.T) (VerifyOptions, func(func(*artifact.Ke
 	}
 	manifest := artifact.KeyManifest{
 		Schema: artifact.ManifestSchema, KeyVersion: rehearsal.KeyVersion,
-		CircuitID: rehearsal.CircuitID, Curve: "BLS12-381", Backend: "groth16",
+		GnarkVersion: prover.GnarkVersion,
+		CircuitID:    rehearsal.CircuitID, Curve: "BLS12-381", Backend: "groth16",
 		ProvingKeySHA256: pk.SHA256, ProvingKeyBlake2b256: pk.Blake2b256, ProvingKeySize: pk.Size,
 		VKHash: vk.Blake2b256, VerifyingKeySHA256: vk.SHA256, VerifyingKeySize: vk.Size,
 		SignatureKeyID: "test-rehearsal-signer",
@@ -198,7 +199,7 @@ func TestVerifyRehearsalDoesNotBroadenProductionProfiles(t *testing.T) {
 	if _, err := VerifyRehearsal(opts); err == nil {
 		t.Fatal("rehearsal verifier accepted an implicit profile")
 	}
-	opts.KeyVersion = "ownership-destination-v2"
+	opts.KeyVersion = "ownership-destination-v3"
 	if _, err := VerifyRehearsal(opts); err == nil {
 		t.Fatal("rehearsal verifier accepted a production profile")
 	}
@@ -217,7 +218,7 @@ func TestVerifyRehearsalRetainsSignatureAndFilePinChecks(t *testing.T) {
 		})
 	}
 	for name, change := range map[string]func(*artifact.KeyManifest){
-		"key version": func(m *artifact.KeyManifest) { m.KeyVersion = "ownership-destination-v2" },
+		"key version": func(m *artifact.KeyManifest) { m.KeyVersion = "ownership-destination-v3" },
 		"circuit":     func(m *artifact.KeyManifest) { m.CircuitID = "wrong-circuit" },
 		"curve":       func(m *artifact.KeyManifest) { m.Curve = "wrong-curve" },
 		"backend":     func(m *artifact.KeyManifest) { m.Backend = "wrong-backend" },

@@ -21,7 +21,7 @@ func executeInspectDefinitionProtocol(o InspectDefinitionOptions) (CommandResult
 	}
 	d := trusted.Definition
 	workflow := m.StorageFirstWorkflowV1
-	if d.Schema == m.DefinitionSchemaV4 {
+	if d.UsesCoordinatorReplay() {
 		workflow = m.StorageFirstWorkflowV2
 	}
 	inspection := DefinitionProtocolInspection{

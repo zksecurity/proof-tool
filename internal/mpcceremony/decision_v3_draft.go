@@ -36,14 +36,18 @@ func (d ProductionDecisionDraftV3) Validate() error {
 }
 
 func (d ProductionDecisionDraftV3) decision() (ProductionDecisionV3, error) {
-	if d.Schema != ProductionDecisionDraftSchemaV3 {
+	if d.Schema != ProductionDecisionDraftSchemaV3 && d.Schema != ProductionDecisionDraftSchemaV4 {
 		return ProductionDecisionV3{}, errDecisionDraftSchemaV3
 	}
 	release, err := NewFinalReleaseEvidenceV4(d.CeremonyID, d.Release.FinalReleaseCheckpoint, d.Release.CandidateID)
 	if err != nil {
 		return ProductionDecisionV3{}, err
 	}
-	return NewProductionDecisionV3(ProductionDecisionV3{Schema: ProductionDecisionSchemaV3, CeremonyID: d.CeremonyID, AssurancePolicy: cloneAssurancePolicy(d.AssurancePolicy), Release: release, SourceRelease: d.SourceRelease, Auditors: d.Auditors, ExternalAudits: d.ExternalAudits, K21Rehearsal: d.K21Rehearsal, MainnetDeploymentPlan: d.MainnetDeploymentPlan, FormalChecklist: d.FormalChecklist, Gates: d.Gates, Decision: d.Decision, DecidedAt: d.DecidedAt})
+	schema := ProductionDecisionSchemaV3
+	if d.Schema == ProductionDecisionDraftSchemaV4 {
+		schema = ProductionDecisionSchemaV4
+	}
+	return NewProductionDecisionV3(ProductionDecisionV3{Schema: schema, CeremonyID: d.CeremonyID, AssurancePolicy: cloneAssurancePolicy(d.AssurancePolicy), Release: release, SourceRelease: d.SourceRelease, Auditors: d.Auditors, ExternalAudits: d.ExternalAudits, K21Rehearsal: d.K21Rehearsal, MainnetDeploymentPlan: d.MainnetDeploymentPlan, FormalChecklist: d.FormalChecklist, Gates: d.Gates, Decision: d.Decision, DecidedAt: d.DecidedAt})
 }
 
 func PrepareProductionDecisionV4(trust TrustPaths, root string, draftBytes []byte) (ProductionDecisionV3, []byte, error) {

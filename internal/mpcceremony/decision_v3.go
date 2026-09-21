@@ -9,6 +9,8 @@ import (
 )
 
 const (
+	ProductionDecisionSchemaV4                     = "proof-tool-mpc-production-decision-v4"
+	ProductionDecisionDraftSchemaV4                = "proof-tool-mpc-production-decision-draft-v4"
 	ProductionDecisionSchemaV3                     = "proof-tool-mpc-production-decision-v3"
 	ProductionDecisionDraftSchemaV3                = "proof-tool-mpc-production-decision-draft-v3"
 	GateSourceRelease               ProductionGate = "source-release"
@@ -166,6 +168,7 @@ func (g ProductionGateResultV3) validate(p AssurancePolicy) error {
 		return errors.New("gate rationale must be trimmed and bounded")
 	}
 	optional, enabled := optionalDecisionGateV3(g.Gate, p)
+
 	if optional && !enabled {
 		if g.Status != GateNotRequired || len(g.Evidence) != 0 || g.Rationale == "" {
 			return errors.New("disabled assurance gate must be NOT_REQUIRED with an explanation and no evidence")
@@ -209,11 +212,16 @@ func NewProductionDecisionV3(value ProductionDecisionV3) (ProductionDecisionV3, 
 
 func computeProductionDecisionIDV3(value ProductionDecisionV3) (string, error) {
 	value.DecisionID = ""
-	return canonicalHash("proof-tool/mpc-ceremony/production-decision/v3", value)
+	domain := "proof-tool/mpc-ceremony/production-decision/v3"
+	if value.Schema == ProductionDecisionSchemaV4 {
+		domain = "proof-tool/mpc-ceremony/production-decision/v4"
+	}
+	return canonicalHash(domain, value)
 }
 
 func (d ProductionDecisionV3) Validate() error {
-	if d.Schema != ProductionDecisionSchemaV3 || d.AssurancePolicy == nil || d.Auditors == nil || d.ExternalAudits == nil || d.Gates == nil {
+
+	if (d.Schema != ProductionDecisionSchemaV3 && d.Schema != ProductionDecisionSchemaV4) || d.AssurancePolicy == nil || d.Auditors == nil || d.ExternalAudits == nil || d.Gates == nil {
 		return errors.New("decision v3 requires its explicit schema, policy and arrays")
 	}
 	if err := validateHashID("decision_id", d.DecisionID); err != nil {
@@ -277,13 +285,16 @@ func (d ProductionDecisionV3) Validate() error {
 	if err := b.Validate(); err != nil {
 		return err
 	}
-	if b.KeyVersion != KeyVersionDestinationV2 || b.DomainSize != 1<<21 {
-		return errors.New("production decision requires the exact K21 destination-v2 rehearsal")
+	if b.KeyVersion != KeyVersionDestinationV3 || b.DomainSize != 1<<21 {
+		return errors.New("production decision requires the exact K21 destination-v3 rehearsal")
 	}
 	if path.Ext(d.FormalChecklist.Name) != ".md" {
 		return errors.New("formal checklist must be Markdown")
 	}
 	expected := decisionGatesV3()
+	if d.Schema == ProductionDecisionSchemaV4 {
+		expected = decisionGatesV4()
+	}
 	if len(d.Gates) != len(expected) {
 		return errors.New("decision requires every V3 production gate exactly once")
 	}
@@ -354,4 +365,9 @@ func decisionExternalArtifactsV3(d ProductionDecisionV3) ([]ArtifactRef, error) 
 		return nil, err
 	}
 	return result, nil
+}
+
+func decisionGatesV4() []ProductionGate {
+	gates := decisionGatesV3()
+	return slices.DeleteFunc(gates, func(g ProductionGate) bool { return g == GateParticipantIndependent || g == GateLiveTwentyParty })
 }

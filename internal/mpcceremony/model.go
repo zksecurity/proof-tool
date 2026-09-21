@@ -23,6 +23,7 @@ const (
 	DefinitionSchemaV2            = "proof-tool-mpc-ceremony-definition-v2"
 	DefinitionSchemaV3            = "proof-tool-mpc-ceremony-definition-v3"
 	DefinitionSchemaV4            = "proof-tool-mpc-ceremony-definition-v4"
+	DefinitionSchemaV5            = "proof-tool-mpc-ceremony-definition-v5"
 	DefinitionSchema              = DefinitionSchemaV3
 	DetachedSignatureSchema       = "proof-tool-mpc-detached-signature-v1"
 	ContributionAttestationSchema = "proof-tool-mpc-contribution-attestation-v2"
@@ -37,8 +38,8 @@ const (
 	FinalTranscriptSchema         = "proof-tool-mpc-final-transcript-v2"
 	FinalTranscriptSchemaV3       = "proof-tool-mpc-final-transcript-v3"
 
-	KeyVersionDestinationV2 = "ownership-destination-v2"
-	CircuitIDDestinationV2  = "root-ownership-destination-v2/bls12-381/groth16"
+	KeyVersionDestinationV3 = "ownership-destination-v3"
+	CircuitIDDestinationV3  = "root-ownership-destination-v3/bls12-381/groth16"
 	// KeyVersionRehearsal names the tiny circuit used to exercise the ceremony
 	// machinery at a small domain. It is accepted only when mode is rehearsal;
 	// see CeremonyDefinition.validate.
@@ -46,8 +47,8 @@ const (
 	CircuitIDRehearsal      = "rehearsal-tiny-v1/bls12-381/groth16"
 	CurveBLS12381           = "BLS12-381"
 	BackendGroth16          = "groth16"
-	GnarkVersion            = "v0.15.0"
-	GnarkCryptoVersion      = "v0.20.1"
+	GnarkVersion            = "v0.16.3"
+	GnarkCryptoVersion      = "v0.21.0"
 	DrandVersion            = "v2.1.6"
 	ProductionGoVersion     = "go1.26.6"
 	ProductionGOOS          = "linux"
@@ -238,11 +239,11 @@ func (b CircuitBinding) Validate() error {
 	//
 	// This is membership in a closed set rather than equality with a single
 	// constant, which is a weaker check than it replaced. What restores the
-	// strength is that a production definition may only name destination-v2;
+	// strength is that a production definition may only name destination-v3;
 	// CeremonyDefinition.validate enforces that, and it is the only place that
 	// knows the mode.
 	switch {
-	case b.KeyVersion == KeyVersionDestinationV2 && b.CircuitID == CircuitIDDestinationV2:
+	case b.KeyVersion == KeyVersionDestinationV3 && b.CircuitID == CircuitIDDestinationV3:
 	case b.KeyVersion == KeyVersionRehearsal && b.CircuitID == CircuitIDRehearsal:
 	default:
 		return fmt.Errorf(

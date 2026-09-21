@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Runs a staged, exact ownership-destination-v2 K=21 ceremony through the
-# participant-facing CLI using same-host rehearsal identities.
+# Runs a staged, exact ownership-destination-v3 K=21 ceremony through the
+# participant-facing CLI using same-host rehearsal identities. The filename is
+# retained for operator compatibility with existing rehearsal automation.
 #
 # This is resource/coherence evidence, not participant-independence evidence.
 # It never fetches a beacon. The operator must close each phase on a future
@@ -1762,7 +1763,7 @@ case "$STAGE" in
       init \
       --mode rehearsal \
       --created-at "$(timestamp "$CREATED_EPOCH")" \
-      --key-version ownership-destination-v2 \
+      --key-version ownership-destination-v3 \
       --participants "$CONFIG/participants.json" \
       --policy "$CONFIG/policy.json" \
       --coordinator-key-id coordinator-key \

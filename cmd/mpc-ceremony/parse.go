@@ -15,7 +15,7 @@ import (
 	"proof-tool/internal/mpcrehearsal"
 )
 
-const supportedKeyVersion = "ownership-destination-v2"
+const supportedKeyVersion = "ownership-destination-v3"
 
 // rehearsalKeyVersion selects the tiny circuit used to exercise the ceremony at
 // a small domain. It is accepted here only alongside --mode rehearsal; the
@@ -866,7 +866,7 @@ func parseInit(args []string) (InitOptions, error) {
 	fs.StringVar(&options.ReleaseVerification, "release-verification", "", "opt into definition v4 with coordinator-full-replay-v1; omitted preserves v3")
 	fs.StringVar(&options.SessionNonceHex, "session-nonce-hex", "", "optional 32-byte session nonce as hex; generated securely when omitted")
 	fs.StringVar(&options.CreatedAt, "created-at", "", "ceremony creation timestamp in RFC3339")
-	fs.StringVar(&options.KeyVersion, "key-version", "", "repository key version (ownership-destination-v2, or rehearsal-tiny-v1 with --mode rehearsal)")
+	fs.StringVar(&options.KeyVersion, "key-version", "", "repository key version (ownership-destination-v3, or rehearsal-tiny-v1 with --mode rehearsal)")
 	fs.StringVar(&options.ParticipantsPath, "participants", "", "participant roster JSON path")
 	fs.StringVar(&options.PolicyPath, "policy", "", "ceremony policy JSON path")
 	fs.StringVar(&options.CoordinatorKeyID, "coordinator-key-id", "", "coordinator signing key identifier")

@@ -493,7 +493,7 @@ Only this command (or checkpoint verify with explicit evidence) emits
 fully_verified=true. Structural inspect output is diagnostics-only.
 `,
 	"init": `Usage:
-  mpc-ceremony init --key-version ownership-destination-v2 \
+  mpc-ceremony init --key-version ownership-destination-v3 \
     --participants ROSTER.json --policy POLICY.json \
     --coordinator-key-id ID --coordinator-signing-key KEY \
     --created-at RFC3339 --out-dir DIR [--mode rehearsal|production] \
@@ -686,7 +686,7 @@ wallet material, overwrites evidence, or produces a production ownership proof.
 ` + replayFlagsHelp + `
 
 Independently compiles the circuit named by the signed ceremony definition
-(ownership-destination-v2 in production, rehearsal-tiny-v1 in a rehearsal),
+(ownership-destination-v3 in production, rehearsal-tiny-v1 in a rehearsal),
 replays both phases, and publishes a coordinator-signed preliminary native
 PK/VK tree. It is not a candidate and cannot be audited or released.
 `,

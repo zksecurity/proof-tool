@@ -47,7 +47,7 @@ func PrepareCandidateAllocationCheckpointV4(options CandidateAllocationCheckpoin
 	if err != nil {
 		return CandidateAllocationCheckpointV4{}, err
 	}
-	if stored.trusted.Definition.Schema != DefinitionSchemaV4 {
+	if !stored.trusted.Definition.UsesCoordinatorReplay() {
 		_ = stored.reader.root.Close()
 		return CandidateAllocationCheckpointV4{}, errors.New("candidate allocation requires definition v4")
 	}
@@ -152,7 +152,7 @@ func RejectAllocatedCandidateV4(options RejectAllocatedCandidateV4Options) (Reje
 	if err != nil {
 		return RejectedCandidateCheckpointV4{}, err
 	}
-	if stored.trusted.Definition.Schema != DefinitionSchemaV4 {
+	if !stored.trusted.Definition.UsesCoordinatorReplay() {
 		_ = stored.reader.root.Close()
 		return RejectedCandidateCheckpointV4{}, errors.New("candidate rejection requires definition v4")
 	}
@@ -302,7 +302,7 @@ func VerifyAndAcceptAllocatedCandidateV4(options AcceptAllocatedCandidateV4Optio
 	if err != nil {
 		return AcceptedCandidateCheckpointV4{}, err
 	}
-	if stored.trusted.Definition.Schema != DefinitionSchemaV4 {
+	if !stored.trusted.Definition.UsesCoordinatorReplay() {
 		_ = stored.reader.root.Close()
 		return AcceptedCandidateCheckpointV4{}, errors.New("candidate acceptance requires definition v4")
 	}

@@ -72,6 +72,8 @@ var (
 		"dispatch-before-fft.patch",
 		"computeh-scoped-coset-tables.patch",
 		"uints-constant-fold.patch",
+		"uints-bounded-pack.patch",
+		"rangecheck-single-limb.patch",
 		"computeh-parallel-transforms.patch",
 		"mpc-phase1-parallel-update.patch",
 		"mpc-phase1-parallel-codec.patch",

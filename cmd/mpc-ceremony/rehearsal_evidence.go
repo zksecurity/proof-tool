@@ -50,7 +50,9 @@ func generateRehearsalEvidence(o RehearsalEvidenceOptions) error {
 	if pre.CeremonyID != o.CeremonyID {
 		return errors.New("ceremony mismatch")
 	}
-	if pre.Circuit.Constraints != 5 || pre.Circuit.R1CS.Digest.SHA256 != "sha256:1cbaefe7d52545efae5a9033f6fd381b667ec305da58fb84065a79438c5161ab" {
+	// gnark 0.16.3 serialization: only embedded version bytes differ from the
+	// previous 0.15.0 tiny circuit; constraint data is byte-for-byte identical.
+	if pre.Circuit.Constraints != 5 || pre.Circuit.R1CS.Digest.SHA256 != "sha256:177ab88ee828ca78f753d7e63342d5c86f3ba4ef19910ad4182d2d648b539519" {
 		return errors.New("only the exact pinned five-constraint rehearsal circuit is permitted")
 	}
 	ccs, err := mpcceremony.ReadR1CSFile(filepath.Join(o.KeysDir, pre.ConstraintSystem.Name), pre.Circuit)

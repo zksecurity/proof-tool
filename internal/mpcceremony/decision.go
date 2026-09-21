@@ -262,6 +262,8 @@ func (e ExternalAuditEvidence) Validate() error {
 	return nil
 }
 
+// K21RehearsalEvidence binds the optimized fixed destination-v3 circuit.
+// The intermediate unoptimized upstream v3 circuit was K22 and is not accepted.
 type K21RehearsalEvidence struct {
 	KeyVersion  string             `json:"key_version"`
 	CircuitID   string             `json:"circuit_id"`
@@ -303,11 +305,11 @@ func (e SourceReleaseEvidence) Validate() error {
 }
 
 func (e K21RehearsalEvidence) Validate() error {
-	if e.KeyVersion != KeyVersionDestinationV2 ||
-		e.CircuitID != CircuitIDDestinationV2 ||
+	if e.KeyVersion != KeyVersionDestinationV3 ||
+		e.CircuitID != CircuitIDDestinationV3 ||
 		e.Curve != CurveBLS12381 ||
 		e.Backend != BackendGroth16 {
-		return errors.New("K21 rehearsal must bind the exact ownership-destination-v2 BLS12-381 Groth16 circuit")
+		return errors.New("K21 rehearsal must bind the exact ownership-destination-v3 BLS12-381 Groth16 circuit")
 	}
 	if e.Constraints == 0 {
 		return errors.New("K21 rehearsal constraint count must be positive")
@@ -856,7 +858,7 @@ func VerifyProductionDecisionEvidence(
 }
 
 func validateProductionDecisionBinding(definition CeremonyDefinition, decision ProductionDecision) error {
-	if definition.Schema == DefinitionSchemaV4 {
+	if definition.UsesCoordinatorReplay() {
 		return errors.New("definition v4 requires the versioned trusted-coordinator decision verification path")
 	}
 	if decision.CeremonyID != definition.CeremonyID {
@@ -905,7 +907,7 @@ func validateProductionDecisionBinding(definition CeremonyDefinition, decision P
 }
 
 func expectedFinalTranscriptSchema(definition CeremonyDefinition) string {
-	if definition.Schema == DefinitionSchemaV4 {
+	if definition.UsesCoordinatorReplay() {
 		return FinalTranscriptSchemaV3
 	}
 	if definition.Schema == DefinitionSchemaV3 {

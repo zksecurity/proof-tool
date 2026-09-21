@@ -58,7 +58,7 @@ const CoordinatorReplayReleaseV1 = "coordinator-full-replay-v1"
 // UsesSignedAssurancePolicy selects a versioned capability, not a successful
 // verification result. Callers must still authenticate and validate definitions.
 func (d CeremonyDefinition) UsesSignedAssurancePolicy() bool {
-	return d.Schema == DefinitionSchemaV3 || d.Schema == DefinitionSchemaV4
+	return d.Schema == DefinitionSchemaV3 || d.UsesCoordinatorReplay()
 }
 
 // AssurancePolicy is the signed, ceremony-wide authority for optional
@@ -161,7 +161,7 @@ func NewCeremonyDefinition(options DefinitionOptions) (CeremonyDefinition, error
 		Phase1Genesis:       options.Phase1Genesis,
 	}
 	if options.ReleaseVerification != "" {
-		definition.Schema = DefinitionSchemaV4
+		definition.Schema = DefinitionSchemaV5
 	}
 	id, err := ComputeCeremonyID(definition)
 	if err != nil {
@@ -178,7 +178,7 @@ func NewCeremonyDefinition(options DefinitionOptions) (CeremonyDefinition, error
 // content-derived CeremonyID. It is useful to decouple expensive circuit
 // compilation from metadata construction.
 func FinalizeCeremonyDefinition(definition CeremonyDefinition) (CeremonyDefinition, error) {
-	if definition.Schema != DefinitionSchemaV4 {
+	if !definition.UsesCoordinatorReplay() {
 		definition.Schema = DefinitionSchema
 	}
 	if definition.Auditors == nil {
@@ -218,6 +218,8 @@ func ComputeCeremonyID(definition CeremonyDefinition) (string, error) {
 		domain = "proof-tool/mpc-ceremony/root/v2"
 	case DefinitionSchemaV4:
 		domain = "proof-tool/mpc-ceremony/root/v4"
+	case DefinitionSchemaV5:
+		domain = "proof-tool/mpc-ceremony/root/v5"
 	}
 	return canonicalHash(domain, definition)
 }
@@ -237,7 +239,8 @@ func (d CeremonyDefinition) Validate() error {
 }
 
 func (d CeremonyDefinition) validate(requireID bool) error {
-	if d.Schema == DefinitionSchemaV4 {
+
+	if d.UsesCoordinatorReplay() {
 		if d.ReleaseVerification != CoordinatorReplayReleaseV1 {
 			return errors.New("definition v4 requires explicit coordinator-full-replay-v1 release verification")
 		}
@@ -245,7 +248,7 @@ func (d CeremonyDefinition) validate(requireID bool) error {
 		return errors.New("release_verification is only permitted in definition v4")
 	}
 	switch d.Schema {
-	case DefinitionSchemaV3, DefinitionSchemaV4:
+	case DefinitionSchemaV3, DefinitionSchemaV4, DefinitionSchemaV5:
 	case DefinitionSchemaV2:
 		if d.AssurancePolicy != nil {
 			return errors.New("definition v2 must not contain v3-only assurance_policy")
@@ -278,10 +281,10 @@ func (d CeremonyDefinition) validate(requireID bool) error {
 		// mode, so it is the only place the restriction can live, and it is
 		// decided before any environment-dependent check so the failure is
 		// about the definition rather than the host.
-		if d.Circuit.KeyVersion != KeyVersionDestinationV2 {
+		if d.Circuit.KeyVersion != KeyVersionDestinationV3 {
 			return fmt.Errorf(
 				"production ceremony must use key_version %q, not %q",
-				KeyVersionDestinationV2, d.Circuit.KeyVersion,
+				KeyVersionDestinationV3, d.Circuit.KeyVersion,
 			)
 		}
 		if d.Software.SourceDirty {
@@ -313,7 +316,7 @@ func (d CeremonyDefinition) validate(requireID bool) error {
 		return fmt.Errorf("circuit: %w", err)
 	}
 	if d.Mode == ModeProduction {
-		if err := ValidateCanonicalDestinationV2(d.Circuit); err != nil {
+		if err := ValidateCanonicalDestinationV3(d.Circuit); err != nil {
 			return fmt.Errorf("circuit: %w", err)
 		}
 	}

@@ -34,7 +34,7 @@ func CreateAllocatedContributionCandidateV4(options AllocatedContributionFilesV4
 		return ContributionFilesResult{}, err
 	}
 	defer func() { _ = stored.reader.root.Close() }()
-	if stored.trusted.Definition.Schema != DefinitionSchemaV4 {
+	if !stored.trusted.Definition.UsesCoordinatorReplay() {
 		return ContributionFilesResult{}, errors.New("allocated contribution requires definition v4")
 	}
 	allocation, ok := stored.ancestry.allocations[options.AttemptID]

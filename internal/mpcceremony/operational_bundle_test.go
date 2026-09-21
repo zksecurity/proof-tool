@@ -521,9 +521,9 @@ func newOperationalBundleFixtureConfigured(t *testing.T, selected *AssurancePoli
 	// Keep this downstream evidence fixture small. Canonical production circuit
 	// identity is covered by definition_test.go; rehearsal mode may bind these
 	// synthetic R1CS bytes so the exact release-tree checks can exercise real
-	// files without embedding the 129 MB production constraint system.
+	// files without embedding the 101 MB production constraint system.
 	definition.Circuit.R1CS.Digest = NewDigest([]byte("r1cs"))
-	definition.Circuit.Constraints = 1_789_750
+	definition.Circuit.Constraints = CanonicalDestinationV3Constraints
 	definition.Circuit.DomainSize = 1 << 21
 	definition.Phase1Policy.Minimum = 1
 	definition.Phase2Policy.Minimum = 1
