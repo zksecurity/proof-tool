@@ -73,19 +73,30 @@ func PrepareRecordedCheckpointV4(options RecordedCheckpointV4Options) (RecordedC
 			return RecordedCheckpointV4{}, errors.New("phase2 initialization requires the authenticated phase1 seal and circuit")
 		}
 		path := func(ref ArtifactRef) string { return filepath.Join(options.ArtifactRoot, filepath.FromSlash(ref.Name)) }
-		verified, err := VerifyPhase2GenesisFiles(VerifyPhase2GenesisFilesOptions{
-			Trust: options.Trust, Circuit: options.Circuit, TranscriptRoot: options.ArtifactRoot,
-			Phase1SealPath: path(previous.Progress.Phase1Seal.Record), Phase1SealSignaturePath: path(previous.Progress.Phase1Seal.Signature),
-			Phase2ChainPath: path(options.Record.Record), Phase2ChainSignaturePath: path(options.Record.Signature),
+		// Derive only a provisional projection here. PrepareCheckpointV4 below
+		// performs the authoritative deterministic-genesis verification once.
+		chain, refs, err := LoadSignedChainExact(stored.trusted, PhaseTranscriptPaths{
+			RootDir: options.ArtifactRoot, ChainPath: path(options.Record.Record),
+			ChainSignaturePath: path(options.Record.Signature),
 		})
 		if err != nil {
 			return RecordedCheckpointV4{}, err
 		}
-		headID, err := verified.Chain.HeadRecordID()
+		if refs != options.Record {
+			return RecordedCheckpointV4{}, errors.New("phase2 initialization chain references differ from supplied record")
+		}
+		if chain.Phase != Phase2 || len(chain.Records) != 0 {
+			return RecordedCheckpointV4{}, errors.New("phase2 initialization requires a zero-contribution Phase 2 chain")
+		}
+		headID, err := chain.HeadRecordID()
 		if err != nil {
 			return RecordedCheckpointV4{}, err
 		}
-		next.Progress.Phase2 = &CheckpointPhaseState{Phase: Phase2, HeadRecordID: headID, HeadPayload: verified.Genesis, Chain: verified.ChainRefs}
+		genesis, err := chain.HeadPayload()
+		if err != nil {
+			return RecordedCheckpointV4{}, err
+		}
+		next.Progress.Phase2 = &CheckpointPhaseState{Phase: Phase2, HeadRecordID: headID, HeadPayload: genesis, Chain: refs}
 	case CheckpointPhase2Closed:
 		next.Progress.Phase2Closure = &options.Record
 	case CheckpointPhase2BeaconRecorded:

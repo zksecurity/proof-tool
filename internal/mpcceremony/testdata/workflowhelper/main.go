@@ -737,6 +737,15 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	if err != nil {
 		return fmt.Errorf("Phase 2 participant 1: %w", err)
 	}
+	if os.Getenv("MPC_WORKFLOW_CHECK_GENESIS") == "1" {
+		if err := checkGenesisVerification(mpcceremony.VerifyPhase2GenesisFilesOptions{
+			Trust: trust, Circuit: circuit, TranscriptRoot: ceremonyRoot,
+			Phase1SealPath: phase1Seal.SealPath, Phase1SealSignaturePath: phase1Seal.SignaturePath,
+			Phase2ChainPath: phase2Initialized.ChainPath, Phase2ChainSignaturePath: phase2Initialized.ChainSignaturePath,
+		}, phase2Paths); err != nil {
+			return err
+		}
+	}
 	if !checkpointPhase2One {
 		phase2Paths, err = contributeAndAccept(
 			mpcceremony.Phase2,
