@@ -567,27 +567,15 @@ func LoadSignedChainExact(trusted *TrustedCeremony, paths PhaseTranscriptPaths) 
 	return chain, refs, nil
 }
 
-// VerifyAcceptedPhase1Chain replays every Phase 1 transition and returns only
-// after the signed chain, contribution mathematics, participant attestations,
-// cleanup acknowledgements, and coordinator verification records agree. It is
-// read-only and is the checkpoint verifier's cp3 boundary.
+// VerifyAcceptedPhase1Chain authenticates accepted Phase 1 evidence and
+// coordinator verification records, returning references to the same signed
+// chain read. It does not independently replay transition mathematics.
 func VerifyAcceptedPhase1Chain(trust TrustPaths, circuit *CompiledCircuit, paths PhaseTranscriptPaths) (Chain, SignedArtifactRefs, error) {
 	trusted, err := loadOperationalCeremony(trust)
 	if err != nil {
 		return Chain{}, SignedArtifactRefs{}, err
 	}
-	if err := validateWorkflowCircuit(trusted, circuit); err != nil {
-		return Chain{}, SignedArtifactRefs{}, err
-	}
-	chain, err := loadVerifiedPhase1Files(trusted, circuit, paths)
-	if err != nil {
-		return Chain{}, SignedArtifactRefs{}, err
-	}
-	_, refs, err := LoadSignedChainExact(trusted, paths)
-	if err != nil {
-		return Chain{}, SignedArtifactRefs{}, err
-	}
-	return chain, refs, nil
+	return loadVerifiedPhase1FilesExact(trusted, circuit, paths)
 }
 
 // VerifyAcceptedPhase2Chain fully replays sealed Phase 1 and every accepted
@@ -623,18 +611,27 @@ func loadVerifiedPhase1Files(
 	circuit *CompiledCircuit,
 	paths PhaseTranscriptPaths,
 ) (Chain, error) {
+	chain, _, err := loadVerifiedPhase1FilesExact(trusted, circuit, paths)
+	return chain, err
+}
+
+func loadVerifiedPhase1FilesExact(
+	trusted *TrustedCeremony,
+	circuit *CompiledCircuit,
+	paths PhaseTranscriptPaths,
+) (Chain, SignedArtifactRefs, error) {
 	if err := validateWorkflowCircuit(trusted, circuit); err != nil {
-		return Chain{}, err
+		return Chain{}, SignedArtifactRefs{}, err
 	}
-	chain, err := LoadSignedChain(trusted, paths)
+	chain, refs, err := LoadSignedChainExact(trusted, paths)
 	if err != nil {
-		return Chain{}, err
+		return Chain{}, SignedArtifactRefs{}, err
 	}
 	if chain.Phase != Phase1 {
-		return Chain{}, fmt.Errorf("chain phase is %q, want phase1", chain.Phase)
+		return Chain{}, SignedArtifactRefs{}, fmt.Errorf("chain phase is %q, want phase1", chain.Phase)
 	}
 	if chain.Genesis != trusted.Definition.Phase1Genesis {
-		return Chain{}, errors.New("Phase 1 chain genesis differs from signed ceremony definition")
+		return Chain{}, SignedArtifactRefs{}, errors.New("Phase 1 chain genesis differs from signed ceremony definition")
 	}
 	expectedPhaseID, err := ComputePhaseID(
 		trusted.Definition.CeremonyID,
@@ -643,15 +640,39 @@ func loadVerifiedPhase1Files(
 		"",
 	)
 	if err != nil {
-		return Chain{}, err
+		return Chain{}, SignedArtifactRefs{}, err
 	}
 	if chain.PhaseID != expectedPhaseID {
-		return Chain{}, errors.New("Phase 1 chain ID does not bind the signed genesis")
+		return Chain{}, SignedArtifactRefs{}, errors.New("Phase 1 chain ID does not bind the signed genesis")
 	}
 	if err := verifyChainFiles(trusted, paths.RootDir, chain, circuit.Binding.Phase2Shape); err != nil {
-		return Chain{}, err
+		return Chain{}, SignedArtifactRefs{}, err
 	}
-	return chain, nil
+	return chain, refs, nil
+}
+
+// A signed genesis may have a valid native shape while differing from the
+// deterministic Powers-of-Tau starting state. Participant input authentication
+// retains this comparison even when it does not replay historical transitions.
+func canonicalPhase1Genesis(trusted *TrustedCeremony, circuit *CompiledCircuit, chain Chain) (*gnarkmpc.Phase1, error) {
+	if err := validateWorkflowCircuit(trusted, circuit); err != nil {
+		return nil, err
+	}
+	if chain.Phase != Phase1 || chain.Genesis != trusted.Definition.Phase1Genesis {
+		return nil, errors.New("Phase 1 genesis is not bound to the signed definition")
+	}
+	initial, _, err := InitializePhase1(circuit.Binding.DomainSize)
+	if err != nil {
+		return nil, err
+	}
+	digest, err := writerDigest(initial)
+	if err != nil {
+		return nil, err
+	}
+	if digest != chain.Genesis.Digest {
+		return nil, errors.New("signed Phase 1 genesis differs from canonical construction")
+	}
+	return initial, nil
 }
 
 // LoadReplayPhase1Files authenticates all accepted evidence and independently
@@ -672,6 +693,9 @@ func loadReplayPhase1FilesState(
 ) (Chain, *gnarkmpc.Phase1, error) {
 	chain, err := loadVerifiedPhase1Files(trusted, circuit, paths)
 	if err != nil {
+		return Chain{}, nil, err
+	}
+	if _, err := canonicalPhase1Genesis(trusted, circuit, chain); err != nil {
 		return Chain{}, nil, err
 	}
 	loader := phase1FileLoader(paths.RootDir, chain, circuit.Binding.DomainSize, paths.Progress)
@@ -805,10 +829,21 @@ type ContributionFilesOptions struct {
 	Environment               ContributionEnvironment
 	ContributedAt             string
 	CandidateDir              string
+	Progress                  StageProgress
 	// ExpectedScope is set by the V4 allocation-aware entry point. It is
 	// checked after the signed chain is loaded and before contribution
 	// randomness is sampled. Legacy callers leave it nil.
 	ExpectedScope *ContributionScope
+	assignedInput *authenticatedContributionAssignment
+}
+
+// Only the allocated checkpoint boundary can construct this private authority.
+// It binds the exact signed snapshot before participant randomness is drawn.
+type authenticatedContributionAssignment struct {
+	definition  SignedArtifactRefs
+	chain       SignedArtifactRefs
+	phase1Chain SignedArtifactRefs
+	phase1Seal  SignedArtifactRefs
 }
 
 type ContributionFilesResult struct {
@@ -818,9 +853,10 @@ type ContributionFilesResult struct {
 	AttestationSignaturePath string
 }
 
-// CreateContributionCandidate replays the entire accepted chain before
-// sampling contribution randomness. It never modifies the authoritative
-// transcript and writes only to a fresh candidate directory.
+// CreateContributionCandidate authenticates the complete accepted history.
+// An allocated V5 turn checks only its own native transition; legacy direct
+// turns retain independent history replay. The authoritative transcript is
+// never modified, and the candidate is written to a fresh directory.
 func CreateContributionCandidate(options ContributionFilesOptions) (result ContributionFilesResult, err error) {
 	trusted, err := loadOperationalCeremony(options.Trust)
 	if err != nil {
@@ -850,15 +886,41 @@ func CreateContributionCandidate(options ContributionFilesOptions) (result Contr
 		return result, err
 	}
 
+	if options.assignedInput != nil && trusted.DefinitionRefs != options.assignedInput.definition {
+		return result, errors.New("assigned definition differs from authenticated checkpoint")
+	}
+	if options.assignedInput != nil && options.Progress != nil {
+		options.Progress("Checking input files", 2, 5)
+	}
 	var chain Chain
 	var generateContributionWriter func() (func(string) (ArtifactDigest, error), error)
 	switch options.Phase {
 	case Phase1:
-		chain, err = loadVerifiedPhase1Files(trusted, options.Circuit, options.Transcript)
+		var refs SignedArtifactRefs
+		chain, refs, err = loadVerifiedPhase1FilesExact(trusted, options.Circuit, options.Transcript)
 		if err != nil {
 			return result, err
 		}
+		if options.assignedInput != nil && refs != options.assignedInput.chain {
+			return result, errors.New("assigned Phase 1 chain differs from authenticated checkpoint")
+		}
 		generateContributionWriter = func() (func(string) (ArtifactDigest, error), error) {
+			if options.assignedInput != nil {
+				canonical, err := canonicalPhase1Genesis(trusted, options.Circuit, chain)
+				if err != nil {
+					return nil, err
+				}
+				head, digest, err := authenticatedPhase1Head(options.Transcript.RootDir, chain, options.Circuit.Binding.DomainSize, canonical)
+				if err != nil {
+					return nil, err
+				}
+				contribution, err := contributePhase1FromAuthenticatedHead(options.Circuit.Binding.DomainSize, head, digest, options.Progress)
+				if err != nil {
+					return nil, err
+				}
+				shape := Phase1Shape{DomainN: options.Circuit.Binding.DomainSize, ChallengeLength: contributionChallengeSize}
+				return func(path string) (ArtifactDigest, error) { return WritePhase1FileNoReplace(path, contribution, shape) }, nil
+			}
 			contribution, contributeErr := ContributePhase1Loaded(
 				options.Circuit.Binding.DomainSize,
 				len(chain.Records),
@@ -873,18 +935,45 @@ func CreateContributionCandidate(options ContributionFilesOptions) (result Contr
 			}, nil
 		}
 	case Phase2:
+		if options.assignedInput != nil {
+			if err := authenticateParticipantPhase1Seal(trusted, options.Circuit, options.Transcript.RootDir, *options.assignedInput, options.Phase1SealPath, options.Phase1SealSignaturePath); err != nil {
+				return result, err
+			}
+			var refs SignedArtifactRefs
+			chain, refs, err = loadAcceptedPhase2FilesExact(trusted, options.Circuit, options.assignedInput.phase1Seal, options.Transcript)
+			if err != nil {
+				return result, err
+			}
+			if refs != options.assignedInput.chain {
+				return result, errors.New("assigned Phase 2 chain differs from authenticated checkpoint")
+			}
+			generateContributionWriter = func() (func(string) (ArtifactDigest, error), error) {
+				head, digest, err := authenticatedPhase2Head(options.Transcript.RootDir, chain, options.Circuit.Binding.Phase2Shape)
+				if err != nil {
+					return nil, err
+				}
+				contribution, err := contributePhase2FromAuthenticatedHead(head, digest, options.Progress)
+				if err != nil {
+					return nil, err
+				}
+				shape := contributionPhase2Shape(options.Circuit.Binding.Phase2Shape)
+				return func(path string) (ArtifactDigest, error) { return WritePhase2FileNoReplace(path, contribution, shape) }, nil
+			}
+			break
+		}
 		commons, phase1Seal, _, loadErr := loadPhase1CommonsForPhase2(trusted, options.Circuit, options.Transcript.RootDir, options.Phase1SealPath, options.Phase1SealSignaturePath)
 		if loadErr != nil {
 			return result, loadErr
 		}
-		chain, err = loadVerifiedPhase2Files(trusted, options.Circuit, commons, phase1Seal, options.Transcript)
+		var genesis *gnarkmpc.Phase2
+		chain, _, genesis, err = loadVerifiedPhase2FilesWithGenesis(trusted, options.Circuit, commons, phase1Seal, options.Transcript)
 		if err != nil {
 			return result, err
 		}
 		generateContributionWriter = func() (func(string) (ArtifactDigest, error), error) {
-			contribution, contributeErr := ContributePhase2Loaded(
-				options.Circuit,
-				commons,
+			contribution, contributeErr := contributePhase2FromVerifiedGenesis(
+				genesis,
+				options.Circuit.Binding.Phase2Shape,
 				len(chain.Records),
 				phase2FileLoader(options.Transcript.RootDir, chain, contributionPhase2Shape(options.Circuit.Binding.Phase2Shape), options.Transcript.Progress),
 			)
@@ -928,14 +1017,17 @@ func CreateContributionCandidate(options ContributionFilesOptions) (result Contr
 		return result, fmt.Errorf("inspect fresh candidate directory: %w", statErr)
 	}
 
-	// Replay and MPC entropy sampling start only after all deterministic
+	// Contribution generation and MPC entropy sampling start only after all deterministic
 	// schedule and destination preflights have succeeded. The directory itself
-	// is created afterward so termination during replay does not strand an
+	// is created afterward so termination during generation does not strand an
 	// empty candidate path; the ceremony root must remain access-controlled to
 	// exclude a racing creator between this preflight and mkdir.
 	contributionWriter, err := generateContributionWriter()
 	if err != nil {
 		return result, err
+	}
+	if options.assignedInput != nil && options.Progress != nil {
+		options.Progress("Saving contribution and attestation", 5, 5)
 	}
 	if err := os.Mkdir(options.CandidateDir, 0o700); err != nil {
 		return result, fmt.Errorf("create fresh candidate directory: %w", err)
@@ -1114,6 +1206,8 @@ type AcceptContributionFilesOptions struct {
 	// boundary. It exposes stable candidate-content failures to the recovery
 	// protocol without relabeling trust, predecessor, or filesystem failures.
 	ClassifyCandidateInvalid bool
+	// Only the allocated coordinator wrapper supplies this private signed input.
+	assignedInput *authenticatedContributionAssignment
 }
 
 type AcceptContributionFilesResult struct {
@@ -1166,6 +1260,7 @@ func VerifyAndAcceptContribution(options AcceptContributionFilesOptions) (result
 	var phase1Candidate *gnarkmpc.Phase1
 	var phase2Candidate *gnarkmpc.Phase2
 	var phase2Commons *gnarkmpc.SrsCommons
+	var phase2Genesis *gnarkmpc.Phase2
 	var phase1Seal SealRecord
 	switch options.Phase {
 	case Phase1:
@@ -1174,6 +1269,30 @@ func VerifyAndAcceptContribution(options AcceptContributionFilesOptions) (result
 			return result, err
 		}
 	case Phase2:
+		if options.assignedInput != nil {
+			assignment := *options.assignedInput
+			if assignment.definition != trusted.DefinitionRefs || assignment.phase1Seal == (SignedArtifactRefs{}) || assignment.chain == (SignedArtifactRefs{}) {
+				return result, errors.New("allocated Phase 2 acceptance lacks authenticated input references")
+			}
+			if err := authenticateParticipantPhase1Seal(trusted, options.Circuit, options.Transcript.RootDir, assignment, options.Phase1SealPath, options.Phase1SealSignaturePath); err != nil {
+				return result, err
+			}
+			var refs SignedArtifactRefs
+			chain, refs, err = loadAcceptedPhase2FilesExact(trusted, options.Circuit, assignment.phase1Seal, options.Transcript)
+			if err != nil {
+				return result, err
+			}
+			if refs != assignment.chain {
+				return result, errors.New("allocated Phase 2 input chain differs from authenticated checkpoint")
+			}
+			if len(chain.Records) == 0 {
+				phase2Genesis, _, err = authenticatedPhase2Head(options.Transcript.RootDir, chain, options.Circuit.Binding.Phase2Shape)
+				if err != nil {
+					return result, err
+				}
+			}
+			break
+		}
 		phase2Commons, phase1Seal, _, err = loadAuthenticatedPhase1CommonsForCoordinator(
 			trusted,
 			options.Circuit,
@@ -1185,12 +1304,15 @@ func VerifyAndAcceptContribution(options AcceptContributionFilesOptions) (result
 		if loadErr != nil {
 			return result, loadErr
 		}
-		chain, err = loadVerifiedPhase2Files(trusted, options.Circuit, phase2Commons, phase1Seal, options.Transcript)
+		chain, _, phase2Genesis, err = loadVerifiedPhase2FilesWithGenesis(trusted, options.Circuit, phase2Commons, phase1Seal, options.Transcript)
 		if err != nil {
 			return result, err
 		}
 	}
 	index := len(chain.Records) + 1
+	if index > 1 {
+		phase2Genesis = nil
+	}
 	names := contributionLogicalNames(options.Phase, index)
 	candidatePayloadPath := filepath.Join(options.CandidateDir, "contribution.bin")
 	candidateAttestationPath := filepath.Join(options.CandidateDir, "attestation.json")
@@ -1314,7 +1436,7 @@ func VerifyAndAcceptContribution(options AcceptContributionFilesOptions) (result
 		candidateDigest, candidateChallenge = digest, digest.Challenge
 		var previous *gnarkmpc.Phase2
 		if index == 1 {
-			previous, _, err = InitializePhase2(options.Circuit, phase2Commons)
+			previous = phase2Genesis
 		} else {
 			previous, err = phase2FileLoader(
 				options.Transcript.RootDir,
@@ -1632,7 +1754,7 @@ func validateContributionVerification(record ChainRecord, verification Contribut
 }
 
 type ClosePhaseFilesOptions struct {
-	// FullReplay additionally replays Phase 1 mathematics. Phase 2 always replays.
+	// FullReplay independently replays all prior transitions for the selected phase.
 	FullReplay                bool
 	Trust                     TrustPaths
 	Circuit                   *CompiledCircuit
@@ -1646,7 +1768,7 @@ type ClosePhaseFilesOptions struct {
 	BeaconRound uint64
 	// BeaconRoundLeadSeconds derives the round from the clock sampled after
 	// verification. This avoids predicting verification duration, including
-	// full replay when requested or required by Phase 2. The round remains
+	// full replay when requested. The round remains
 	// unpublished until the signed closure is committed, and must still be
 	// in the future at publication time.
 	BeaconRoundLeadSeconds uint32
@@ -1661,7 +1783,8 @@ type ClosePhaseFilesResult struct {
 // ClosePhaseFiles authenticates the exact signed chain and publishes a signed
 // closure as one atomic directory at the fixed per-phase path. Phase 1 relies
 // on the authenticated acceptance receipts unless FullReplay is requested;
-// Phase 2 always replays. Closure time is sampled after verification, and the
+// Phase 2 authenticates accepted history unless FullReplay is requested.
+// Closure time is sampled after verification, and the
 // future-round lead is checked again immediately before directory commit.
 func ClosePhaseFiles(options ClosePhaseFilesOptions) (ClosePhaseFilesResult, error) {
 	return closePhaseFiles(options, time.Now)
@@ -1694,6 +1817,11 @@ func closePhaseFilesAuthenticated(
 	if err := validateWorkflowCircuit(trusted, options.Circuit); err != nil {
 		return result, err
 	}
+	// Match the coordinator signing identity before selecting an acceptance-based
+	// verification method. Publication reloads the key after the input checks.
+	if _, _, err := loadMatchingPrivateKey(options.CoordinatorPrivateKeyPath, trusted.Definition.Coordinator); err != nil {
+		return result, err
+	}
 	var chain Chain
 	var err error
 	// Retained past the switch so a derived phase 2 round can be checked for
@@ -1710,12 +1838,21 @@ func closePhaseFilesAuthenticated(
 		var commons *gnarkmpc.SrsCommons
 		var phase1Seal SealRecord
 		var loadedClose CloseRecord
-		commons, phase1Seal, loadedClose, err = loadPhase1CommonsForPhase2(
+		sealRefs, sealErr := signedArtifactRefsAtPaths(options.Transcript.RootDir, options.Phase1SealPath, options.Phase1SealSignaturePath)
+		if sealErr != nil {
+			return result, sealErr
+		}
+		method := phase1IndependentReplay
+		if trusted.Definition.UsesCoordinatorReplay() && !options.FullReplay {
+			method = phase1CoordinatorAcceptance
+		}
+		commons, phase1Seal, loadedClose, err = loadPhase1CommonsWithMethod(
 			trusted,
 			options.Circuit,
 			options.Transcript.RootDir,
 			options.Phase1SealPath,
 			options.Phase1SealSignaturePath,
+			method,
 		)
 		if err == nil {
 			phase1Close = &loadedClose
@@ -1727,7 +1864,18 @@ func closePhaseFilesAuthenticated(
 			)
 		}
 		if err == nil {
-			chain, err = LoadReplayPhase2Files(trusted, options.Circuit, commons, phase1Seal, options.Transcript)
+			if method == phase1CoordinatorAcceptance {
+				var after SignedArtifactRefs
+				after, err = signedArtifactRefsAtPaths(options.Transcript.RootDir, options.Phase1SealPath, options.Phase1SealSignaturePath)
+				if err == nil && after != sealRefs {
+					err = errors.New("Phase 1 seal changed during closure verification")
+				}
+				if err == nil {
+					chain, _, err = loadAcceptedPhase2FilesExact(trusted, options.Circuit, sealRefs, options.Transcript)
+				}
+			} else {
+				chain, err = LoadReplayPhase2Files(trusted, options.Circuit, commons, phase1Seal, options.Transcript)
+			}
 		}
 	default:
 		err = fmt.Errorf("unsupported phase %q", options.Phase)
@@ -2146,6 +2294,10 @@ type VerifyPhase2GenesisFilesResult struct {
 // VerifyPhase2GenesisFiles fully replays sealed Phase 1 and proves that the
 // signed zero-contribution Phase 2 chain names its deterministic genesis.
 func VerifyPhase2GenesisFiles(options VerifyPhase2GenesisFilesOptions) (VerifyPhase2GenesisFilesResult, error) {
+	return verifyPhase2GenesisFilesWithMethod(options, phase1IndependentReplay)
+}
+
+func verifyPhase2GenesisFilesWithMethod(options VerifyPhase2GenesisFilesOptions, method phase1VerificationMethod) (VerifyPhase2GenesisFilesResult, error) {
 	trusted, err := loadOperationalCeremony(options.Trust)
 	if err != nil {
 		return VerifyPhase2GenesisFilesResult{}, err
@@ -2153,7 +2305,7 @@ func VerifyPhase2GenesisFiles(options VerifyPhase2GenesisFilesOptions) (VerifyPh
 	if err := validateWorkflowCircuit(trusted, options.Circuit); err != nil {
 		return VerifyPhase2GenesisFilesResult{}, err
 	}
-	commons, seal, _, err := loadPhase1CommonsForPhase2(trusted, options.Circuit, options.TranscriptRoot, options.Phase1SealPath, options.Phase1SealSignaturePath)
+	commons, seal, _, err := loadPhase1CommonsWithMethod(trusted, options.Circuit, options.TranscriptRoot, options.Phase1SealPath, options.Phase1SealSignaturePath, method)
 	if err != nil {
 		return VerifyPhase2GenesisFilesResult{}, fmt.Errorf("verify sealed Phase 1: %w", err)
 	}
@@ -2180,9 +2332,19 @@ func VerifyPhase2GenesisFiles(options VerifyPhase2GenesisFilesOptions) (VerifyPh
 // from the authenticated accepted chain and recorded beacon; it never signs or
 // writes ceremony state.
 func VerifyPhase1SealFiles(options VerifyPhase1SealFilesOptions) (VerifyPhase1SealFilesResult, error) {
+	return verifyPhase1SealFilesWithMethod(options, phase1IndependentReplay)
+}
+
+func verifyPhase1SealFilesWithMethod(options VerifyPhase1SealFilesOptions, method phase1VerificationMethod) (VerifyPhase1SealFilesResult, error) {
 	trusted, err := loadOperationalCeremony(options.Trust)
 	if err != nil {
 		return VerifyPhase1SealFilesResult{}, err
+	}
+	if method != phase1IndependentReplay && method != phase1CoordinatorAcceptance {
+		return VerifyPhase1SealFilesResult{}, errors.New("unknown Phase 1 verification method")
+	}
+	if method == phase1CoordinatorAcceptance && !trusted.Definition.UsesCoordinatorReplay() {
+		return VerifyPhase1SealFilesResult{}, errors.New("coordinator acceptance method requires V4 or V5")
 	}
 	if err := validateWorkflowCircuit(trusted, options.Circuit); err != nil {
 		return VerifyPhase1SealFilesResult{}, err
@@ -2198,11 +2360,17 @@ func VerifyPhase1SealFiles(options VerifyPhase1SealFilesOptions) (VerifyPhase1Se
 	if err := loadCoordinatorSignedRecord(trusted, options.Phase1ClosePath, options.Phase1CloseSignaturePath, &closeRecord); err != nil {
 		return VerifyPhase1SealFilesResult{}, fmt.Errorf("load exact Phase 1 closure: %w", err)
 	}
-	chain, replayedHead, err := loadReplayPhase1FilesState(trusted, options.Circuit, PhaseTranscriptPaths{
-		RootDir: options.TranscriptRoot, ChainPath: options.Phase1ChainPath, ChainSignaturePath: options.Phase1ChainSignaturePath,
-	})
+	paths := PhaseTranscriptPaths{RootDir: options.TranscriptRoot, ChainPath: options.Phase1ChainPath, ChainSignaturePath: options.Phase1ChainSignaturePath}
+	var chain Chain
+	var replayedHead *gnarkmpc.Phase1
+	if method == phase1IndependentReplay {
+		chain, replayedHead, err = loadReplayPhase1FilesState(trusted, options.Circuit, paths)
+	} else {
+		chain, replayedHead, err = loadCoordinatorPhase1SealHead(trusted, options.Circuit, paths, false)
+	}
+
 	if err != nil {
-		return VerifyPhase1SealFilesResult{}, fmt.Errorf("replay exact closed Phase 1 chain: %w", err)
+		return VerifyPhase1SealFilesResult{}, fmt.Errorf("verify exact closed Phase 1 chain: %w", err)
 	}
 	if err := ValidateClose(trusted.Definition, chain, closeRecord); err != nil {
 		return VerifyPhase1SealFilesResult{}, fmt.Errorf("validate exact Phase 1 closure: %w", err)
@@ -2423,6 +2591,8 @@ func SealPhase1Files(options SealPhase1FilesOptions) (result SealPhase1FilesResu
 const initPhase2StageCount = 3
 
 type InitPhase2FilesOptions struct {
+	// FullReplay forces independent Phase 1 replay even in coordinator V4/V5 mode.
+	FullReplay                bool
 	Trust                     TrustPaths
 	Circuit                   *CompiledCircuit
 	TranscriptRoot            string
@@ -2459,18 +2629,22 @@ func InitializePhase2Files(options InitPhase2FilesOptions) (result InitPhase2Fil
 			options.Progress(name, index, initPhase2StageCount)
 		}
 	}
-	stage("verify sealed phase 1 commons", 1)
-	commons, phase1Seal, _, err := loadPhase1CommonsForPhase2(
+	privateKey, _, err := loadMatchingPrivateKey(options.CoordinatorPrivateKeyPath, trusted.Definition.Coordinator)
+	if err != nil {
+		return result, err
+	}
+	method := phase1IndependentReplay
+	if trusted.Definition.UsesCoordinatorReplay() && !options.FullReplay {
+		method = phase1CoordinatorAcceptance
+	}
+	stage("verify sealed phase 1 commons: "+string(method), 1)
+	commons, phase1Seal, _, err := loadPhase1CommonsWithMethod(
 		trusted,
 		options.Circuit,
 		options.TranscriptRoot,
 		options.Phase1SealPath,
-		options.Phase1SealSignaturePath,
+		options.Phase1SealSignaturePath, method,
 	)
-	if err != nil {
-		return result, err
-	}
-	privateKey, _, err := loadMatchingPrivateKey(options.CoordinatorPrivateKeyPath, trusted.Definition.Coordinator)
 	if err != nil {
 		return result, err
 	}
@@ -3536,6 +3710,26 @@ func loadPhase1CommonsForPhase2(
 	circuit *CompiledCircuit,
 	transcriptRoot, sealPath, sealSignaturePath string,
 ) (*gnarkmpc.SrsCommons, SealRecord, CloseRecord, error) {
+	return loadPhase1CommonsWithMethod(trusted, circuit, transcriptRoot, sealPath, sealSignaturePath, phase1IndependentReplay)
+}
+
+type phase1VerificationMethod string
+
+const (
+	phase1IndependentReplay     phase1VerificationMethod = "independent-full-replay-v1"
+	phase1CoordinatorAcceptance phase1VerificationMethod = "coordinator-acceptance-and-beacon-v1"
+)
+
+// Coordinator-only policy, never selected by participant or public verification.
+// This relies on honest prior coordinator mathematical acceptance checks.
+func loadPhase1CommonsWithMethod(trusted *TrustedCeremony, circuit *CompiledCircuit, transcriptRoot, sealPath, sealSignaturePath string, method phase1VerificationMethod) (*gnarkmpc.SrsCommons, SealRecord, CloseRecord, error) {
+	if method != phase1IndependentReplay && method != phase1CoordinatorAcceptance {
+		return nil, SealRecord{}, CloseRecord{}, errors.New("unknown Phase 1 verification method")
+	}
+	if method == phase1CoordinatorAcceptance && !trusted.Definition.UsesCoordinatorReplay() {
+		return nil, SealRecord{}, CloseRecord{}, errors.New("acceptance-based Phase 1 verification requires coordinator V4/V5 context")
+	}
+
 	if strings.TrimSpace(sealPath) == "" || strings.TrimSpace(sealSignaturePath) == "" {
 		return nil, SealRecord{}, CloseRecord{}, errors.New("signed Phase 1 seal paths are required")
 	}
@@ -3547,12 +3741,9 @@ func loadPhase1CommonsForPhase2(
 		return nil, SealRecord{}, CloseRecord{}, errors.New("Phase 1 seal ceremony or phase mismatch")
 	}
 
-	// A coordinator signature makes the seal attributable, but it does not
-	// make the sealed state valid. Every Phase 2 operation independently
-	// verifies the complete closed Phase 1 transcript before it accepts the
-	// derived commons. This prevents a malicious or mistaken coordinator from
-	// inducing Phase 2 participants to contribute against an invalid Phase 1
-	// state and deferring discovery until finalization.
+	// The independent method replays every transition. The coordinator method
+	// authenticates acceptance history, then independently verifies the beacon
+	// application and exact archived commons. These are distinct trust claims.
 	closePath := filepath.Join(
 		transcriptRoot,
 		string(Phase1),
@@ -3583,17 +3774,18 @@ func loadPhase1CommonsForPhase2(
 		string(Phase1),
 		fmt.Sprintf("chain-%04d.json", closeRecord.FinalIndex),
 	)
-	chain, replayedHead, err := loadReplayPhase1FilesState(
-		trusted,
-		circuit,
-		PhaseTranscriptPaths{
-			RootDir:            transcriptRoot,
-			ChainPath:          chainPath,
-			ChainSignaturePath: DefaultSignaturePath(chainPath),
-		},
-	)
+	paths := PhaseTranscriptPaths{RootDir: transcriptRoot, ChainPath: chainPath, ChainSignaturePath: DefaultSignaturePath(chainPath)}
+	var chain Chain
+	var replayedHead *gnarkmpc.Phase1
+	var err error
+	if method == phase1IndependentReplay {
+		chain, replayedHead, err = loadReplayPhase1FilesState(trusted, circuit, paths)
+	} else {
+		chain, replayedHead, err = loadCoordinatorPhase1SealHead(trusted, circuit, paths, false)
+	}
+
 	if err != nil {
-		return nil, SealRecord{}, CloseRecord{}, fmt.Errorf("replay closed Phase 1 for Phase 2: %w", err)
+		return nil, SealRecord{}, CloseRecord{}, fmt.Errorf("verify closed Phase 1 for Phase 2: %w", err)
 	}
 	if err := ValidateClose(trusted.Definition, chain, closeRecord); err != nil {
 		return nil, SealRecord{}, CloseRecord{}, fmt.Errorf("validate closed Phase 1 for Phase 2: %w", err)

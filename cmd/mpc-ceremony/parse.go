@@ -17,11 +17,10 @@ import (
 
 const supportedKeyVersion = "ownership-destination-v3"
 
-// rehearsalKeyVersion selects the tiny circuit used to exercise the ceremony at
-// a small domain. It is accepted here only alongside --mode rehearsal; the
-// signed definition enforces the same rule independently, so this check is
-// convenience rather than the control.
+// These test circuits exercise ceremony machinery at smaller domains. Their
+// exact R1CS identities are pinned for production-mode definitions.
 const rehearsalKeyVersion = "rehearsal-tiny-v1"
+const rehearsalK11KeyVersion = "rehearsal-k11-v1"
 
 type helpRequest struct {
 	topic []string
@@ -477,7 +476,7 @@ func parseDecisionPrepare(args []string) (DecisionPrepareOptions, error) {
 		&options.CoordinatorPublicKeyFile,
 	)
 	fs.StringVar(&options.DraftPath, "draft", "", "canonical production-decision draft JSON")
-	fs.StringVar(&options.EvidenceRoot, "evidence-root", "", "required local evidence root for definition v4")
+	fs.StringVar(&options.EvidenceRoot, "evidence-root", "", "required local evidence root for definition v4/v5")
 	fs.StringVar(&options.OutPath, "out", "", "fresh canonical content-addressed decision output")
 	if err := parseFlags(fs, args); err != nil {
 		return options, err
@@ -863,10 +862,10 @@ func parseInit(args []string) (InitOptions, error) {
 	var options InitOptions
 	var allowedBinaries stringList
 	fs := commandFlagSet("init")
-	fs.StringVar(&options.ReleaseVerification, "release-verification", "", "opt into definition v4 with coordinator-full-replay-v1; omitted preserves v3")
+	fs.StringVar(&options.ReleaseVerification, "release-verification", "", "opt into definition v5 with coordinator-full-replay-v1; omitted preserves v3")
 	fs.StringVar(&options.SessionNonceHex, "session-nonce-hex", "", "optional 32-byte session nonce as hex; generated securely when omitted")
 	fs.StringVar(&options.CreatedAt, "created-at", "", "ceremony creation timestamp in RFC3339")
-	fs.StringVar(&options.KeyVersion, "key-version", "", "repository key version (ownership-destination-v3, or rehearsal-tiny-v1 with --mode rehearsal)")
+	fs.StringVar(&options.KeyVersion, "key-version", "", "repository circuit: ownership-destination-v3, rehearsal-tiny-v1, or rehearsal-k11-v1")
 	fs.StringVar(&options.ParticipantsPath, "participants", "", "participant roster JSON path")
 	fs.StringVar(&options.PolicyPath, "policy", "", "ceremony policy JSON path")
 	fs.StringVar(&options.CoordinatorKeyID, "coordinator-key-id", "", "coordinator signing key identifier")
@@ -891,14 +890,10 @@ func parseInit(args []string) (InitOptions, error) {
 	}
 	switch options.KeyVersion {
 	case "", supportedKeyVersion:
-	case rehearsalKeyVersion:
-		if options.Mode != "rehearsal" {
-			return options, fmt.Errorf(
-				"--key-version %q requires --mode rehearsal", rehearsalKeyVersion)
-		}
+	case rehearsalKeyVersion, rehearsalK11KeyVersion:
 	default:
 		return options, fmt.Errorf(
-			"--key-version must be %q or %q", supportedKeyVersion, rehearsalKeyVersion)
+			"--key-version must be %q, %q or %q", supportedKeyVersion, rehearsalKeyVersion, rehearsalK11KeyVersion)
 	}
 	if options.SessionNonceHex != "" {
 		raw, err := hex.DecodeString(options.SessionNonceHex)
@@ -933,10 +928,10 @@ func parseContribute(name string, args []string, phase2 bool) (ContributeOptions
 	fs.StringVar(&options.EnvironmentPath, "environment", "", "canonical contribution environment attestation JSON path")
 	fs.StringVar(&options.ContributedAt, "contributed-at", "", "contribution timestamp in RFC3339")
 	fs.StringVar(&options.OutDir, "out-dir", "", "fresh candidate contribution directory")
-	fs.StringVar(&options.ArtifactRoot, "artifact-root", "", "definition v4 authenticated artifact root")
-	fs.StringVar(&options.CheckpointPath, "checkpoint", "", "definition v4 signed allocation checkpoint")
-	fs.StringVar(&options.CheckpointSignaturePath, "checkpoint-signature", "", "definition v4 detached allocation checkpoint signature")
-	fs.StringVar(&options.AttemptID, "attempt-id", "", "definition v4 preallocated candidate attempt")
+	fs.StringVar(&options.ArtifactRoot, "artifact-root", "", "definition v4/v5 authenticated artifact root")
+	fs.StringVar(&options.CheckpointPath, "checkpoint", "", "definition v4/v5 signed allocation checkpoint")
+	fs.StringVar(&options.CheckpointSignaturePath, "checkpoint-signature", "", "definition v4/v5 detached allocation checkpoint signature")
+	fs.StringVar(&options.AttemptID, "attempt-id", "", "definition v4/v5 preallocated candidate attempt")
 	if err := parseFlags(fs, args); err != nil {
 		return options, err
 	}
@@ -1026,9 +1021,7 @@ func parseErasure(name string, args []string) (ErasureOptions, error) {
 func parseClose(name string, args []string, phase2 bool) (CloseOptions, error) {
 	var options CloseOptions
 	fs := commandFlagSet(name)
-	if !phase2 {
-		fs.BoolVar(&options.FullReplay, "full-replay", false, "independently replay all Phase 1 transitions before closing")
-	}
+	fs.BoolVar(&options.FullReplay, "full-replay", false, "independently replay all prior transitions before closing")
 	addCeremonyTrustFlags(fs, &options.CeremonyPath, &options.CeremonySignaturePath, &options.CoordinatorPublicKeyFile)
 	if phase2 {
 		fs.StringVar(&options.Phase1SealPath, "phase1-seal", "", "verified phase 1 seal JSON path")
@@ -1127,6 +1120,7 @@ func parseBeacon(name string, args []string) (BeaconOptions, error) {
 func parsePhase2Init(args []string) (Phase2InitOptions, error) {
 	var options Phase2InitOptions
 	fs := commandFlagSet("phase2 init")
+	fs.BoolVar(&options.FullReplay, "full-replay", false, "independently replay Phase 1 instead of relying on prior coordinator acceptance checks")
 	addCeremonyTrustFlags(fs, &options.CeremonyPath, &options.CeremonySignaturePath, &options.CoordinatorPublicKeyFile)
 	fs.StringVar(&options.Phase1TranscriptDir, "phase1-transcript-dir", "", "complete ceremony transcript root containing sealed phase 1")
 	fs.StringVar(&options.Phase1SealPath, "phase1-seal", "", "verified phase 1 seal JSON path")

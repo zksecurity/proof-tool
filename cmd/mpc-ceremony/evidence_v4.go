@@ -139,7 +139,7 @@ func executeEvidenceV4(command Command, o EvidenceOptionsV4) (CommandResult, err
 	}
 	d := trusted.Definition
 	if !d.UsesCoordinatorReplay() {
-		return CommandResult{}, errors.New("V4 evidence commands require definition v4")
+		return CommandResult{}, errors.New("V4 evidence commands require definition v4/v5")
 	}
 	if err := m.VerifyRunningSoftwareForMode(d.Software, d.Mode); err != nil {
 		return CommandResult{}, err

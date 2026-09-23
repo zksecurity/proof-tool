@@ -704,8 +704,8 @@ func VerifyRelease(options VerifyReleaseOptions) (*VerifyReleaseResult, error) {
 	verifyBundle := keybundle.Verify
 	// This choice comes only from the already authenticated, validated ceremony,
 	// never from the release manifest or a caller-controlled verification flag.
-	if definition.Mode == ModeRehearsal && definition.Circuit.KeyVersion == KeyVersionRehearsal {
-		verifyBundle = keybundle.VerifyRehearsal
+	if IsCeremonyTestCircuit(definition.Circuit.KeyVersion) {
+		verifyBundle = keybundle.VerifyCeremonyTest
 	}
 	manifest, err := verifyBundle(keybundle.VerifyOptions{
 		KeysDir:                options.KeysDir,

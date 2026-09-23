@@ -22,7 +22,7 @@ func TestReleasedSignerReplayRequirementsRemainExplicit(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "release-signer independent replay") {
 		t.Fatalf("released v3 skipped actual replay: %v", err)
 	}
-	for _, schema := range []string{"", "proof-tool-mpc-ceremony-definition-v4", "unknown"} {
+	for _, schema := range []string{"", "unknown"} {
 		if err := verifyRequiredReleaseSignerReplay(schema, SignReleaseOptions{}); err == nil {
 			t.Fatalf("unimplemented schema %q selected legacy behavior", schema)
 		}

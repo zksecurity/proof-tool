@@ -207,6 +207,7 @@ type BeaconOptions struct {
 }
 
 type Phase2InitOptions struct {
+	FullReplay               bool
 	CeremonyPath             string
 	CeremonySignaturePath    string
 	CoordinatorPublicKeyFile string
@@ -452,6 +453,7 @@ type DefinitionInspection struct {
 	Schema             string                       `json:"schema"`
 	CeremonyID         string                       `json:"ceremony_id"`
 	Mode               string                       `json:"mode"`
+	KeyVersion         string                       `json:"key_version"`
 	Phase1Participants []string                     `json:"phase1_participants"`
 	Phase2Participants []string                     `json:"phase2_participants"`
 	R1CS               mpcceremony.ArtifactRef      `json:"r1cs"`

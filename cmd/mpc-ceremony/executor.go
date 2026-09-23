@@ -186,7 +186,7 @@ func executeInit(options InitOptions) (CommandResult, error) {
 		// Fail before allocating and writing the large Phase 1 genesis. The same
 		// invariant is also enforced by CeremonyDefinition validation so no
 		// consumer can bypass it by creating or loading a definition elsewhere.
-		if err := mpcceremony.ValidateCanonicalDestinationV3(circuit.Binding); err != nil {
+		if err := mpcceremony.ValidateCanonicalCeremonyCircuit(circuit.Binding); err != nil {
 			return CommandResult{}, err
 		}
 	}
@@ -270,8 +270,10 @@ func executeContribution(phase mpcceremony.Phase, options ContributeOptions) (Co
 		result, err = mpcceremony.CreateAllocatedContributionCandidateV4(mpcceremony.AllocatedContributionFilesV4Options{
 			Trust: trust, Circuit: circuit, ArtifactRoot: options.ArtifactRoot,
 			Checkpoint: checkpoint, AttemptID: options.AttemptID,
+			ExpectedPhase: phase, ExpectedParticipantID: options.ParticipantID,
 			ParticipantPrivateKeyPath: options.ParticipantSigningKey,
 			Environment:               environment, ContributedAt: options.ContributedAt, CandidateDir: options.OutDir,
+			Progress: stageProgressReporter(),
 		})
 	} else {
 		result, err = mpcceremony.CreateContributionCandidate(mpcceremony.ContributionFilesOptions{
@@ -291,11 +293,15 @@ func executeContribution(phase mpcceremony.Phase, options ContributeOptions) (Co
 	if err != nil {
 		return CommandResult{}, err
 	}
+	summary := fmt.Sprintf("created %s contribution candidate", result.Attestation.Phase)
+	if trusted.Definition.UsesCoordinatorReplay() {
+		summary = "Contribution saved. Assigned input authenticated and your contribution checked."
+	}
 	return CommandResult{
 		CeremonyID: result.Attestation.CeremonyID,
-		Phase:      string(phase),
+		Phase:      string(result.Attestation.Phase),
 		Sequence:   int(result.Attestation.Index),
-		Summary:    fmt.Sprintf("created %s contribution candidate", phase),
+		Summary:    summary,
 		Outputs: map[string]string{
 			"contribution":          result.OutputPayloadPath,
 			"attestation":           result.AttestationPath,
@@ -400,6 +406,9 @@ func executeClose(phase mpcceremony.Phase, options CloseOptions) (CommandResult,
 	if err != nil {
 		return CommandResult{}, err
 	}
+	if options.FullReplay {
+		announceFullReplay()
+	}
 	result, err := mpcceremony.ClosePhaseFiles(mpcceremony.ClosePhaseFilesOptions{
 		FullReplay:                options.FullReplay,
 		Trust:                     trust,
@@ -415,12 +424,16 @@ func executeClose(phase mpcceremony.Phase, options CloseOptions) (CommandResult,
 	if err != nil {
 		return CommandResult{}, err
 	}
+	summary := fmt.Sprintf("closed %s transcript", phase)
+	if options.FullReplay {
+		summary += " after independent full replay"
+	}
 	return CommandResult{
 		CeremonyID: result.Close.CeremonyID,
 		Phase:      string(phase),
 		Sequence:   int(result.Close.FinalIndex),
 		ClosedAt:   result.Close.ClosedAt,
-		Summary:    fmt.Sprintf("closed %s transcript", phase),
+		Summary:    summary,
 		Outputs: map[string]string{
 			"closure":           result.ClosePath,
 			"closure_signature": result.SignaturePath,
@@ -477,6 +490,7 @@ func executePhase1Seal(options Phase1SealOptions) (CommandResult, error) {
 	}
 	progress := contributionProgressReporter("loading accepted")
 	if options.FullReplay {
+		announceFullReplay()
 		progress = replayProgressReporter()
 	}
 	result, err := mpcceremony.SealPhase1Files(mpcceremony.SealPhase1FilesOptions{
@@ -520,7 +534,11 @@ func executePhase2Init(options Phase2InitOptions) (CommandResult, error) {
 	if err != nil {
 		return CommandResult{}, err
 	}
+	if options.FullReplay {
+		announceFullReplay()
+	}
 	result, err := mpcceremony.InitializePhase2Files(mpcceremony.InitPhase2FilesOptions{
+		FullReplay:                options.FullReplay,
 		Trust:                     trust,
 		Circuit:                   circuit,
 		TranscriptRoot:            options.Phase1TranscriptDir,
@@ -720,7 +738,7 @@ func executeReleaseSign(options ReleaseSignOptions) (CommandResult, error) {
 		return executeReleaseSignV4(options, trust, trusted.Definition.CeremonyID)
 	}
 	if options.ReviewCheckpointPath != "" || options.ReviewSignaturePath != "" {
-		return CommandResult{}, fmt.Errorf("review checkpoint signing requires definition v4")
+		return CommandResult{}, fmt.Errorf("review checkpoint signing requires definition v4/v5")
 	}
 	coordinatorPublicKey, err := readPublicKeyHex(options.CoordinatorPublicKeyFile)
 	if err != nil {
@@ -886,6 +904,10 @@ func stageProgressReporter() mpcceremony.StageProgress {
 			index, total, stage, time.Since(start).Round(time.Second),
 		)
 	}
+}
+
+func announceFullReplay() {
+	fmt.Fprintln(os.Stderr, "Full replay requested. Checking the complete required contribution history.")
 }
 
 func replayPaths(trust mpcceremony.TrustPaths, replay ReplayOptions) (mpcceremony.ReplayPaths, error) {

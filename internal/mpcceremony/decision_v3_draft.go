@@ -22,7 +22,8 @@ type ProductionDecisionDraftV3 struct {
 	SourceRelease         SourceReleaseEvidenceV4     `json:"source_release"`
 	Auditors              []DecisionAuditorV3         `json:"auditors"`
 	ExternalAudits        []ExternalAuditEvidenceV3   `json:"external_audits"`
-	K21Rehearsal          K21RehearsalEvidenceV3      `json:"k21_rehearsal"`
+	K21Rehearsal          *K21RehearsalEvidenceV3     `json:"k21_rehearsal,omitempty"`
+	CircuitRehearsal      *CircuitRehearsalEvidenceV5 `json:"circuit_rehearsal,omitempty"`
 	MainnetDeploymentPlan ArtifactRef                 `json:"mainnet_deployment_plan"`
 	FormalChecklist       ArtifactRef                 `json:"formal_checklist"`
 	Gates                 []ProductionGateResultV3    `json:"gates"`
@@ -36,7 +37,7 @@ func (d ProductionDecisionDraftV3) Validate() error {
 }
 
 func (d ProductionDecisionDraftV3) decision() (ProductionDecisionV3, error) {
-	if d.Schema != ProductionDecisionDraftSchemaV3 && d.Schema != ProductionDecisionDraftSchemaV4 {
+	if d.Schema != ProductionDecisionDraftSchemaV3 && d.Schema != ProductionDecisionDraftSchemaV4 && d.Schema != ProductionDecisionDraftSchemaV5 {
 		return ProductionDecisionV3{}, errDecisionDraftSchemaV3
 	}
 	release, err := NewFinalReleaseEvidenceV4(d.CeremonyID, d.Release.FinalReleaseCheckpoint, d.Release.CandidateID)
@@ -46,8 +47,10 @@ func (d ProductionDecisionDraftV3) decision() (ProductionDecisionV3, error) {
 	schema := ProductionDecisionSchemaV3
 	if d.Schema == ProductionDecisionDraftSchemaV4 {
 		schema = ProductionDecisionSchemaV4
+	} else if d.Schema == ProductionDecisionDraftSchemaV5 {
+		schema = ProductionDecisionSchemaV5
 	}
-	return NewProductionDecisionV3(ProductionDecisionV3{Schema: schema, CeremonyID: d.CeremonyID, AssurancePolicy: cloneAssurancePolicy(d.AssurancePolicy), Release: release, SourceRelease: d.SourceRelease, Auditors: d.Auditors, ExternalAudits: d.ExternalAudits, K21Rehearsal: d.K21Rehearsal, MainnetDeploymentPlan: d.MainnetDeploymentPlan, FormalChecklist: d.FormalChecklist, Gates: d.Gates, Decision: d.Decision, DecidedAt: d.DecidedAt})
+	return NewProductionDecisionV3(ProductionDecisionV3{Schema: schema, CeremonyID: d.CeremonyID, AssurancePolicy: cloneAssurancePolicy(d.AssurancePolicy), Release: release, SourceRelease: d.SourceRelease, Auditors: d.Auditors, ExternalAudits: d.ExternalAudits, K21Rehearsal: d.K21Rehearsal, CircuitRehearsal: d.CircuitRehearsal, MainnetDeploymentPlan: d.MainnetDeploymentPlan, FormalChecklist: d.FormalChecklist, Gates: d.Gates, Decision: d.Decision, DecidedAt: d.DecidedAt})
 }
 
 func PrepareProductionDecisionV4(trust TrustPaths, root string, draftBytes []byte) (ProductionDecisionV3, []byte, error) {

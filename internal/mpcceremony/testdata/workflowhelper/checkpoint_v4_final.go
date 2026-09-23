@@ -45,7 +45,13 @@ func runCheckpointV4Final(output, root string, trust m.TrustPaths, circuit *m.Co
 	checkpoint := m.SignedArtifactRefs{Record: checkpointRecord, Signature: checkpointSignature}
 	candidateDir := filepath.Join(output, "candidates/v4-phase2")
 	environment := m.ContributionEnvironment{OS: runtime.GOOS, Architecture: runtime.GOARCH, EntropySource: "operating-system-csprng", ContributorSwapDisabled: true, ContributorCrashDumpsDisabled: true, ContributorTelemetryDisabled: true, EphemeralEnvironment: true, EphemeralCleanupRequired: true, HostRemnantsNotExcluded: true}
-	if _, err = m.CreateAllocatedContributionCandidateV4(m.AllocatedContributionFilesV4Options{Trust: trust, Circuit: circuit, ArtifactRoot: root, Checkpoint: checkpoint, AttemptID: candidateAttempt, ParticipantPrivateKeyPath: participantPath, Environment: environment, ContributedAt: "2023-08-23T15:11:30.3Z", CandidateDir: candidateDir}); err != nil {
+	var contributionStages []string
+	if _, err = m.CreateAllocatedContributionCandidateV4(m.AllocatedContributionFilesV4Options{Trust: trust, Circuit: circuit, ArtifactRoot: root, Checkpoint: checkpoint, AttemptID: candidateAttempt, ExpectedPhase: scope.Phase, ExpectedParticipantID: scope.ParticipantID, ParticipantPrivateKeyPath: participantPath, Environment: environment, ContributedAt: "2023-08-23T15:11:30.3Z", CandidateDir: candidateDir, Progress: func(stage string, index, total int) {
+		contributionStages = append(contributionStages, fmt.Sprintf("%d/%d %s", index, total, stage))
+	}}); err != nil {
+		return err
+	}
+	if err := checkAllocatedContributionStages(contributionStages); err != nil {
 		return err
 	}
 	if _, err = m.CreateErasureAttestationFiles(m.CreateErasureAttestationFilesOptions{Trust: trust, ParticipantID: p.ID, ParticipantPrivateKeyPath: participantPath, CandidateDir: candidateDir, DestroyedAt: "2023-08-23T15:11:30.4Z"}); err != nil {
@@ -306,6 +312,7 @@ func runCheckpointV4Final(output, root string, trust m.TrustPaths, circuit *m.Co
 		return fmt.Errorf("final candidate accepted an extra file")
 	}
 	fmt.Println("V4 phase2 and final candidate passed: real contribution, cleanup, optional observers, second drand round, coordinator full replay, exact final inventory")
+	var committedAudits []m.SignedArtifactRefs
 	if d.AssurancePolicy.PassingCeremonyAudits > 0 {
 		db, err := os.ReadFile(trust.DefinitionPath)
 		if err != nil {
@@ -355,6 +362,7 @@ func runCheckpointV4Final(output, root string, trust m.TrustPaths, circuit *m.Co
 				return err
 			}
 			ar := m.SignedArtifactRefs{Record: r, Signature: s}
+			committedAudits = append(committedAudits, ar)
 			next(m.CheckpointTransitionV4{Kind: m.CheckpointAuditRecorded, Record: &ar, Evidence: []m.ArtifactRef{}})
 			missing := *c
 			missing.Sequence = beforeEnrollment.Sequence + 1
@@ -547,7 +555,7 @@ func runCheckpointV4Final(output, root string, trust m.TrustPaths, circuit *m.Co
 		return err
 	}
 	fmt.Println("V4 operational bundle passed: deterministic checkpoint-only assembly, all roster enrollments, original bundle verifier, corruption rejected")
-	if err := runCheckpointV4Review(root, trust, d, *c, checkpoint, brs, coordinator); err != nil {
+	if err := runCheckpointV4Review(root, trust, d, *c, checkpoint, brs, committedAudits, coordinator); err != nil {
 		return err
 	}
 	beforeStop := *c

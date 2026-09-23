@@ -32,7 +32,7 @@ func TestReleaseV4ExecutableAuthenticatesBeforeDispatch(t *testing.T) {
 		t.Helper()
 		d.Schema, d.ReleaseVerification = mpcceremony.DefinitionSchemaV3, ""
 		if v4 {
-			d.Schema, d.ReleaseVerification = mpcceremony.DefinitionSchemaV4, "coordinator-full-replay-v1"
+			d.Schema, d.ReleaseVerification = mpcceremony.DefinitionSchemaV5, "coordinator-full-replay-v1"
 		}
 		d, err = mpcceremony.FinalizeCeremonyDefinition(d)
 		if err != nil {

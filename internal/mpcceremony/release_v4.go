@@ -239,8 +239,8 @@ func VerifyReleaseV4(o VerifyReleaseV4Options) (*VerifyReleaseResult, error) {
 		return nil, errors.New("release signer id differs from signed definition")
 	}
 	verifyBundle := keybundle.Verify
-	if d.Mode == ModeRehearsal && d.Circuit.KeyVersion == KeyVersionRehearsal {
-		verifyBundle = keybundle.VerifyRehearsal
+	if IsCeremonyTestCircuit(d.Circuit.KeyVersion) {
+		verifyBundle = keybundle.VerifyCeremonyTest
 	}
 	manifest, err := verifyBundle(keybundle.VerifyOptions{KeysDir: o.KeysDir, KeyVersion: d.Circuit.KeyVersion, PublicKeyHex: o.TrustedPublicKeyHex, ExpectedSignatureKeyID: o.ExpectedSignatureKeyID, RequireProvingKey: true})
 	if err != nil {

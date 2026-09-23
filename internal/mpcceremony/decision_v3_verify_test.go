@@ -83,7 +83,7 @@ func TestDecisionV3PackageGatesAndExternalBindings(t *testing.T) {
 			}
 		}
 	}
-	for _, gate := range []ProductionGate{GateSourceRelease, GateK21Rehearsal, GateMainnetDeploymentPlan, GateFormalChecklist} {
+	for _, gate := range []ProductionGate{GateSourceRelease, GateExactCircuitRehearsal, GateMainnetDeploymentPlan, GateFormalChecklist} {
 		x := clone()
 		for i := range x.Gates {
 			if x.Gates[i].Gate == gate {

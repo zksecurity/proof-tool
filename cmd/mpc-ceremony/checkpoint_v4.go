@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"proof-tool/internal/keybundle"
@@ -11,6 +12,7 @@ import (
 )
 
 type CheckpointOptionsV4 struct {
+	FullReplay bool
 	InspectDefinitionOptions
 	ArtifactRoot, ProposalPath, RejectedCandidateDir string
 	CheckpointPath, CheckpointSignaturePath          string
@@ -69,6 +71,7 @@ func parseCheckpointV4(action string, args []string) (CheckpointOptionsV4, error
 			fs.StringVar(&o.CheckpointPath, "checkpoint", "", "exact checkpoint under artifact-root")
 			fs.StringVar(&o.CheckpointSignaturePath, "checkpoint-signature", "", "exact detached checkpoint signature under artifact-root")
 			if action == "record-v4" {
+				fs.BoolVar(&o.FullReplay, "full-replay", false, "independently replay the required history for supported closure, seal, and genesis transitions")
 				fs.StringVar(&o.TransitionKind, "transition", "", "record-backed V4 transition kind")
 				fs.StringVar(&o.RecordPath, "record", "", "exact signed protocol record under artifact-root")
 				fs.StringVar(&o.RecordSignaturePath, "record-signature", "", "detached protocol record signature under artifact-root")
@@ -147,11 +150,12 @@ func parseCheckpointV4(action string, args []string) (CheckpointOptionsV4, error
 func checkpointNeedsCircuitV4(kind m.CheckpointTransitionKind) (bool, error) {
 	switch kind {
 	case m.CheckpointInitial, m.CheckpointPhase1CandidateAccepted, m.CheckpointPhase2CandidateAccepted,
-		m.CheckpointPhase1Sealed, m.CheckpointPhase2Initialized, m.CheckpointFinalCandidateRecorded:
+		m.CheckpointPhase1Sealed, m.CheckpointPhase2Initialized, m.CheckpointFinalCandidateRecorded,
+		m.CheckpointPhase1Closed, m.CheckpointPhase2Closed:
 		return true, nil
 	case m.CheckpointPhase1CandidateAllocated, m.CheckpointPhase2CandidateAllocated,
 		m.CheckpointDeliveryRetired, m.CheckpointDeliveryReallocated, m.CheckpointContributionRejected,
-		m.CheckpointPhase1Closed, m.CheckpointPhase2Closed, m.CheckpointPhase1BeaconRecorded, m.CheckpointPhase2BeaconRecorded,
+		m.CheckpointPhase1BeaconRecorded, m.CheckpointPhase2BeaconRecorded,
 		m.CheckpointReleaseReviewRecorded, m.CheckpointFinalReleaseRecorded, m.CheckpointEnrollmentRecorded, m.CheckpointMirrorRecorded,
 		m.CheckpointWitnessRecorded, m.CheckpointAuditRecorded,
 		m.CheckpointIncidentRecorded, m.CheckpointAborted, m.CheckpointRestarted:
@@ -169,7 +173,7 @@ func executeCheckpointV4(command Command, o CheckpointOptionsV4) (CommandResult,
 	}
 	d := trusted.Definition
 	if !d.UsesCoordinatorReplay() {
-		return CommandResult{}, errors.New("V4 checkpoint commands require definition v4")
+		return CommandResult{}, errors.New("V4 checkpoint commands require definition v4/v5")
 	}
 	if err := m.VerifyRunningSoftwareForMode(d.Software, d.Mode); err != nil {
 		return CommandResult{}, err
@@ -209,6 +213,9 @@ func executeCheckpointV4(command Command, o CheckpointOptionsV4) (CommandResult,
 		return CommandResult{CeremonyID: d.CeremonyID, Phase: string(m.Phase1), Sequence: 0, Summary: "derived and signed the initial checkpoint from the authenticated definition and replayed genesis chain; it is not current until the delivery service publishes it", Outputs: map[string]string{"checkpoint": filepath.Join(o.OutDir, "checkpoint.json"), "checkpoint_signature": filepath.Join(o.OutDir, "checkpoint.sig")}}, nil
 	}
 	if command == CommandCheckpointRecordV4 {
+		if o.FullReplay {
+			fmt.Fprintln(os.Stderr, "Full replay requested. Checking the complete required contribution history.")
+		}
 		_, _, refs, err := checkpointSignedBytes(o.ArtifactRoot, o.CheckpointPath, o.CheckpointSignaturePath)
 		if err != nil {
 			return CommandResult{}, err
@@ -235,7 +242,7 @@ func executeCheckpointV4(command Command, o CheckpointOptionsV4) (CommandResult,
 				return CommandResult{}, err
 			}
 		}
-		prepared, err := m.PrepareRecordedCheckpointV4(m.RecordedCheckpointV4Options{Trust: trust, Circuit: circuit, ArtifactRoot: o.ArtifactRoot, Checkpoint: refs, Kind: kind, Record: record, Evidence: evidence})
+		prepared, err := m.PrepareCoordinatorRecordedCheckpointV4(m.RecordedCheckpointV4Options{Trust: trust, Circuit: circuit, ArtifactRoot: o.ArtifactRoot, Checkpoint: refs, Kind: kind, Record: record, Evidence: evidence}, o.CoordinatorSigningKey, o.FullReplay)
 		if err != nil {
 			return CommandResult{}, err
 		}
@@ -257,7 +264,11 @@ func executeCheckpointV4(command Command, o CheckpointOptionsV4) (CommandResult,
 		if err := writeAtomicOutputDir(o.OutDir, map[string][]byte{"checkpoint.json": prepared.Canonical, "checkpoint.sig": signatureBytes}); err != nil {
 			return CommandResult{}, err
 		}
-		return CommandResult{CeremonyID: d.CeremonyID, Sequence: int(prepared.Checkpoint.Sequence), Summary: "verified the exact signed protocol record and derived its signed descendant checkpoint; it is not current until the delivery service publishes it", Outputs: map[string]string{"checkpoint": filepath.Join(o.OutDir, "checkpoint.json"), "checkpoint_signature": filepath.Join(o.OutDir, "checkpoint.sig")}}, nil
+		summary := "verified the exact signed protocol record and derived its signed descendant checkpoint; it is not current until the delivery service publishes it"
+		if prepared.Phase1VerificationMethod != "" {
+			summary += "; Phase 1 verification: " + prepared.Phase1VerificationMethod
+		}
+		return CommandResult{CeremonyID: d.CeremonyID, Sequence: int(prepared.Checkpoint.Sequence), Summary: summary, Outputs: map[string]string{"checkpoint": filepath.Join(o.OutDir, "checkpoint.json"), "checkpoint_signature": filepath.Join(o.OutDir, "checkpoint.sig")}}, nil
 	}
 	if command == CommandCheckpointAllocateV4 || command == CommandCheckpointAcceptCandidateV4 || command == CommandCheckpointRejectCandidateV4 {
 		_, _, refs, err := checkpointSignedBytes(o.ArtifactRoot, o.CheckpointPath, o.CheckpointSignaturePath)

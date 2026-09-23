@@ -165,13 +165,36 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 	candidateDir := filepath.Join(output, "candidates/v4-turn")
 	environment := m.ContributionEnvironment{OS: runtime.GOOS, Architecture: runtime.GOARCH, EntropySource: "operating-system-csprng", ContributorSwapDisabled: true, ContributorCrashDumpsDisabled: true, ContributorTelemetryDisabled: true, EphemeralEnvironment: true, EphemeralCleanupRequired: true, HostRemnantsNotExcluded: true}
 	wrongCandidateDir := candidateDir + "-wrong-attempt"
-	if _, wrongErr := m.CreateAllocatedContributionCandidateV4(m.AllocatedContributionFilesV4Options{Trust: trust, Circuit: circuit, ArtifactRoot: root, Checkpoint: committed, AttemptID: "dddddddddddddddddddddddddddddddd", ParticipantPrivateKeyPath: participantPath, Environment: environment, ContributedAt: "2023-08-23T15:03:00Z", CandidateDir: wrongCandidateDir}); wrongErr == nil {
+	if _, wrongErr := m.CreateAllocatedContributionCandidateV4(m.AllocatedContributionFilesV4Options{Trust: trust, Circuit: circuit, ArtifactRoot: root, Checkpoint: committed, AttemptID: "dddddddddddddddddddddddddddddddd", ExpectedPhase: scope.Phase, ExpectedParticipantID: scope.ParticipantID, ParticipantPrivateKeyPath: participantPath, Environment: environment, ContributedAt: "2023-08-23T15:03:00Z", CandidateDir: wrongCandidateDir}); wrongErr == nil {
 		return errors.New("unallocated candidate attempt was accepted")
 	}
 	if _, statErr := os.Lstat(wrongCandidateDir); !errors.Is(statErr, os.ErrNotExist) {
 		return fmt.Errorf("rejected allocation wrote candidate output: %v", statErr)
 	}
-	if _, err = m.CreateAllocatedContributionCandidateV4(m.AllocatedContributionFilesV4Options{Trust: trust, Circuit: circuit, ArtifactRoot: root, Checkpoint: committed, AttemptID: candidateAttempt, ParticipantPrivateKeyPath: participantPath, Environment: environment, ContributedAt: "2023-08-23T15:03:00Z", CandidateDir: candidateDir}); err != nil {
+	wrongPhase := m.Phase2
+	if scope.Phase == m.Phase2 {
+		wrongPhase = m.Phase1
+	}
+	for _, mismatch := range []struct {
+		phase       m.Phase
+		participant string
+		name        string
+	}{{wrongPhase, scope.ParticipantID, "phase"}, {scope.Phase, "wrong-participant", "participant"}} {
+		out := candidateDir + "-wrong-" + mismatch.name
+		if _, mismatchErr := m.CreateAllocatedContributionCandidateV4(m.AllocatedContributionFilesV4Options{Trust: trust, Circuit: circuit, ArtifactRoot: root, Checkpoint: committed, AttemptID: candidateAttempt, ExpectedPhase: mismatch.phase, ExpectedParticipantID: mismatch.participant, ParticipantPrivateKeyPath: participantPath, Environment: environment, ContributedAt: "2023-08-23T15:03:00Z", CandidateDir: out}); mismatchErr == nil {
+			return fmt.Errorf("mismatched %s accepted", mismatch.name)
+		}
+		if _, statErr := os.Lstat(out); !errors.Is(statErr, os.ErrNotExist) {
+			return fmt.Errorf("mismatched %s wrote candidate output: %v", mismatch.name, statErr)
+		}
+	}
+	var contributionStages []string
+	if _, err = m.CreateAllocatedContributionCandidateV4(m.AllocatedContributionFilesV4Options{Trust: trust, Circuit: circuit, ArtifactRoot: root, Checkpoint: committed, AttemptID: candidateAttempt, ExpectedPhase: scope.Phase, ExpectedParticipantID: scope.ParticipantID, ParticipantPrivateKeyPath: participantPath, Environment: environment, ContributedAt: "2023-08-23T15:03:00Z", CandidateDir: candidateDir, Progress: func(stage string, index, total int) {
+		contributionStages = append(contributionStages, fmt.Sprintf("%d/%d %s", index, total, stage))
+	}}); err != nil {
+		return err
+	}
+	if err := checkAllocatedContributionStages(contributionStages); err != nil {
 		return err
 	}
 	generated, err := m.InspectComputationOutputV4(trust, paths, scope, candidateDir)
@@ -428,6 +451,12 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 		return err
 	}
 	sealRefs := m.SignedArtifactRefs{Record: sr, Signature: ss}
+	if os.Getenv("MPC_WORKFLOW_CHECK_P1_REUSE") == "1" {
+		opts := m.RecordedCheckpointV4Options{Trust: trust, Circuit: circuit, ArtifactRoot: root, Checkpoint: committed, Kind: m.CheckpointPhase1Sealed, Record: sealRefs, Evidence: seal.Seal.Outputs}
+		if err := checkCoordinatorPhase1RecordMethods(opts, coordinatorPath, participantPath); err != nil {
+			return err
+		}
+	}
 	next(m.CheckpointTransitionV4{Kind: m.CheckpointPhase1Sealed, Record: &sealRefs, Evidence: seal.Seal.Outputs})
 	c.Progress.Phase1Seal = &sealRefs
 	if err = commit(); err != nil {
@@ -462,6 +491,11 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 			return fmt.Errorf("record phase2 genesis accepted changed %s", corrupt)
 		}
 	}
+	if os.Getenv("MPC_WORKFLOW_CHECK_P1_REUSE") == "1" {
+		if err := checkCoordinatorPhase1RecordMethods(recordOptions, coordinatorPath, participantPath); err != nil {
+			return err
+		}
+	}
 	recordedGenesis, err := m.PrepareRecordedCheckpointV4(recordOptions)
 	if err != nil {
 		return fmt.Errorf("record phase2 genesis: %w", err)
@@ -476,7 +510,24 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 		return err
 	}
 	fmt.Println("V4 real phase1 turn passed: initial, allocation, contribution, cleanup, full replay, exact acceptance, corruption rejected, closure, drand, seal, phase2 genesis")
+	if os.Getenv("MPC_WORKFLOW_STOP_AFTER_P1_REUSE") == "1" {
+		return nil
+	}
 	return runCheckpointV4Final(output, root, trust, circuit, d, coordinator, coordinatorPath, participant, participantPath, &c, next, commit, writePair, ref, sorted)
+}
+
+func checkAllocatedContributionStages(got []string) error {
+	want := []string{
+		"1/5 Checking assignment and signed records",
+		"2/5 Checking input files",
+		"3/5 Creating your contribution",
+		"4/5 Checking your contribution",
+		"5/5 Saving contribution and attestation",
+	}
+	if !slices.Equal(got, want) {
+		return fmt.Errorf("allocated contribution stages = %v, want %v", got, want)
+	}
+	return nil
 }
 
 // Exercise a stopped coordinator retry using the same predecessor and immutable
@@ -517,6 +568,31 @@ func checkAcceptedCheckpointRetryV4(options m.AcceptAllocatedCandidateV4Options,
 	recovered, err := m.VerifyAndAcceptAllocatedCandidateV4(options)
 	if err != nil || !bytes.Equal(recovered.Canonical, expected.Canonical) {
 		return fmt.Errorf("restored acceptance retry did not recover exact checkpoint: %v", err)
+	}
+	return nil
+}
+
+func checkCoordinatorPhase1RecordMethods(options m.RecordedCheckpointV4Options, coordinator, wrongKey string) error {
+	independent, err := m.PrepareRecordedCheckpointV4(options)
+	if err != nil {
+		return err
+	}
+	accepted, err := m.PrepareCoordinatorRecordedCheckpointV4(options, coordinator, false)
+	if err != nil {
+		return err
+	}
+	forced, err := m.PrepareCoordinatorRecordedCheckpointV4(options, coordinator, true)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(independent.Canonical, accepted.Canonical) || !bytes.Equal(independent.Canonical, forced.Canonical) {
+		return errors.New("verification methods changed checkpoint bytes")
+	}
+	if accepted.Phase1VerificationMethod != "coordinator-acceptance-and-beacon-v1" || independent.Phase1VerificationMethod != "independent-full-replay-v1" || forced.Phase1VerificationMethod != "independent-full-replay-v1" {
+		return errors.New("wrong Phase 1 verification method label")
+	}
+	if _, err := m.PrepareCoordinatorRecordedCheckpointV4(options, wrongKey, false); err == nil {
+		return errors.New("participant signing key authorized coordinator reuse")
 	}
 	return nil
 }

@@ -32,10 +32,11 @@ func TestCheckpointV4RealContributionTurn(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, output)
 	}
-	for _, scenario := range []struct{ name, mirrorMode, extra, rejection string }{
+	for _, scenario := range []struct{ name, mirrorMode, extra, rejection, zeroAssurance string }{
 		{name: "observers-disabled", mirrorMode: "0"},
 		{name: "observers-enabled", mirrorMode: "1"},
 		{name: "audits-enabled", mirrorMode: "1", extra: "MPC_WORKFLOW_V4_AUDITS=1"},
+		{name: "audits-over-minimum", mirrorMode: "1", zeroAssurance: "0"},
 		{name: "missing-witness", mirrorMode: "1", extra: "MPC_WORKFLOW_SKIP_WITNESS=1", rejection: "signed witness minimum"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
@@ -48,7 +49,11 @@ func TestCheckpointV4RealContributionTurn(t *testing.T) {
 				}
 				run.Env = append(run.Env, entry)
 			}
-			run.Env = append(run.Env, "MPC_WORKFLOW_CHECKPOINT_V4=1", "PROOF_TOOL_TEST_ZERO_ASSURANCE=1", "MPC_WORKFLOW_V4_MIRROR="+scenario.mirrorMode)
+			zeroAssurance := scenario.zeroAssurance
+			if zeroAssurance == "" {
+				zeroAssurance = "1"
+			}
+			run.Env = append(run.Env, "MPC_WORKFLOW_CHECKPOINT_V4=1", "PROOF_TOOL_TEST_ZERO_ASSURANCE="+zeroAssurance, "MPC_WORKFLOW_V4_MIRROR="+scenario.mirrorMode)
 			if scenario.extra != "" {
 				run.Env = append(run.Env, scenario.extra)
 			}
@@ -61,6 +66,17 @@ func TestCheckpointV4RealContributionTurn(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("real checkpoint turn: %v\n%s", err, output)
+			}
+			definitionBytes, err := os.ReadFile(filepath.Join(outputRoot, "ceremony", "ceremony.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var definition CeremonyDefinition
+			if err := UnmarshalCanonical(definitionBytes, &definition); err != nil {
+				t.Fatal(err)
+			}
+			if definition.Schema != DefinitionSchemaV5 {
+				t.Fatalf("signed fixture uses %s, want %s", definition.Schema, DefinitionSchemaV5)
 			}
 			if !strings.Contains(string(output), "V4 real phase1 turn passed") || !strings.Contains(string(output), "V4 phase2 and final candidate passed") {
 				t.Fatalf("missing completion: %s", output)

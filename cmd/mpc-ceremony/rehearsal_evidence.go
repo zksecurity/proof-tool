@@ -1,5 +1,5 @@
-// Generate a real proof for the repository's tiny rehearsal circuit and public
-// golden vector. No application wallet material is accepted by this helper.
+// Generate a real proof for a ceremony test circuit and the public golden
+// vector. No application wallet material is accepted by this helper.
 package main
 
 import (
@@ -36,7 +36,7 @@ func executeRehearsalEvidence(o RehearsalEvidenceOptions) (CommandResult, error)
 	if err := generateRehearsalEvidence(o); err != nil {
 		return CommandResult{}, err
 	}
-	return CommandResult{CeremonyID: o.CeremonyID, Summary: "Generated and verified a real tiny-circuit proof using public golden inputs; not a production ownership proof", Outputs: map[string]string{"public_evidence": o.OutPath}}, nil
+	return CommandResult{CeremonyID: o.CeremonyID, Summary: "Generated and verified a test-circuit proof using public golden inputs; not a production ownership proof", Outputs: map[string]string{"public_evidence": o.OutPath}}, nil
 }
 func generateRehearsalEvidence(o RehearsalEvidenceOptions) error {
 	key, err := os.ReadFile(o.CoordinatorPublicKeyFile)
@@ -50,10 +50,11 @@ func generateRehearsalEvidence(o RehearsalEvidenceOptions) error {
 	if pre.CeremonyID != o.CeremonyID {
 		return errors.New("ceremony mismatch")
 	}
-	// gnark 0.16.3 serialization: only embedded version bytes differ from the
-	// previous 0.15.0 tiny circuit; constraint data is byte-for-byte identical.
-	if pre.Circuit.Constraints != 5 || pre.Circuit.R1CS.Digest.SHA256 != "sha256:177ab88ee828ca78f753d7e63342d5c86f3ba4ef19910ad4182d2d648b539519" {
-		return errors.New("only the exact pinned five-constraint rehearsal circuit is permitted")
+	if !mpcceremony.IsCeremonyTestCircuit(pre.Circuit.KeyVersion) {
+		return errors.New("only ceremony test circuits are permitted")
+	}
+	if err := mpcceremony.ValidateCanonicalCeremonyCircuit(pre.Circuit); err != nil {
+		return err
 	}
 	ccs, err := mpcceremony.ReadR1CSFile(filepath.Join(o.KeysDir, pre.ConstraintSystem.Name), pre.Circuit)
 	if err != nil {
@@ -91,7 +92,11 @@ func generateRehearsalEvidence(o RehearsalEvidenceOptions) error {
 	if new(big.Int).Exp(cubeRoot, big.NewInt(3), field).Cmp(scalar) != 0 {
 		return errors.New("public golden input is not a cubic residue")
 	}
-	witness, err := frontend.NewWitness(&rehearsal.Circuit{X: cubeRoot, Pub: scalar}, field)
+	var assignment frontend.Circuit = &rehearsal.Circuit{X: cubeRoot, Pub: scalar}
+	if pre.Circuit.KeyVersion == mpcceremony.KeyVersionRehearsalK11 {
+		assignment = &rehearsal.K11Circuit{X: cubeRoot, Pub: scalar}
+	}
+	witness, err := frontend.NewWitness(assignment, field)
 	if err != nil {
 		return err
 	}

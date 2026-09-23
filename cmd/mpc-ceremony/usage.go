@@ -48,7 +48,7 @@ Commands:
   phase2 beacon        Record signed post-closure beacon evidence
   finalize prepare     Replay both phases and publish preliminary final keys
   finalize complete    Verify external public evidence and create candidate
-  finalize rehearsal-evidence  Generate a real proof for the tiny rehearsal circuit
+  finalize rehearsal-evidence  Generate public proof evidence for a ceremony test circuit
   replay               Publicly replay both phases without signing
   audit                Independently replay and audit ceremony artifacts
   release sign         Sign an audited release manifest
@@ -316,7 +316,7 @@ The output directory must be fresh and its parent must already exist.
     --coordinator-public-key-file KEY --artifact-root DIR \
     --coordinator-signing-key KEY --out-dir FRESH_DIR
 
-Authenticates the signed V4 definition and stored circuit, fully checks the
+Authenticates the signed ceremony definition and stored circuit, fully checks the
 Phase 1 genesis chain and derives the only valid sequence-zero checkpoint.
 Creates a signed pair atomically. The pair is not current until the delivery
 service publishes its immutable files and creates the ceremony root.
@@ -503,11 +503,16 @@ fully_verified=true. Structural inspect output is diagnostics-only.
 Compiles a registered repository circuit and writes a fresh signed ceremony
 definition. The authoritative ceremony ID is derived from canonical content,
 including a 32-byte session nonce securely generated when omitted. Production
-mode requires exact clean source builds. The running binary is always allowed;
+mode requires exact clean source builds. Available circuits are
+ownership-destination-v3 (K21 ownership proof), rehearsal-tiny-v1 (K3 test),
+and rehearsal-k11-v1 (K11 test). The test circuits can run with production-mode
+policy and can receive GO for their exact signed circuit, but cannot prove
+ownership. The running binary
+is always allowed;
 each repeated --allowed-binary adds one authenticated binary for another
 platform to the signed definition.
 Omitting --release-verification preserves Definition V3. The explicit value
-opts a fresh ceremony into Definition V4: coordinator full replay remains
+opts a fresh ceremony into Definition V5: coordinator full replay remains
 mandatory; the required release signer verifies its exact binding without a
 second contribution replay. This never upgrades an existing ceremony.
 `,
@@ -526,10 +531,11 @@ the exact accepted chain; the command never discovers a "latest" state.
     [--artifact-root DIR --checkpoint FILE --checkpoint-signature FILE \
      --attempt-id HEX]
 
-Replays the complete accepted phase 1 chain before adding OS-generated
-randomness. The input chain is never modified. Definition V4 requires the four
-allocation flags; it derives and rechecks the exact input snapshot from that
-signed checkpoint in this same process before generating randomness.
+For a V5 allocated turn, the coordinator checks earlier contributions. You
+authenticate your assigned input, add fresh randomness and check your own
+contribution. The four
+allocation flags select the exact signed checkpoint before fresh randomness.
+The input chain is never modified. Legacy direct turns retain full replay.
 `,
 	"phase1 attest-erasure": `Usage:
   mpc-ceremony phase1 attest-erasure --ceremony FILE \
@@ -565,7 +571,7 @@ authenticate accepted evidence by default; --full-replay adds full replay.
 Authenticates the entire signed chain, native payload digests, challenge links,
 participant attestations, cleanup evidence, and coordinator verification
 receipts. --full-replay additionally replays every contribution from genesis.
-Finalization and fresh participants retain their independent full replay.
+Finalization retains independent full replay.
 
 Samples closed_at after verification and atomically publishes the signed
 closure only while the policy lead still holds. --beacon-round-lead derives
@@ -603,7 +609,11 @@ Phase 2 is bound to the exact compiled R1CS and verified phase 1 seal.
   mpc-ceremony phase2 init --ceremony FILE --ceremony-signature FILE \
     --coordinator-public-key-file KEY --phase1-transcript-dir DIR \
     --phase1-seal FILE --phase1-seal-signature FILE \
-    --coordinator-signing-key KEY --out-dir FRESH_DIR
+    --coordinator-signing-key KEY --out-dir FRESH_DIR [--full-replay]
+For V4 and V5 coordinator preparation, authenticates prior acceptance checks and verifies
+the beacon application and resulting commons. This relies on honest coordinator
+acceptance, not independent full Phase 1 replay. --full-replay requests independent
+verification. Older definitions retain full replay.
 `,
 	"phase2 contribute": `Usage:
   mpc-ceremony phase2 contribute --ceremony FILE \
@@ -615,8 +625,12 @@ Phase 2 is bound to the exact compiled R1CS and verified phase 1 seal.
     [--artifact-root DIR --checkpoint FILE --checkpoint-signature FILE \
      --attempt-id HEX]
 
-Definition V4 requires the four allocation flags and derives the exact Phase 2
-chain and Phase 1 seal from the authenticated checkpoint before randomness.
+For a V5 allocated turn, the coordinator checks earlier contributions. You
+authenticate your assigned input, add fresh randomness and check your own
+contribution. You rely on the coordinator to prepare the Phase 2 starting
+parameters correctly. The four
+allocation flags select the exact Phase 2 chain and Phase 1 seal before fresh
+randomness. Legacy direct turns retain full replay.
 `,
 	"phase2 attest-erasure": `Usage:
   mpc-ceremony phase2 attest-erasure --ceremony FILE \
@@ -638,20 +652,22 @@ statement is auditable evidence, not proof that secret randomness was erased.
 Authenticates the signed chain, Phase 1 seal, and candidate evidence; verifies
 the candidate transition directly from the accepted native Phase 2 head; then
 appends immutable numbered artifacts and a new signed chain record.
-Participant contribution and phase close retain independent full replays.
+Finalization retains independent full replay. Phase 2 closure authenticates
+accepted evidence by default and supports --full-replay diagnostics.
 `,
 	"phase2 close": `Usage:
   mpc-ceremony phase2 close --ceremony FILE --ceremony-signature FILE \
     --coordinator-public-key-file KEY --phase1-seal FILE \
     --phase1-seal-signature FILE --transcript-dir DIR --chain FILE \
     --chain-signature FILE --coordinator-signing-key KEY \
-    --beacon-round N | --beacon-round-lead SECONDS
+    --beacon-round N | --beacon-round-lead SECONDS [--full-replay]
 
-Replays the full phase, derives the exact Quicknet schedule from the round,
-samples closed_at inside the core after replay, and atomically publishes the
+Checks accepted records and completion, derives the exact Quicknet schedule from the round,
+samples closed_at inside the core after verification, and atomically publishes the
 signed closure only while the policy lead still holds.
 
-At K=21 the replay takes hours, so --beacon-round asks you to predict it: a
+--full-replay independently checks both phases before closing. At K=21 that
+replay takes hours, so --beacon-round asks you to predict it: a
 round named too near is already public when the closure is written and the
 whole replay is discarded. --beacon-round-lead instead derives the round from
 the clock sampled after the replay, at least SECONDS ahead and never below the
@@ -674,7 +690,8 @@ Records the distinct Phase 2 post-closure beacon evidence used by finalize.
   mpc-ceremony finalize rehearsal-evidence --keys-dir DIR \
     --coordinator-public-key-file FILE --ceremony-id ID --out FILE
 
-Authenticates preliminary keys and checks the exact supported tiny circuit.
+Authenticates preliminary keys and checks the exact supported test circuit
+(rehearsal-tiny-v1 or rehearsal-k11-v1).
 Generates and verifies a real proof using public golden inputs. Never accepts
 wallet material, overwrites evidence, or produces a production ownership proof.
 `,
@@ -685,8 +702,7 @@ wallet material, overwrites evidence, or produces a production ownership proof.
     --out-dir FRESH_DIR
 ` + replayFlagsHelp + `
 
-Independently compiles the circuit named by the signed ceremony definition
-(ownership-destination-v3 in production, rehearsal-tiny-v1 in a rehearsal),
+Independently compiles the circuit named by the signed ceremony definition,
 replays both phases, and publishes a coordinator-signed preliminary native
 PK/VK tree. It is not a candidate and cannot be audited or released.
 `,
@@ -762,7 +778,7 @@ closed final/candidate and final/release directories. Parent must exist.
 	release directory. Definition V3 requires independent signer replay of both
 	phases even when the signed audit minimum is zero.
 
-For Definition V4, replace --candidate-bundle, audit and replay flags with:
+For Definition V4/V5, replace --candidate-bundle, audit and replay flags with:
   --review-checkpoint FILE --review-checkpoint-signature FILE
 Both files and the operational bundle pair must be under --operational-evidence-root.
 The signed review determines the candidate and required audits. The signer checks
@@ -781,7 +797,7 @@ This creates a local signed package, not a storage publication or production GO.
 Authenticates the release using the out-of-band release public key, then
 strictly verifies the bundled audit evidence, transcript, native keys, Cardano
 export, candidate signature, and checksums.
-Definition V4 selects the new exact review/package verifier automatically after
+Definition V4/V5 selects the new exact review/package verifier automatically after
 authenticating the definition. This does not publish or approve production use.
 `,
 	"decision": `Usage:
@@ -801,7 +817,7 @@ ceremony schema, derives
 the release_id and decision_id, and checks ceremony, source, exact K=21
 circuit, and signer-role bindings. The fresh output is the only byte string
 the accountable roles should sign.
-Definition V4 requires --evidence-root and verifies its complete local release
+Definition V4/V5 requires --evidence-root and verifies its complete local release
 package and decision evidence before writing. Keep --out outside final/release.
 Older definitions do not accept this preparation flag.
 `,
@@ -817,7 +833,7 @@ A GO record requires the coordinator, every auditor named by the record,
 and the distinct release signer to sign the same bytes — one signature per
 named auditor, so a ceremony with three auditors needs five signatures. Before loading a GO
 signing key, the command hashes and semantically verifies the full local
-evidence set. Definition V4 requires verified evidence for both GO and post-package
+evidence set. Definition V4/V5 requires verified evidence for both GO and post-package
 NO-GO; use the authenticated abort procedure for an earlier stop without a package.
 Keep --out outside final/release. Older definitions retain optional evidence
 verification for NO-GO records reporting unavailable evidence.
@@ -927,7 +943,7 @@ The reviewed hash binds signing to bytes previously shown by a helper. It is
 required for handoff, receipt, beacon-evidence and evidence-bundle signing.
 Run ops verify afterwards; receipts require --related-record and bundles require
 --evidence-root. A signature alone does not verify a complete ceremony.
-Definition V4 evidence bundles require ops sign-bundle-v4 instead.
+Definition V4/V5 evidence bundles require ops sign-bundle-v4 instead.
 `,
 	"ops prepare-bundle-v4": `Usage:
   mpc-ceremony ops prepare-bundle-v4 --ceremony FILE --ceremony-signature FILE \
@@ -970,7 +986,7 @@ If complete, independently verifies all referenced evidence and exports an
 UNSIGNED canonical bundle and signing request. It does not invent records,
 backdate observations, or sign for other roles. Release still requires the
 coordinator's bundle signature and successful signed-bundle verification.
-Definition V4 requires ops prepare-bundle-v4 with an exact checkpoint instead.
+Definition V4/V5 requires ops prepare-bundle-v4 with an exact checkpoint instead.
 `,
 	"ops export-signing": `Usage:
   mpc-ceremony ops export-signing --record-type TYPE --record FILE \
@@ -979,7 +995,7 @@ Definition V4 requires ops prepare-bundle-v4 with an exact checkpoint instead.
 
 Strictly verifies the canonical record and ceremony binding, then exports
 canonical.json and signing-request.json. No private signing key is read.
-Definition V4 evidence bundles must use ops sign-bundle-v4; this legacy export
+Definition V4/V5 evidence bundles must use ops sign-bundle-v4; this legacy export
 does not bind an exact checkpoint.
 `,
 	"ops import-signature": `Usage:
@@ -991,7 +1007,7 @@ does not bind an exact checkpoint.
 Accepts 64 raw signature bytes or 128 lowercase hex characters, verifies the
 offline Ed25519 signature over exact canonical bytes and signer identity, then
 writes the repository detached-signature format without replacement.
-Definition V4 evidence bundles require ops sign-bundle-v4 with an exact checkpoint.
+Definition V4/V5 evidence bundles require ops sign-bundle-v4 with an exact checkpoint.
 `,
 	"ops verify": `Usage:
   mpc-ceremony ops verify --record-type TYPE --record FILE --signature FILE \

@@ -49,6 +49,23 @@ func TestVerifiedGenesisReplayMatchesIndependentReplay(t *testing.T) {
 			if !bytes.Equal(serializeEngineArtifact(t, head), serializeEngineArtifact(t, independent)) {
 				t.Fatal("replay heads differ")
 			}
+			// This full-replay reference helper samples fresh entropy, verifies
+			// the complete prefix, and leaves every authenticated input untouched.
+			var generated [][]byte
+			for range 2 {
+				next, err := contributePhase2FromVerifiedGenesis(genesis, shape, count, phase2SliceLoader(contributions[:count]))
+				if err != nil {
+					t.Fatal(err)
+				}
+				candidateChain := append(append([]*gnarkmpc.Phase2(nil), contributions[:count]...), next)
+				if err := ReplayPhase2(circuit, commons, candidateChain); err != nil {
+					t.Fatalf("independent verification of reused-genesis contribution: %v", err)
+				}
+				generated = append(generated, serializeEngineArtifact(t, next))
+			}
+			if bytes.Equal(generated[0], generated[1]) {
+				t.Fatal("separate contributions reused the same random output")
+			}
 			if !bytes.Equal(before, serializeEngineArtifact(t, genesis)) {
 				t.Fatal("genesis mutated")
 			}
@@ -74,6 +91,9 @@ func TestVerifiedGenesisReplayMatchesIndependentReplay(t *testing.T) {
 			altered[index] = bad
 			if _, err := replayPhase2FromVerifiedGenesis(genesis, shape, len(altered), phase2SliceLoader(altered)); err == nil {
 				t.Fatal("invalid contribution accepted")
+			}
+			if _, err := contributePhase2FromVerifiedGenesis(genesis, shape, len(altered), phase2SliceLoader(altered)); err == nil {
+				t.Fatal("contribution reuse accepted an invalid earlier edge")
 			}
 			if err := ReplayPhase2(circuit, commons, altered); err == nil {
 				t.Fatal("independent replay accepted invalid contribution")

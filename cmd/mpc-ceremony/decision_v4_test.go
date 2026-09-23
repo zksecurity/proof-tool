@@ -42,7 +42,7 @@ func TestDecisionV4OutputOutsideClosedPackage(t *testing.T) {
 func TestDecisionV4AuthenticatedDispatchRejectsLegacyBeforeKey(t *testing.T) {
 	root := t.TempDir()
 	d, legacy, key := decisionSignFixture(t)
-	d.Schema = mpcceremony.DefinitionSchemaV4
+	d.Schema = mpcceremony.DefinitionSchemaV5
 	d.ReleaseVerification = "coordinator-full-replay-v1"
 	var err error
 	d, err = mpcceremony.FinalizeCeremonyDefinition(d)

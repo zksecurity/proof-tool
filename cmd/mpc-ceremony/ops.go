@@ -186,7 +186,7 @@ func executeOpsExportSigning(options OpsExportSigningOptions) (result CommandRes
 		return CommandResult{}, err
 	}
 	if recordType == mpcceremony.RecordEvidenceBundle && trusted.Definition.UsesCoordinatorReplay() {
-		return CommandResult{}, errors.New("definition v4 evidence bundles require ops sign-bundle-v4 with an exact checkpoint pair")
+		return CommandResult{}, errors.New("definition v4/v5 evidence bundles require ops sign-bundle-v4 with an exact checkpoint pair")
 	}
 	request, err := mpcceremony.NewOperationalSigningRequest(recordType, canonical)
 	if err != nil {
@@ -265,7 +265,7 @@ func executeOpsImportSignature(options OpsImportSignatureOptions) (CommandResult
 		return CommandResult{}, err
 	}
 	if recordType == mpcceremony.RecordEvidenceBundle && trusted.Definition.UsesCoordinatorReplay() {
-		return CommandResult{}, errors.New("definition v4 evidence bundles require ops sign-bundle-v4 with an exact checkpoint pair")
+		return CommandResult{}, errors.New("definition v4/v5 evidence bundles require ops sign-bundle-v4 with an exact checkpoint pair")
 	}
 	definitionBytes, err := canonicalDefinition(trusted)
 	if err != nil {

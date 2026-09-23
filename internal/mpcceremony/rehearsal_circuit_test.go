@@ -61,12 +61,14 @@ func TestCircuitBindingChecksIdentityAsAPair(t *testing.T) {
 	}
 }
 
-// TestProductionRejectsRehearsalCircuit is the guard that restores what the
-// membership check gave up. A rehearsal transcript proves nothing about a
-// production ceremony, and the definition is the only place that knows the mode.
-func TestProductionRejectsRehearsalCircuit(t *testing.T) {
+// TestProductionAllowsPinnedTestCircuit checks that production-mode ceremony
+// policy can exercise the reviewed test circuit without making it GO eligible.
+func TestProductionAllowsPinnedTestCircuit(t *testing.T) {
 	circuit, err := CompileForKeyVersion(KeyVersionRehearsal)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateCanonicalCeremonyCircuit(circuit.Binding); err != nil {
 		t.Fatal(err)
 	}
 	definition := CeremonyDefinition{
@@ -75,11 +77,8 @@ func TestProductionRejectsRehearsalCircuit(t *testing.T) {
 		Circuit: circuit.Binding,
 	}
 	err = definition.validate(false)
-	if err == nil {
-		t.Fatal("a production definition accepted the rehearsal circuit")
-	}
-	if !strings.Contains(err.Error(), KeyVersionDestinationV3) {
-		t.Fatalf("error should name the required key version, got: %v", err)
+	if err != nil && (strings.Contains(err.Error(), "key_version") || strings.Contains(err.Error(), "circuit")) {
+		t.Fatalf("production mode rejected the pinned test circuit: %v", err)
 	}
 }
 

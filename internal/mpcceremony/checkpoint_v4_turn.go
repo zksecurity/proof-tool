@@ -349,6 +349,11 @@ func VerifyAndAcceptAllocatedCandidateV4(options AcceptAllocatedCandidateV4Optio
 		}
 		accept.Phase1SealPath = filepath.Join(options.ArtifactRoot, filepath.FromSlash(previous.Progress.Phase1Seal.Record.Name))
 		accept.Phase1SealSignaturePath = filepath.Join(options.ArtifactRoot, filepath.FromSlash(previous.Progress.Phase1Seal.Signature.Name))
+		accept.assignedInput = &authenticatedContributionAssignment{
+			definition: stored.trusted.DefinitionRefs,
+			chain:      state.Chain, phase1Chain: previous.Progress.Phase1.Chain,
+			phase1Seal: *previous.Progress.Phase1Seal,
+		}
 	}
 	accepted, err := VerifyAndAcceptContribution(accept)
 	if err != nil {
@@ -407,7 +412,13 @@ func VerifyAndAcceptAllocatedCandidateV4(options AcceptAllocatedCandidateV4Optio
 		next.Progress.Phase2 = &nextState
 	}
 	next.AcceptedArtifacts = appendUniqueSortedArtifactsV4(previous.AcceptedArtifacts, append(signedArtifacts(&chainRefs), evidence...)...)
-	canonical, err := PrepareCheckpointV4(CheckpointPreparationV4{Trust: options.Trust, ArtifactRoot: options.ArtifactRoot, Proposal: next, Circuit: options.Circuit})
+	preparation := CheckpointPreparationV4{Trust: options.Trust, ArtifactRoot: options.ArtifactRoot, Proposal: next, Circuit: options.Circuit}
+	if scope.Phase == Phase2 {
+		preparation.coordinatorAcceptedChain = &accepted.Chain
+		preparation.coordinatorAcceptedRefs = chainRefs
+		preparation.coordinatorDefinition = stored.trusted.DefinitionRefs
+	}
+	canonical, err := PrepareCheckpointV4(preparation)
 	if err != nil {
 		return AcceptedCandidateCheckpointV4{}, err
 	}

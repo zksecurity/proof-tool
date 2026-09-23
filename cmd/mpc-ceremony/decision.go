@@ -27,7 +27,7 @@ func executeDecisionPrepare(options DecisionPrepareOptions) (CommandResult, erro
 		return executeDecisionPrepareV4(options, trusted.Definition.CeremonyID, draftBytes)
 	}
 	if options.EvidenceRoot != "" {
-		return CommandResult{}, fmt.Errorf("decision prepare --evidence-root is only supported for definition v4")
+		return CommandResult{}, fmt.Errorf("decision prepare --evidence-root is only supported for definition v4/v5")
 	}
 	decision, decisionBytes, err := mpcceremony.PrepareProductionDecision(
 		trusted.Definition,

@@ -273,20 +273,9 @@ func (d CeremonyDefinition) validate(requireID bool) error {
 	switch d.Mode {
 	case ModeRehearsal:
 	case ModeProduction:
-		// The circuit registry accepts a tiny rehearsal circuit so the ceremony
-		// machinery can be exercised at a small domain. Production must never
-		// see it: a transcript at domain 2^16 proves nothing about a 2^21
-		// ceremony, and the exact-k21-rehearsal gate exists precisely so a
-		// smaller run cannot satisfy it. This is the only place that knows the
-		// mode, so it is the only place the restriction can live, and it is
-		// decided before any environment-dependent check so the failure is
-		// about the definition rather than the host.
-		if d.Circuit.KeyVersion != KeyVersionDestinationV3 {
-			return fmt.Errorf(
-				"production ceremony must use key_version %q, not %q",
-				KeyVersionDestinationV3, d.Circuit.KeyVersion,
-			)
-		}
+		// Production-mode runs may use reviewed test circuits while retaining
+		// production participation and witnessing policy. A production GO
+		// decision binds the exact signed circuit and release.
 		if d.Software.SourceDirty {
 			return errors.New("production ceremony requires a clean source tree")
 		}
@@ -316,7 +305,7 @@ func (d CeremonyDefinition) validate(requireID bool) error {
 		return fmt.Errorf("circuit: %w", err)
 	}
 	if d.Mode == ModeProduction {
-		if err := ValidateCanonicalDestinationV3(d.Circuit); err != nil {
+		if err := ValidateCanonicalCeremonyCircuit(d.Circuit); err != nil {
 			return fmt.Errorf("circuit: %w", err)
 		}
 	}

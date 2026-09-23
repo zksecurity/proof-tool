@@ -40,11 +40,12 @@ const (
 
 	KeyVersionDestinationV3 = "ownership-destination-v3"
 	CircuitIDDestinationV3  = "root-ownership-destination-v3/bls12-381/groth16"
-	// KeyVersionRehearsal names the tiny circuit used to exercise the ceremony
-	// machinery at a small domain. It is accepted only when mode is rehearsal;
-	// see CeremonyDefinition.validate.
+	// Test circuits exercise ceremony operation and cannot serve as ownership
+	// proof keys. A production-mode GO is scoped to the exact signed circuit.
 	KeyVersionRehearsal     = "rehearsal-tiny-v1"
 	CircuitIDRehearsal      = "rehearsal-tiny-v1/bls12-381/groth16"
+	KeyVersionRehearsalK11  = "rehearsal-k11-v1"
+	CircuitIDRehearsalK11   = "rehearsal-k11-v1/bls12-381/groth16"
 	CurveBLS12381           = "BLS12-381"
 	BackendGroth16          = "groth16"
 	GnarkVersion            = "v0.16.3"
@@ -77,6 +78,12 @@ const (
 	// only at release, after every audit had already been performed.
 	MaxAuditors = MaxParticipants
 )
+
+// IsCeremonyTestCircuit identifies circuits which exercise MPC machinery but
+// cannot prove ownership.
+func IsCeremonyTestCircuit(keyVersion string) bool {
+	return keyVersion == KeyVersionRehearsal || keyVersion == KeyVersionRehearsalK11
+}
 
 type Phase string
 
@@ -237,14 +244,12 @@ func (b CircuitBinding) Validate() error {
 	// definition naming one circuit's version with another's id would otherwise
 	// pass both checks separately while describing nothing that exists.
 	//
-	// This is membership in a closed set rather than equality with a single
-	// constant, which is a weaker check than it replaced. What restores the
-	// strength is that a production definition may only name destination-v3;
-	// CeremonyDefinition.validate enforces that, and it is the only place that
-	// knows the mode.
+	// Production-mode test circuits have pinned identities. A decision for one
+	// circuit cannot authorize another circuit's keys.
 	switch {
 	case b.KeyVersion == KeyVersionDestinationV3 && b.CircuitID == CircuitIDDestinationV3:
 	case b.KeyVersion == KeyVersionRehearsal && b.CircuitID == CircuitIDRehearsal:
+	case b.KeyVersion == KeyVersionRehearsalK11 && b.CircuitID == CircuitIDRehearsalK11:
 	default:
 		return fmt.Errorf(
 			"key_version %q with circuit_id %q is not a known circuit",

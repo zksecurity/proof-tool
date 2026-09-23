@@ -1,10 +1,27 @@
 # Ceremony verification reuse
 
+Historical source/implementation notes: this document includes decisions from
+before the latest operator revision. For current requirements use the
+[optimization specification](ceremony-optimization-specification.md),
+[implementation plan](ceremony-optimization-implementation-plan.md) and
+[deferred-task register](ceremony-optimization-deferred-tasks.md). In particular,
+participants now omit historical mathematical replay in both phases, persistent
+calculation caching is deferred, and only the full V5-definition workflow is a
+release requirement. Historical V4 test logs and earlier runtime observations
+remain evidence of those runs; they are not instructions to retain the old policy.
+
+
 These changes are under validation. They require a new proof-tool release and a
 subsequent Relay release pinned to its exact attested assets. They do not authorize
 replacing the proof-tool approved by an already frozen ceremony.
 
 ## Changes within one command
+
+- Phase 1 accepted-chain verification captures the chain and its exact signed
+  references from one read. Previously it reopened the chain after authenticating
+  its evidence and could pair the first chain with references to a different
+  signed chain. This preserves the existing acceptance-evidence checks; it does
+  not add or remove independent mathematical replay.
 
 - Phase 2 initialization checkpoint recording builds its provisional projection
   from the authenticated zero-contribution chain. The authoritative checkpoint
@@ -38,7 +55,10 @@ file-replacement gap. Review is not execution evidence or certification.
 ## Remaining audit and qualification
 
 Phase 1 coordinator closure and sealing already support authenticated acceptance
-evidence, with an explicit full-replay option. Phase 2 closure still verifies the
+evidence. The released code also has explicit full-replay options; the operator
+now requires removal of that optional replay from sealing after the Phase 1
+beacon. This is a planned change, not yet implemented. The separate pre-beacon
+closure option is outside that decision. Phase 2 closure still verifies the
 whole contribution chain. The changes above remove its duplicate initialization,
 not its contribution verification.
 
@@ -125,3 +145,86 @@ entries must fail; unrelated transcript files need not invalidate the cache.
 Return owned decoded commons and metadata, never merely a supposedly verified
 path that the caller reopens unchecked. Cache key exposure grants minting authority,
 so its mount boundary also needs explicit implementation and isolation tests.
+
+### Revised owned-input design (reviewed, not implemented)
+
+A fixed tuple of captured signed roots can replace the proposed general read
+ledger. A private owned-input loader would read and authenticate definition,
+chain, closure, beacon and seal exactly once, retaining both decoded objects and
+references derived from those same record/signature bytes. The tuple also binds
+the decoded external trust key, approved running executable, actual validated
+compiled circuit, operation/schema domain and exact commons digest.
+
+Both cache paths must perform complete ordinary evidence validation against
+these owned roots: native payloads and challenge links, participant attestations,
+cleanup and verification records, closure-chain consistency, archived drand
+cryptography, beacon-closure consistency and seal-beacon consistency. References
+in the captured chain and beacon transitively bind their descendants; there is
+no caller-supplied dependency inventory. Invalid ceremony evidence is an error,
+not a cache miss that can bypass validation.
+
+On a miss, replay uses the already-owned chain and the existing actual-read
+native digest checks. It must not call a helper that reloads the chain. Derive
+commons, compare its digest with the owned seal, and only then mint the local
+MAC receipt with its verification method. Ordinary seal generation alone cannot
+mint a verified-result receipt. The revised coordinator acceptance-history plus
+independent beacon/output check may mint its own explicitly labelled method.
+On a hit, skip only replay and deterministic commons derivation. Return the
+owned commons object from the decoding read whose digest matched the seal;
+downstream operations must not reopen a supposedly verified path.
+
+Independent review accepted this object-consistency boundary in place of a
+global filesystem snapshot: each consumed descendant must match an immutable
+expected digest from a captured authenticated root. It did not certify the
+implementation. Remaining prerequisites are a complete cold-path reader audit,
+a shared private loader for seal verification and Phase 2 initialization,
+precise running-executable identity, bounded/domain-separated receipt encoding,
+atomic publication and coordinator-only key/mount isolation. Cache failures may
+fall back to the explicitly requested verification method, never downgrade an
+independent replay request; evidence failures never authorize a hit or mint.
+
+Qualification must exercise changed signed roots, mixed individually valid
+roots, changed descendants under unchanged roots, contribution replacement
+during replay, commons replacement before decoding, wrong verifier/circuit/key,
+forged receipts for mathematically invalid chains, failed cold verification,
+interrupted publication and independent participant behavior. Root replacement
+after capture must either fail or remain consistently bound to the captured
+objects, never mix old verification with new references. No persistent cache
+is enabled by this design document.
+
+Reader-audit findings for the revised design:
+
+- `loadOperationalCeremony` derives `RunningSoftware` from the kernel-held Linux
+  `/proc/self/exe` and Go build metadata after checking the signed software
+  policy. Reuse this process-derived identity; do not hash an operator-selected
+  binary path to establish verifier authority.
+- `validateCompiledCircuit` checks the private binder marker, field, counts and
+  Phase 2 shape, but does not recompute the R1CS digest on every call. A receipt
+  boundary must explicitly digest the actual owned R1CS and compare it with the
+  signed binding; copying `circuit.Binding.R1CS.Digest` alone is insufficient.
+  Keep that object private and unchanged throughout verification and use.
+- `ReadR1CSFile` authenticates before decoding and then rebinds the decoded
+  object. Retain its post-decode binding check; an open descriptor alone does
+  not make the underlying bytes immutable.
+
+Further within-call changes under validation: Phase 2 contributions replay from the freshly verified genesis and retain fresh entropy and all predecessor checks. First-contribution acceptance reuses that genesis as predecessor; later turns release it and load their authenticated head. Final replay now pairs genesis and fresh evaluations in a private single-use object and seals from that same initialization after genesis checks. Targeted deterministic-key equivalence, consumed-state rejection, archive immutability and independent evaluation-array tests pass. Full signed workflows and exact-circuit memory qualification remain required for these additions.
+
+## Superseding coordinator Phase 1 design (2026-09-23)
+
+The operator now explicitly authorizes prior coordinator acceptance checks as the
+trust basis for a coordinator-only Phase 1 result, after exact history/file checks,
+beacon cryptography, independent beacon application and output comparison. Earlier
+full-replay-only minting requirements in this document are superseded for that
+labelled method. They still apply to claims of independent full replay. The detailed
+specification defines method isolation, role boundaries and mandatory negative tests.
+The latest request retains an explicit troubleshooting replay option; the earlier
+proposal to remove the seal CLI flag entirely is superseded. Implementation and
+tests of this revised path are authorized, while releases remain gated.
+
+V5 scope clarification: the coordinator acceptance-history method applies to both
+V4 and V5. `UsesCoordinatorReplay()` is the existing closed predicate for these
+two formats. The contribution checks and checkpoint lifecycle are shared; V5's
+production-decision schema and release requirements remain unchanged. Public and
+participant verification remain independent for both formats. The workflow test
+helper's historical V4 name does not identify its schema: its current constructor
+creates V5, so tests must assert the actual signed definition version.

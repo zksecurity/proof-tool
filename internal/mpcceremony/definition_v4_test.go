@@ -9,7 +9,7 @@ import (
 func trustedCoordinatorDefinition(t *testing.T) CeremonyDefinition {
 	t.Helper()
 	d := adversarialDefinition(t)
-	d.Schema = DefinitionSchemaV4
+	d.Schema = DefinitionSchemaV5
 	d.ReleaseVerification = CoordinatorReplayReleaseV1
 	d, err := FinalizeCeremonyDefinition(d)
 	if err != nil {
@@ -18,13 +18,13 @@ func trustedCoordinatorDefinition(t *testing.T) CeremonyDefinition {
 	return d
 }
 
-func TestDefinitionV4ExplicitTrustPolicyAndDistinctIdentity(t *testing.T) {
+func TestDefinitionV5ExplicitTrustPolicyAndDistinctIdentity(t *testing.T) {
 	legacy := adversarialDefinition(t)
 	if legacy.Schema != DefinitionSchemaV3 {
 		t.Fatal("default changed before new workflow is complete")
 	}
 	d := legacy
-	d.Schema = DefinitionSchemaV4
+	d.Schema = DefinitionSchemaV5
 	d.ReleaseVerification = CoordinatorReplayReleaseV1
 	d, err := FinalizeCeremonyDefinition(d)
 	if err != nil {
@@ -40,7 +40,7 @@ func TestDefinitionV4ExplicitTrustPolicyAndDistinctIdentity(t *testing.T) {
 		changed := d
 		changed.Schema = schema
 		if _, err := ComputeCeremonyID(changed); err == nil {
-			t.Fatalf("%s accepted v4 policy", schema)
+			t.Fatalf("%s accepted V5 policy", schema)
 		}
 	}
 	for _, policy := range []string{"", "none", "coordinator-said-so", "signer-optional"} {
@@ -72,7 +72,7 @@ func TestDefinitionV4ExplicitTrustPolicyAndDistinctIdentity(t *testing.T) {
 	}
 }
 
-func TestDefinitionV4PreservesRequiredSignerAndExplicitAssurance(t *testing.T) {
+func TestDefinitionV5PreservesRequiredSignerAndExplicitAssurance(t *testing.T) {
 	d := trustedCoordinatorDefinition(t)
 	d.Auditors = []Identity{}
 	d.AssurancePolicy = &AssurancePolicy{}
@@ -102,16 +102,16 @@ func TestDefinitionV4PreservesRequiredSignerAndExplicitAssurance(t *testing.T) {
 	}
 	// The new declaration alone cannot take the old signer path.
 	if err := verifyRequiredReleaseSignerReplay(d.Schema, SignReleaseOptions{}); err == nil || !strings.Contains(err.Error(), "unsupported") {
-		t.Fatalf("v4 fell through into the legacy signing path: %v", err)
+		t.Fatalf("V5 fell through into the legacy signing path: %v", err)
 	}
 	if err := validateCheckpointDefinitionVersion(d, Checkpoint{Schema: CheckpointSchemaV1}); err == nil {
-		t.Fatal("v4 fell through to legacy checkpoints")
+		t.Fatal("V5 fell through to legacy checkpoints")
 	}
 	if err := validateProductionDecisionBinding(d, ProductionDecision{Schema: ProductionDecisionSchemaV1, CeremonyID: d.CeremonyID}); err == nil {
-		t.Fatal("v4 fell through to legacy production decisions")
+		t.Fatal("V5 fell through to legacy production decisions")
 	}
 	if expectedFinalTranscriptSchema(d) != FinalTranscriptSchemaV3 {
-		t.Fatal("v4 selected a legacy transcript")
+		t.Fatal("V5 selected a legacy transcript")
 	}
 }
 

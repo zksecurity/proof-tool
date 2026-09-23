@@ -34,7 +34,7 @@ func runCheckpointV4Release(root string, trust m.TrustPaths, d m.CeremonyDefinit
 	if _, err := m.VerifyReleaseV4(verify); err != nil {
 		return fmt.Errorf("V4 release verification: %w", err)
 	}
-	if _, err := keybundle.VerifyRehearsal(keybundle.VerifyOptions{KeysDir: out, KeyVersion: d.Circuit.KeyVersion, PublicKeyHex: d.ReleaseSigner.Ed25519PublicKeyHex, ExpectedSignatureKeyID: d.ReleaseSigner.KeyID, RequireProvingKey: true}); err != nil {
+	if _, err := keybundle.VerifyCeremonyTest(keybundle.VerifyOptions{KeysDir: out, KeyVersion: d.Circuit.KeyVersion, PublicKeyHex: d.ReleaseSigner.Ed25519PublicKeyHex, ExpectedSignatureKeyID: d.ReleaseSigner.KeyID, RequireProvingKey: true}); err != nil {
 		return fmt.Errorf("ordinary rehearsal key-bundle consumer: %w", err)
 	}
 	if _, err := m.VerifyRelease(m.VerifyReleaseOptions{DefinitionPath: trust.DefinitionPath, DefinitionSignaturePath: trust.DefinitionSignaturePath, CoordinatorPublicKeyHex: d.Coordinator.Ed25519PublicKeyHex, KeysDir: out, TrustedPublicKeyHex: d.ReleaseSigner.Ed25519PublicKeyHex, ExpectedSignatureKeyID: d.ReleaseSigner.KeyID, RequireProvingKey: true}); err == nil {

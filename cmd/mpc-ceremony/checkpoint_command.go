@@ -598,7 +598,7 @@ func buildCheckpointEvidenceWithParent(options CheckpointEvidenceOptions, verify
 		return builtCheckpointEvidence{}, err
 	}
 	if trusted.Definition.UsesCoordinatorReplay() {
-		return builtCheckpointEvidence{}, errors.New("definition v4 requires the explicit V4 checkpoint commands")
+		return builtCheckpointEvidence{}, errors.New("definition v4/v5 requires the explicit V4 checkpoint commands")
 	}
 	definitionRefs, err := checkpointPairRefs(options.ArtifactRoot, options.CeremonyPath, options.CeremonySignaturePath)
 	if err != nil {

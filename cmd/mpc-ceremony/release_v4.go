@@ -9,7 +9,7 @@ import (
 
 func validateReleaseSignShapeV4(o ReleaseSignOptions) error {
 	if o.ReviewCheckpointPath == "" || o.ReviewSignaturePath == "" {
-		return errors.New("definition v4 release signing requires --review-checkpoint and --review-checkpoint-signature")
+		return errors.New("definition v4/v5 release signing requires --review-checkpoint and --review-checkpoint-signature")
 	}
 	if o.CandidateBundleDir != "" || len(o.AuditReportPaths) != 0 || len(o.AuditSignaturePaths) != 0 || o.Replay != (ReplayOptions{}) {
 		return errors.New("V4 review signing must not supply legacy candidate, audit or replay flags; the authenticated review determines those inputs")
