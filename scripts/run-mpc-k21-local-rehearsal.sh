@@ -2073,6 +2073,7 @@ NODE
       "${REPLAY_FLAGS[@]}" \
       --coordinator-signing-key "$COORDINATOR_PRIVATE_KEY" \
       --public-evidence "$PUBLIC_FINALIZATION_EVIDENCE" \
+      --preliminary-keys-dir "$PRELIMINARY_KEYS" \
       --finalized-at "$(timestamp "$FINALIZED_EPOCH")" \
       --out-dir "$FINAL_CANDIDATE"
     PLUTUS_EVIDENCE_ARGS=("$FINAL_CANDIDATE")

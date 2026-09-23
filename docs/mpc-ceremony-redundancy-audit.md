@@ -47,10 +47,18 @@ Relay `runWorkflowV4FinalizeLifecycle` (in `workflow_v4_phase_lifecycle.go`) run
 separate retained operations. Proof-tool `PrepareFinalization` and `Finalize`
 each call `replayAll`; recording the final candidate reaches
 `VerifyFinalCandidateCheckpoint` -> `verifyCandidateReplay` -> `replayAll`.
-Thus this normal coordinator sequence reconstructs the full keys three times.
+Thus the baseline coordinator sequence reconstructs the full keys three times.
 Each baseline `replayAll` initializes Phase 2 twice, making six initializations
 across those three operations before any optional independent audit. This is a
 static normal-path count, excluding retries, and still needs measured tracing.
+
+The follow-up finalization option `--preliminary-keys-dir` changes the Relay
+normal path to two complete replays: preliminary preparation and the independent
+final-candidate checkpoint. Completion authenticates the preliminary signature,
+every fixed replay input digest, and the key artifacts instead of reconstructing
+them again. The baseline count above remains relevant to callers that omit the
+option and to older releases. This is not a reusable coordinator receipt for
+other commands or independent auditors.
 
 `VerifyPreliminaryFinalKeys` verifies the coordinator signature and referenced
 artifact hashes; it does not independently reconstruct the keys. A public

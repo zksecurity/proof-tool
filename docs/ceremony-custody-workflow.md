@@ -71,9 +71,12 @@ mpc-ceremony finalize rehearsal-evidence \
 This authenticates the preliminary keys under the separately trusted coordinator
 key, requires the exact supported five-constraint rehearsal circuit, and generates
 and verifies a real proof using the repository's public golden input. It accepts
-no wallet secret inputs. The output feeds `finalize complete`, which independently
-replays the ceremony and validates the proof. Production circuits must use their
-own compatible public-evidence generation process.
+no wallet secret inputs. For the ownership circuit, the released
+`mpc-finalization-evidence` helper generates the corresponding public golden proof.
+Pass `--preliminary-keys-dir /work/preliminary` to `finalize complete` to reuse
+those signed keys only when the exact replay inputs still match. Without that
+flag, completion performs its own full replay. The final-candidate checkpoint
+still performs an independent full replay before accepting the candidate.
 
 ## Release sequencing
 
