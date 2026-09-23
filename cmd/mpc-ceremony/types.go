@@ -225,6 +225,7 @@ type FinalizeOptions struct {
 	Replay                   ReplayOptions
 	CoordinatorSigningKey    string
 	PublicEvidencePath       string
+	PreliminaryKeysDir       string
 	FinalizedAt              string
 	OutDir                   string
 }

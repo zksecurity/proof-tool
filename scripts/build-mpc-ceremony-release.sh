@@ -275,6 +275,30 @@ env \
   GOENV=off \
   GOEXPERIMENT= \
   GOFIPS140=off \
+  GOOS=linux \
+  GOARCH=arm64 \
+  GOARM64=v8.0 \
+  GOTOOLCHAIN=local \
+  GOWORK=off \
+  GOFLAGS= \
+  SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \
+  TZ=UTC \
+  LC_ALL=C \
+  "$GO_BIN" build \
+    -mod=vendor \
+    -trimpath \
+    -buildvcs=true \
+    -ldflags=-buildid= \
+    -o "$STAGING/mpc-finalization-evidence-linux-arm64" \
+    ./scripts/mpc-finalization-evidence
+
+env \
+  -u GOROOT \
+  CGO_ENABLED=0 \
+  GOCACHE="$CANONICAL_ROOT/go-cache" \
+  GOENV=off \
+  GOEXPERIMENT= \
+  GOFIPS140=off \
   GOTOOLCHAIN=local \
   GOWORK=off \
   GOOS=linux \
@@ -336,6 +360,24 @@ env \
   GOARCH=amd64 \
   GOAMD64=v1 \
   GOFLAGS=-mod=vendor \
+  "$GO_BIN" run ./scripts/hash-blake2b \
+    -go-version "$GO_VERSION" \
+    -build-flags "$BUILD_FLAGS" \
+    "$STAGING/mpc-finalization-evidence-linux-arm64" >"$STAGING/finalization-evidence-arm64-binary-manifest.json"
+
+env \
+  -u GOROOT \
+  CGO_ENABLED=0 \
+  GOCACHE="$CANONICAL_ROOT/go-cache" \
+  GOENV=off \
+  GOEXPERIMENT= \
+  GOFIPS140=off \
+  GOTOOLCHAIN=local \
+  GOWORK=off \
+  GOOS=linux \
+  GOARCH=amd64 \
+  GOAMD64=v1 \
+  GOFLAGS=-mod=vendor \
   "$GO_BIN" run ./scripts/generate-go-sbom \
     --binary "$STAGING/mpc-ceremony" \
     --name mpc-ceremony \
@@ -378,6 +420,24 @@ env \
     --name mpc-finalization-evidence \
     --source-root "$CANONICAL_SOURCE" >"$STAGING/finalization-evidence-sbom.cdx.json"
 
+env \
+  -u GOROOT \
+  CGO_ENABLED=0 \
+  GOCACHE="$CANONICAL_ROOT/go-cache" \
+  GOENV=off \
+  GOEXPERIMENT= \
+  GOFIPS140=off \
+  GOTOOLCHAIN=local \
+  GOWORK=off \
+  GOOS=linux \
+  GOARCH=amd64 \
+  GOAMD64=v1 \
+  GOFLAGS=-mod=vendor \
+  "$GO_BIN" run ./scripts/generate-go-sbom \
+    --binary "$STAGING/mpc-finalization-evidence-linux-arm64" \
+    --name mpc-finalization-evidence-linux-arm64 \
+    --source-root "$CANONICAL_SOURCE" >"$STAGING/finalization-evidence-arm64-sbom.cdx.json"
+
 (
   cd "$CANONICAL_SOURCE"
   git ls-files -z |
@@ -390,8 +450,8 @@ env \
 
 (
   cd "$STAGING"
-  sha256sum mpc-ceremony mpc-ceremony-linux-arm64 mpc-finalization-evidence >checksums.sha256
-  b2sum -l 256 mpc-ceremony mpc-ceremony-linux-arm64 mpc-finalization-evidence >checksums.blake2b256
+  sha256sum mpc-ceremony mpc-ceremony-linux-arm64 mpc-finalization-evidence mpc-finalization-evidence-linux-arm64 >checksums.sha256
+  b2sum -l 256 mpc-ceremony mpc-ceremony-linux-arm64 mpc-finalization-evidence mpc-finalization-evidence-linux-arm64 >checksums.blake2b256
   env -u GOROOT \
     CGO_ENABLED=0 \
     GOARCH=amd64 \
@@ -422,6 +482,16 @@ env \
     GOTOOLCHAIN=local \
     GOAMD64=v1 \
     "$GO_BIN" version -m ./mpc-finalization-evidence >finalization-evidence-go-build-info.txt
+  env -u GOROOT -u GOAMD64 \
+    CGO_ENABLED=0 \
+    GOARCH=arm64 \
+    GOENV=off \
+    GOEXPERIMENT= \
+    GOFIPS140=off \
+    GOOS=linux \
+    GOARM64=v8.0 \
+    GOTOOLCHAIN=local \
+    "$GO_BIN" version -m ./mpc-finalization-evidence-linux-arm64 >finalization-evidence-arm64-go-build-info.txt
 )
 printf '%s\n' "$SOURCE_COMMIT" >"$STAGING/source-commit.txt"
 printf '%s\n' "$SOURCE_DATE_EPOCH" >"$STAGING/source-date-epoch.txt"
@@ -447,9 +517,13 @@ ROOT_INPUTS=(
   "$STAGING/checksums.sha256"
   "$STAGING/go-build-info.txt"
   "$STAGING/finalization-evidence-binary-manifest.json"
+  "$STAGING/finalization-evidence-arm64-binary-manifest.json"
+  "$STAGING/finalization-evidence-arm64-go-build-info.txt"
+  "$STAGING/finalization-evidence-arm64-sbom.cdx.json"
   "$STAGING/finalization-evidence-go-build-info.txt"
   "$STAGING/finalization-evidence-sbom.cdx.json"
   "$STAGING/mpc-finalization-evidence"
+  "$STAGING/mpc-finalization-evidence-linux-arm64"
   "$STAGING/mpc-ceremony"
   "$STAGING/mpc-ceremony-linux-arm64"
   "$STAGING/sbom.cdx.json"
@@ -488,7 +562,8 @@ env \
 chmod 0555 \
   "$STAGING/mpc-ceremony" \
   "$STAGING/mpc-ceremony-linux-arm64" \
-  "$STAGING/mpc-finalization-evidence"
+  "$STAGING/mpc-finalization-evidence" \
+  "$STAGING/mpc-finalization-evidence-linux-arm64"
 chmod 0444 \
   "$STAGING"/*.txt \
   "$STAGING"/*.json \

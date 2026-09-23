@@ -1195,6 +1195,7 @@ func parseCompleteFinalization(args []string) (FinalizeOptions, error) {
 	addReplayFlags(fs, &options.Replay)
 	fs.StringVar(&options.CoordinatorSigningKey, "coordinator-signing-key", "", "existing Ed25519 coordinator private key path")
 	fs.StringVar(&options.PublicEvidencePath, "public-evidence", "", "canonical public finalization evidence JSON from a separate local proof tool")
+	fs.StringVar(&options.PreliminaryKeysDir, "preliminary-keys-dir", "", "signed preliminary keys from the exact replay inputs")
 	fs.StringVar(&options.FinalizedAt, "finalized-at", "", "candidate finalization timestamp in RFC3339 UTC")
 	fs.StringVar(&options.OutDir, "out-dir", "", "fresh unsigned release candidate directory")
 	if err := parseFlags(fs, args); err != nil {
