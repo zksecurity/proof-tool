@@ -49,9 +49,13 @@ var (
 		"checksums.sha256",
 		"go-build-info.txt",
 		"finalization-evidence-binary-manifest.json",
+		"finalization-evidence-arm64-binary-manifest.json",
+		"finalization-evidence-arm64-go-build-info.txt",
+		"finalization-evidence-arm64-sbom.cdx.json",
 		"finalization-evidence-go-build-info.txt",
 		"finalization-evidence-sbom.cdx.json",
 		"mpc-finalization-evidence",
+		"mpc-finalization-evidence-linux-arm64",
 		"mpc-ceremony",
 		"mpc-ceremony-linux-arm64",
 		"sbom.cdx.json",
@@ -175,11 +179,19 @@ func main() {
 	if err := verifyBinaryManifest(*dir, evidenceManifest, "mpc-finalization-evidence"); err != nil {
 		fatal(err)
 	}
+	arm64EvidenceManifest, err := readDigestManifest(filepath.Join(*dir, "finalization-evidence-arm64-binary-manifest.json"))
+	if err != nil {
+		fatal(err)
+	}
+	if err := verifyBinaryManifest(*dir, arm64EvidenceManifest, "mpc-finalization-evidence-linux-arm64"); err != nil {
+		fatal(err)
+	}
 	if err := verifyBinaryChecksums(
 		*dir,
 		ceremonyManifest.Files[0],
 		arm64Manifest.Files[0],
 		evidenceManifest.Files[0],
+		arm64EvidenceManifest.Files[0],
 	); err != nil {
 		fatal(err)
 	}
@@ -190,6 +202,9 @@ func main() {
 		fatal(err)
 	}
 	if err := verifyBuildInfo(filepath.Join(*dir, "mpc-finalization-evidence"), *commit, "amd64"); err != nil {
+		fatal(err)
+	}
+	if err := verifyBuildInfo(filepath.Join(*dir, "mpc-finalization-evidence-linux-arm64"), *commit, "arm64"); err != nil {
 		fatal(err)
 	}
 	if err := verifySBOM(
@@ -213,6 +228,14 @@ func main() {
 		*sourceRoot,
 		*commit,
 		"mpc-finalization-evidence",
+	); err != nil {
+		fatal(err)
+	}
+	if err := verifySBOM(
+		filepath.Join(*dir, "finalization-evidence-arm64-sbom.cdx.json"),
+		*sourceRoot,
+		*commit,
+		"mpc-finalization-evidence-linux-arm64",
 	); err != nil {
 		fatal(err)
 	}

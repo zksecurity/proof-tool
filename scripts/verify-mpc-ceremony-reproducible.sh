@@ -85,10 +85,14 @@ EXPECTED_FILES=(
   checksums.blake2b256
   checksums.sha256
   finalization-evidence-binary-manifest.json
+  finalization-evidence-arm64-binary-manifest.json
+  finalization-evidence-arm64-go-build-info.txt
+  finalization-evidence-arm64-sbom.cdx.json
   finalization-evidence-go-build-info.txt
   finalization-evidence-sbom.cdx.json
   go-build-info.txt
   mpc-finalization-evidence
+  mpc-finalization-evidence-linux-arm64
   mpc-ceremony
   mpc-ceremony-linux-arm64
   sbom.cdx.json
@@ -149,7 +153,7 @@ for dir in "$BUILD_A" "$BUILD_B"; do
     fi
     expected_mode=444
     if [[ "$name" == "mpc-ceremony" || "$name" == "mpc-ceremony-linux-arm64" ||
-      "$name" == "mpc-finalization-evidence" ]]; then
+      "$name" == "mpc-finalization-evidence" || "$name" == "mpc-finalization-evidence-linux-arm64" ]]; then
       expected_mode=555
     fi
     actual_mode=$(stat -c %a "$dir/$name")
@@ -159,7 +163,7 @@ for dir in "$BUILD_A" "$BUILD_B"; do
     fi
   done
   if [[ ! -x "$dir/mpc-ceremony" || ! -x "$dir/mpc-ceremony-linux-arm64" ||
-    ! -x "$dir/mpc-finalization-evidence" ]]; then
+    ! -x "$dir/mpc-finalization-evidence" || ! -x "$dir/mpc-finalization-evidence-linux-arm64" ]]; then
     echo "FAIL: all release binaries must be executable: $dir" >&2
     exit 1
   fi
@@ -244,12 +248,33 @@ for dir in "$BUILD_A" "$BUILD_B"; do
     exit 1
   fi
   rm -f -- "$EVIDENCE_BUILD_INFO_TMP"
+  ARM64_EVIDENCE_BUILD_INFO_TMP=$(mktemp "${TMPDIR:-/tmp}/mpc-finalization-arm64-build-info.XXXXXXXX")
+  (
+    cd "$dir"
+    env -u GOROOT -u GOAMD64 \
+      CGO_ENABLED=0 \
+      GOARCH=arm64 \
+      GOENV=off \
+      GOEXPERIMENT= \
+      GOFIPS140=off \
+      GOOS=linux \
+      GOARM64=v8.0 \
+      GOTOOLCHAIN=local \
+      "$GO_BIN" version -m ./mpc-finalization-evidence-linux-arm64 >"$ARM64_EVIDENCE_BUILD_INFO_TMP"
+  )
+  if ! cmp "$ARM64_EVIDENCE_BUILD_INFO_TMP" "$dir/finalization-evidence-arm64-go-build-info.txt"; then
+    rm -f -- "$ARM64_EVIDENCE_BUILD_INFO_TMP"
+    echo "FAIL: saved Go build information does not exactly describe the arm64 finalization evidence binary: $dir" >&2
+    exit 1
+  fi
+  rm -f -- "$ARM64_EVIDENCE_BUILD_INFO_TMP"
 done
 
 diff -r --no-dereference "$BUILD_A" "$BUILD_B"
 cmp "$BUILD_A/mpc-ceremony" "$BUILD_B/mpc-ceremony"
 cmp "$BUILD_A/mpc-ceremony-linux-arm64" "$BUILD_B/mpc-ceremony-linux-arm64"
 cmp "$BUILD_A/mpc-finalization-evidence" "$BUILD_B/mpc-finalization-evidence"
+cmp "$BUILD_A/mpc-finalization-evidence-linux-arm64" "$BUILD_B/mpc-finalization-evidence-linux-arm64"
 
 if [[ "$MODE" == "ci" ]]; then
   echo "OK: protected-main CI MPC ceremony builds are semantically valid and byte-identical"
@@ -259,3 +284,4 @@ fi
 sha256sum "$BUILD_A/mpc-ceremony"
 sha256sum "$BUILD_A/mpc-ceremony-linux-arm64"
 sha256sum "$BUILD_A/mpc-finalization-evidence"
+sha256sum "$BUILD_A/mpc-finalization-evidence-linux-arm64"
