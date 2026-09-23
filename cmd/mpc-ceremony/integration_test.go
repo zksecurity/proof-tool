@@ -183,6 +183,7 @@ func TestParticipantCLIHelpHasExplicitSafeFlagAllowlist(t *testing.T) {
 		"--phase2-chain-signature",
 		"--phase2-close",
 		"--phase2-close-signature",
+		"--preliminary-keys-dir",
 		"--policy",
 		"--private-key-out",
 		"--quiet",
