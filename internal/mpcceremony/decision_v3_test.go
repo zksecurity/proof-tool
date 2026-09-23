@@ -10,9 +10,16 @@ import (
 
 // Structural fixture only: no production package, independence or GO outcome
 // is established by these known-key records and placeholder evidence hashes.
-func decisionFixtureV3(t *testing.T) (CeremonyDefinition, ProductionDecisionV3) {
+func decisionFixtureV3(t *testing.T, keyVersion ...string) (CeremonyDefinition, ProductionDecisionV3) {
 	t.Helper()
 	d := trustedCoordinatorDefinition(t)
+	if len(keyVersion) != 0 && keyVersion[0] != d.Circuit.KeyVersion {
+		circuit, err := CompileForKeyVersion(keyVersion[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.Circuit = circuit.Binding
+	}
 	d.AssurancePolicy = &AssurancePolicy{}
 	d.Auditors = []Identity{}
 	var err error
@@ -25,8 +32,8 @@ func decisionFixtureV3(t *testing.T) (CeremonyDefinition, ProductionDecisionV3) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	x := ProductionDecisionV3{Schema: ProductionDecisionSchemaV3, CeremonyID: d.CeremonyID, AssurancePolicy: cloneAssurancePolicy(d.AssurancePolicy), Release: release, SourceRelease: SourceReleaseEvidenceV4{SourceCommit: d.Software.SourceCommit, VerificationReport: ref("source-release.json")}, Auditors: []DecisionAuditorV3{}, ExternalAudits: []ExternalAuditEvidenceV3{}, K21Rehearsal: K21RehearsalEvidenceV3{Circuit: d.Circuit, Evidence: ref("k21.json")}, MainnetDeploymentPlan: ref("deployment.md"), FormalChecklist: ref("checklist.md"), Decision: DecisionGO, DecidedAt: "2026-07-24T12:00:00Z"}
-	for _, gate := range decisionGatesV3() {
+	x := ProductionDecisionV3{Schema: ProductionDecisionSchemaV5, CeremonyID: d.CeremonyID, AssurancePolicy: cloneAssurancePolicy(d.AssurancePolicy), Release: release, SourceRelease: SourceReleaseEvidenceV4{SourceCommit: d.Software.SourceCommit, VerificationReport: ref("source-release.json")}, Auditors: []DecisionAuditorV3{}, ExternalAudits: []ExternalAuditEvidenceV3{}, CircuitRehearsal: &CircuitRehearsalEvidenceV5{Circuit: d.Circuit, Evidence: ref("circuit.json")}, MainnetDeploymentPlan: ref("deployment.md"), FormalChecklist: ref("checklist.md"), Decision: DecisionGO, DecidedAt: "2026-07-24T12:00:00Z"}
+	for _, gate := range decisionGatesV5() {
 		g := ProductionGateResultV3{Gate: gate, Status: GatePASS, Evidence: []ArtifactRef{}}
 		if optional, enabled := optionalDecisionGateV3(gate, *d.AssurancePolicy); optional && !enabled {
 			g.Status = GateNotRequired
@@ -38,8 +45,8 @@ func decisionFixtureV3(t *testing.T) (CeremonyDefinition, ProductionDecisionV3) 
 			g.Evidence = []ArtifactRef{x.SourceRelease.VerificationReport}
 		}
 		switch gate {
-		case GateK21Rehearsal:
-			g.Evidence = []ArtifactRef{x.K21Rehearsal.Evidence}
+		case GateExactCircuitRehearsal:
+			g.Evidence = []ArtifactRef{x.CircuitRehearsal.Evidence}
 		case GateMainnetDeploymentPlan:
 			g.Evidence = []ArtifactRef{x.MainnetDeploymentPlan}
 		case GateFormalChecklist:
@@ -127,7 +134,7 @@ func TestDecisionV3RejectsWrongPolicyEvidenceAndGates(t *testing.T) {
 			x.SourceRelease.VerificationReport.Digest.Size = maxSignedRecordBytes + 1
 			x.Gates[0].Evidence = []ArtifactRef{x.SourceRelease.VerificationReport}
 		},
-		"tiny-rehearsal": func(x *ProductionDecisionV3) { x.K21Rehearsal.Circuit.DomainSize = 8 },
+		"wrong-circuit-domain": func(x *ProductionDecisionV3) { x.CircuitRehearsal.Circuit.DomainSize = 8 },
 		"conflicting-report": func(x *ProductionDecisionV3) {
 			x.FormalChecklist = checkpointArtifact(x.MainnetDeploymentPlan.Name, "other")
 		},
@@ -204,7 +211,7 @@ func TestDecisionV3RequiredSigners(t *testing.T) {
 }
 
 func decisionDraftFixtureV3(x ProductionDecisionV3) ProductionDecisionDraftV3 {
-	return ProductionDecisionDraftV3{Schema: ProductionDecisionDraftSchemaV3, CeremonyID: x.CeremonyID, AssurancePolicy: cloneAssurancePolicy(x.AssurancePolicy), Release: FinalReleaseEvidenceDraftV4{FinalReleaseCheckpoint: x.Release.FinalReleaseCheckpoint, CandidateID: x.Release.CandidateID}, SourceRelease: x.SourceRelease, Auditors: x.Auditors, ExternalAudits: x.ExternalAudits, K21Rehearsal: x.K21Rehearsal, MainnetDeploymentPlan: x.MainnetDeploymentPlan, FormalChecklist: x.FormalChecklist, Gates: x.Gates, Decision: x.Decision, DecidedAt: x.DecidedAt}
+	return ProductionDecisionDraftV3{Schema: ProductionDecisionDraftSchemaV5, CeremonyID: x.CeremonyID, AssurancePolicy: cloneAssurancePolicy(x.AssurancePolicy), Release: FinalReleaseEvidenceDraftV4{FinalReleaseCheckpoint: x.Release.FinalReleaseCheckpoint, CandidateID: x.Release.CandidateID}, SourceRelease: x.SourceRelease, Auditors: x.Auditors, ExternalAudits: x.ExternalAudits, K21Rehearsal: x.K21Rehearsal, CircuitRehearsal: x.CircuitRehearsal, MainnetDeploymentPlan: x.MainnetDeploymentPlan, FormalChecklist: x.FormalChecklist, Gates: x.Gates, Decision: x.Decision, DecidedAt: x.DecidedAt}
 }
 
 func TestDecisionV3DraftDerivesIDsAndRejectsImplicitUpgrade(t *testing.T) {

@@ -16,31 +16,50 @@ type Phase2Loader func(index int) (*gnarkmpc.Phase2, error)
 // InitializePhase2 deterministically derives the circuit-specific Phase 2
 // genesis state from the exact compiled circuit and sealed Phase 1 commons.
 func InitializePhase2(circuit *CompiledCircuit, commons *gnarkmpc.SrsCommons) (*gnarkmpc.Phase2, Phase2Shape, error) {
-	if err := validatePhase2Inputs(circuit, commons); err != nil {
+	owned, err := initializeOwnedPhase2(circuit, commons)
+	if err != nil {
 		return nil, Phase2Shape{}, err
+	}
+	return owned.genesis, owned.shape, nil
+}
+
+// This pair belongs to one invocation. Sealing consumes its evaluations because
+// the returned keys retain their slices. Never cache or share this object.
+type ownedPhase2Initialization struct {
+	genesis     *gnarkmpc.Phase2
+	shape       Phase2Shape
+	evaluations *gnarkmpc.Phase2Evaluations
+	commons     *gnarkmpc.SrsCommons
+	consumed    bool
+}
+
+func initializeOwnedPhase2(circuit *CompiledCircuit, commons *gnarkmpc.SrsCommons) (*ownedPhase2Initialization, error) {
+	if err := validatePhase2Inputs(circuit, commons); err != nil {
+		return nil, err
 	}
 
 	initial := new(gnarkmpc.Phase2)
+	var evaluations gnarkmpc.Phase2Evaluations
 	if err := runGnarkMutation("initialize Phase 2", func() {
-		_ = initial.Initialize(circuit.R1CS, commons)
+		evaluations = initial.Initialize(circuit.R1CS, commons)
 	}); err != nil {
-		return nil, Phase2Shape{}, err
+		return nil, err
 	}
 	shape, err := DerivePhase2Shape(initial)
 	if err != nil {
-		return nil, Phase2Shape{}, fmt.Errorf("derive initial Phase 2 shape: %w", err)
+		return nil, fmt.Errorf("derive initial Phase 2 shape: %w", err)
 	}
 	if shape.ChallengeLength != 0 {
-		return nil, Phase2Shape{}, fmt.Errorf("initial Phase 2 challenge is %d bytes, want 0", shape.ChallengeLength)
+		return nil, fmt.Errorf("initial Phase 2 challenge is %d bytes, want 0", shape.ChallengeLength)
 	}
 	if !equalPhase2Shape(shape, circuit.Binding.Phase2Shape) {
-		return nil, Phase2Shape{}, fmt.Errorf(
+		return nil, fmt.Errorf(
 			"initialized Phase 2 shape %+v does not match circuit binding %+v",
 			shape,
 			circuit.Binding.Phase2Shape,
 		)
 	}
-	return initial, shape, nil
+	return &ownedPhase2Initialization{genesis: initial, shape: shape, evaluations: &evaluations, commons: commons}, nil
 }
 
 // DerivePhase2Shape returns the serialization/preflight shape of a Phase 2
@@ -139,22 +158,59 @@ func ContributePhase2Loaded(
 		return nil, err
 	}
 
+	return contributePhase2FromHead(head)
+}
+
+func contributePhase2FromVerifiedGenesis(genesis *gnarkmpc.Phase2, shape Phase2Shape, count int, load Phase2Loader) (*gnarkmpc.Phase2, error) {
+	head, err := replayPhase2FromVerifiedGenesis(genesis, shape, count, load)
+	if err != nil {
+		return nil, err
+	}
+	return contributePhase2FromHead(head)
+}
+
+func contributePhase2FromHead(head *gnarkmpc.Phase2) (*gnarkmpc.Phase2, error) {
+	if head == nil {
+		return nil, errors.New("Phase 2 head is required")
+	}
+	digest, err := writerDigest(head)
+	if err != nil {
+		return nil, err
+	}
+	return contributePhase2FromAuthenticatedHead(head, digest)
+}
+
+func contributePhase2FromAuthenticatedHead(head *gnarkmpc.Phase2, predecessor Digest, progress ...StageProgress) (*gnarkmpc.Phase2, error) {
+	if head == nil {
+		return nil, errors.New("authenticated Phase 2 head is required")
+	}
 	next := new(gnarkmpc.Phase2)
 	if err := streamClone(head, next); err != nil {
 		return nil, fmt.Errorf("clone Phase 2 head: %w", err)
 	}
+	if len(progress) > 0 && progress[0] != nil {
+		progress[0]("Creating your contribution", 3, 5)
+	}
 	if err := runGnarkMutation("Phase 2 contribution", next.Contribute); err != nil {
 		return nil, err
+	}
+	if len(progress) > 0 && progress[0] != nil {
+		progress[0]("Checking your contribution", 4, 5)
 	}
 	if err := requireContributionChallenge(next.Challenge, "new Phase 2 contribution"); err != nil {
 		return nil, err
 	}
+	if err := requireChallengeMatchesDigest(next.Challenge, predecessor); err != nil {
+		return nil, fmt.Errorf("generated Phase 2 challenge: %w", err)
+	}
 	if err := requireSamePhase2Structure(head, next); err != nil {
 		return nil, fmt.Errorf("new Phase 2 contribution shape: %w", err)
 	}
-	if err := runGnarkVerification("verify new Phase 2 contribution", func() error {
-		return head.Verify(next)
-	}); err != nil {
+	check := new(gnarkmpc.Phase2)
+	if err := streamClone(next, check); err != nil {
+		return nil, fmt.Errorf("decode generated Phase 2 contribution: %w", err)
+	}
+	if err := verifyPhase2Transition(head, check); err != nil {
 		return nil, fmt.Errorf("verify new Phase 2 contribution: %w", err)
 	}
 	return next, nil
@@ -198,6 +254,30 @@ func SealPhase2Loaded(
 		return nil, nil, err
 	}
 
+	return sealPhase2Head(head, commons, evaluations, beaconChallenge)
+}
+
+func sealOwnedPhase2(owned *ownedPhase2Initialization, beaconChallenge []byte, count int, load Phase2Loader) (*groth16bls.ProvingKey, *groth16bls.VerifyingKey, error) {
+	if err := requireBeaconChallenge(beaconChallenge); err != nil {
+		return nil, nil, err
+	}
+	if count <= 0 || load == nil {
+		return nil, nil, errors.New("seal Phase 2 requires contributions and a loader")
+	}
+	if owned == nil || owned.consumed || owned.evaluations == nil {
+		return nil, nil, errors.New("Phase 2 initialization is missing or already consumed")
+	}
+	owned.consumed = true
+	evaluations := owned.evaluations
+	owned.evaluations = nil
+	head, err := replayPhase2FromVerifiedGenesis(owned.genesis, owned.shape, count, load)
+	if err != nil {
+		return nil, nil, err
+	}
+	return sealPhase2Head(head, owned.commons, evaluations, beaconChallenge)
+}
+
+func sealPhase2Head(head *gnarkmpc.Phase2, commons *gnarkmpc.SrsCommons, evaluations *gnarkmpc.Phase2Evaluations, beaconChallenge []byte) (*groth16bls.ProvingKey, *groth16bls.VerifyingKey, error) {
 	// Seal does not copy the evaluations: the returned proving and verifying
 	// keys retain evals.G1.CKK and evals.G1.VKK directly. The evaluations must
 	// therefore stay per-call and must never be cached or shared between
@@ -250,35 +330,58 @@ func replayPhase2State(
 		return nil, nil, errors.New("initialized Phase 2 shape does not match circuit binding")
 	}
 
+	head, err := replayPhase2FromVerifiedGenesis(previous, circuit.Binding.Phase2Shape, contributionCount, load)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Each replay owns fresh evaluations. Seal retains their commitment slices,
+	// so evaluations must never be shared between independently produced keys.
+	return head, &evaluations, nil
+}
+
+// replayPhase2FromVerifiedGenesis consumes a freshly derived genesis from the
+// current verification call. Callers must establish deterministic initialization;
+// this helper does not authenticate a stored genesis or authorize cached state.
+// Every archived contribution is cloned and mathematically verified.
+func replayPhase2FromVerifiedGenesis(previous *gnarkmpc.Phase2, expectedShape Phase2Shape, contributionCount int, load Phase2Loader) (*gnarkmpc.Phase2, error) {
+	if contributionCount < 0 {
+		return nil, fmt.Errorf("replay Phase 2: contribution count %d is negative", contributionCount)
+	}
+	if contributionCount > 0 && load == nil {
+		return nil, errors.New("replay Phase 2: contribution loader is required")
+	}
+	initialShape, err := DerivePhase2Shape(previous)
+	if err != nil {
+		return nil, fmt.Errorf("derive initial Phase 2 shape: %w", err)
+	}
+	if initialShape.ChallengeLength != 0 || !equalPhase2Shape(initialShape, expectedShape) {
+		return nil, errors.New("verified Phase 2 genesis shape or challenge differs from circuit binding")
+	}
 	for i := 0; i < contributionCount; i++ {
 		archived, err := load(i)
 		if err != nil {
-			return nil, nil, fmt.Errorf("load Phase 2 contribution %d: %w", i+1, err)
+			return nil, fmt.Errorf("load Phase 2 contribution %d: %w", i+1, err)
 		}
 		if archived == nil {
-			return nil, nil, fmt.Errorf("replay Phase 2 contribution %d: nil contribution", i+1)
+			return nil, fmt.Errorf("replay Phase 2 contribution %d: nil contribution", i+1)
 		}
 		if err := requireContributionChallenge(archived.Challenge, fmt.Sprintf("Phase 2 contribution %d", i+1)); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 
 		next := new(gnarkmpc.Phase2)
 		if err := streamClone(archived, next); err != nil {
-			return nil, nil, fmt.Errorf("clone Phase 2 contribution %d: %w", i+1, err)
+			return nil, fmt.Errorf("clone Phase 2 contribution %d: %w", i+1, err)
 		}
 		if err := requirePhase2Structure(initialShape, next); err != nil {
-			return nil, nil, fmt.Errorf("Phase 2 contribution %d shape: %w", i+1, err)
+			return nil, fmt.Errorf("Phase 2 contribution %d shape: %w", i+1, err)
 		}
 		if err := verifyPhase2Transition(previous, next); err != nil {
-			return nil, nil, fmt.Errorf("verify Phase 2 contribution %d: %w", i+1, err)
+			return nil, fmt.Errorf("verify Phase 2 contribution %d: %w", i+1, err)
 		}
 		previous = next
 	}
-	// The returned evaluations are freshly derived for this replay and must be
-	// treated that way. Seal retains their CKK and VKK slices in the keys it
-	// produces, so a cached or reused Phase2Evaluations would leave two key
-	// sets aliasing one set of commitment arrays.
-	return previous, &evaluations, nil
+	return previous, nil
 }
 
 func verifyPhase2Transition(previous, next *gnarkmpc.Phase2) error {

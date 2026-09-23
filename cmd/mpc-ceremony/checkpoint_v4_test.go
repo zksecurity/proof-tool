@@ -20,8 +20,8 @@ func TestCheckpointV4CircuitClassification(t *testing.T) {
 		math  bool
 		kinds []m.CheckpointTransitionKind
 	}{
-		{true, []m.CheckpointTransitionKind{m.CheckpointInitial, m.CheckpointPhase1CandidateAccepted, m.CheckpointPhase2CandidateAccepted, m.CheckpointPhase1Sealed, m.CheckpointPhase2Initialized, m.CheckpointFinalCandidateRecorded}},
-		{false, []m.CheckpointTransitionKind{m.CheckpointPhase1CandidateAllocated, m.CheckpointPhase2CandidateAllocated, m.CheckpointDeliveryRetired, m.CheckpointDeliveryReallocated, m.CheckpointContributionRejected, m.CheckpointPhase1Closed, m.CheckpointPhase2Closed, m.CheckpointPhase1BeaconRecorded, m.CheckpointPhase2BeaconRecorded, m.CheckpointReleaseReviewRecorded, m.CheckpointFinalReleaseRecorded, m.CheckpointEnrollmentRecorded, m.CheckpointMirrorRecorded, m.CheckpointWitnessRecorded, m.CheckpointAuditRecorded, m.CheckpointIncidentRecorded, m.CheckpointAborted, m.CheckpointRestarted}},
+		{true, []m.CheckpointTransitionKind{m.CheckpointInitial, m.CheckpointPhase1CandidateAccepted, m.CheckpointPhase2CandidateAccepted, m.CheckpointPhase1Closed, m.CheckpointPhase1Sealed, m.CheckpointPhase2Initialized, m.CheckpointPhase2Closed, m.CheckpointFinalCandidateRecorded}},
+		{false, []m.CheckpointTransitionKind{m.CheckpointPhase1CandidateAllocated, m.CheckpointPhase2CandidateAllocated, m.CheckpointDeliveryRetired, m.CheckpointDeliveryReallocated, m.CheckpointContributionRejected, m.CheckpointPhase1BeaconRecorded, m.CheckpointPhase2BeaconRecorded, m.CheckpointReleaseReviewRecorded, m.CheckpointFinalReleaseRecorded, m.CheckpointEnrollmentRecorded, m.CheckpointMirrorRecorded, m.CheckpointWitnessRecorded, m.CheckpointAuditRecorded, m.CheckpointIncidentRecorded, m.CheckpointAborted, m.CheckpointRestarted}},
 	} {
 		for _, kind := range tc.kinds {
 			if got, err := checkpointNeedsCircuitV4(kind); err != nil || got != tc.math {

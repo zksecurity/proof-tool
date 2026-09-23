@@ -72,7 +72,11 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	var circuit *mpcceremony.CompiledCircuit
 	var err error
 	if checkpointPhase2One || checkpointV4 {
-		circuit, err = mpcceremony.CompileForKeyVersion(mpcceremony.KeyVersionRehearsal)
+		keyVersion := mpcceremony.KeyVersionRehearsal
+		if os.Getenv("MPC_WORKFLOW_K11") == "1" {
+			keyVersion = mpcceremony.KeyVersionRehearsalK11
+		}
+		circuit, err = mpcceremony.CompileForKeyVersion(keyVersion)
 	} else {
 		compiled, compileErr := frontend.Compile(
 			ecc.BLS12_381.ScalarField(),
@@ -304,6 +308,9 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	trusted, err := mpcceremony.LoadSignedDefinition(trust)
 	if err != nil {
 		return err
+	}
+	if checkpointV4 && trusted.Definition.Schema != mpcceremony.DefinitionSchemaV5 {
+		return fmt.Errorf("workflow fixture requires V5 definition, got %s", trusted.Definition.Schema)
 	}
 	if checkpointV4 {
 		return runCheckpointV4Turn(outputRoot, ceremonyRoot, trust, circuit, trusted.Definition, coordinatorPrivate, coordinatorKeyPath, participant1Private, participant1KeyPath)
@@ -736,6 +743,15 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	)
 	if err != nil {
 		return fmt.Errorf("Phase 2 participant 1: %w", err)
+	}
+	if os.Getenv("MPC_WORKFLOW_CHECK_GENESIS") == "1" {
+		if err := checkGenesisVerification(mpcceremony.VerifyPhase2GenesisFilesOptions{
+			Trust: trust, Circuit: circuit, TranscriptRoot: ceremonyRoot,
+			Phase1SealPath: phase1Seal.SealPath, Phase1SealSignaturePath: phase1Seal.SignaturePath,
+			Phase2ChainPath: phase2Initialized.ChainPath, Phase2ChainSignaturePath: phase2Initialized.ChainSignaturePath,
+		}, phase2Paths); err != nil {
+			return err
+		}
 	}
 	if !checkpointPhase2One {
 		phase2Paths, err = contributeAndAccept(
@@ -1195,7 +1211,7 @@ func writeTinyPublicEvidence(
 	scalar := new(big.Int).SetBytes(reversed)
 	scalar.Mod(scalar, ecc.BLS12_381.ScalarField())
 	var assignment frontend.Circuit = &tinyCommittedCircuit{Public: scalar, Secret: scalar}
-	if circuit.Binding.KeyVersion == mpcceremony.KeyVersionRehearsal {
+	if mpcceremony.IsCeremonyTestCircuit(circuit.Binding.KeyVersion) {
 		field := ecc.BLS12_381.ScalarField()
 		q := new(big.Int).Sub(field, big.NewInt(1))
 		q.Div(q, big.NewInt(3))
@@ -1208,6 +1224,9 @@ func writeTinyPublicEvidence(
 			return errors.New("rehearsal golden scalar is not a cube")
 		}
 		assignment = &rehearsal.Circuit{X: cubeRoot, Pub: scalar}
+		if circuit.Binding.KeyVersion == mpcceremony.KeyVersionRehearsalK11 {
+			assignment = &rehearsal.K11Circuit{X: cubeRoot, Pub: scalar}
+		}
 	}
 	fullWitness, err := frontend.NewWitness(assignment, ecc.BLS12_381.ScalarField())
 	if err != nil {

@@ -349,20 +349,25 @@ func VerifyAndAcceptAllocatedCandidateV4(options AcceptAllocatedCandidateV4Optio
 		}
 		accept.Phase1SealPath = filepath.Join(options.ArtifactRoot, filepath.FromSlash(previous.Progress.Phase1Seal.Record.Name))
 		accept.Phase1SealSignaturePath = filepath.Join(options.ArtifactRoot, filepath.FromSlash(previous.Progress.Phase1Seal.Signature.Name))
+		accept.assignedInput = &authenticatedContributionAssignment{
+			definition: stored.trusted.DefinitionRefs,
+			chain:      state.Chain, phase1Chain: previous.Progress.Phase1.Chain,
+			phase1Seal: *previous.Progress.Phase1Seal,
+		}
 	}
 	accepted, err := VerifyAndAcceptContribution(accept)
 	if err != nil {
 		return AcceptedCandidateCheckpointV4{}, err
 	}
 	acceptedPaths := PhaseTranscriptPaths{RootDir: options.ArtifactRoot, ChainPath: accepted.ChainPath, ChainSignaturePath: accepted.ChainSignaturePath}
-	var chain Chain
-	var chainRefs SignedArtifactRefs
-	if scope.Phase == Phase1 {
-		chain, chainRefs, err = VerifyAcceptedPhase1Chain(options.Trust, options.Circuit, acceptedPaths)
-	} else {
-		chain, chainRefs, err = VerifyAcceptedPhase2Chain(options.Trust, options.Circuit, options.ArtifactRoot, accept.Phase1SealPath, accept.Phase1SealSignaturePath, acceptedPaths)
-	}
+	// This signed chain supplies only the provisional projection. The final
+	// PrepareCheckpointV4 call below independently verifies the complete
+	// accepted chain, candidate inventory and allocation before returning bytes.
+	chain, chainRefs, err := LoadSignedChainExact(stored.trusted, acceptedPaths)
 	if err != nil {
+		return AcceptedCandidateCheckpointV4{}, err
+	}
+	if err := validateAcceptedProjectionChainV4(chain, scope); err != nil {
 		return AcceptedCandidateCheckpointV4{}, err
 	}
 	last := chain.Records[len(chain.Records)-1]
@@ -407,7 +412,13 @@ func VerifyAndAcceptAllocatedCandidateV4(options AcceptAllocatedCandidateV4Optio
 		next.Progress.Phase2 = &nextState
 	}
 	next.AcceptedArtifacts = appendUniqueSortedArtifactsV4(previous.AcceptedArtifacts, append(signedArtifacts(&chainRefs), evidence...)...)
-	canonical, err := PrepareCheckpointV4(CheckpointPreparationV4{Trust: options.Trust, ArtifactRoot: options.ArtifactRoot, Proposal: next, Circuit: options.Circuit})
+	preparation := CheckpointPreparationV4{Trust: options.Trust, ArtifactRoot: options.ArtifactRoot, Proposal: next, Circuit: options.Circuit}
+	if scope.Phase == Phase2 {
+		preparation.coordinatorAcceptedChain = &accepted.Chain
+		preparation.coordinatorAcceptedRefs = chainRefs
+		preparation.coordinatorDefinition = stored.trusted.DefinitionRefs
+	}
+	canonical, err := PrepareCheckpointV4(preparation)
 	if err != nil {
 		return AcceptedCandidateCheckpointV4{}, err
 	}
@@ -441,4 +452,13 @@ func appendUniqueSortedArtifactsV4(base []ArtifactRef, values ...ArtifactRef) []
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result
+}
+
+// Bound the provisional last-record lookup before constructing an untrusted
+// checkpoint proposal. Authoritative lifecycle verification remains mandatory.
+func validateAcceptedProjectionChainV4(chain Chain, scope ContributionScope) error {
+	if (scope.Phase != Phase1 && scope.Phase != Phase2) || chain.Phase != scope.Phase || len(chain.Records) == 0 || len(chain.Records) != int(scope.Index) {
+		return errors.New("accepted chain phase or count differs from allocated scope")
+	}
+	return nil
 }

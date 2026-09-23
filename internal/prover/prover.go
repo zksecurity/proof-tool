@@ -380,14 +380,23 @@ func InspectOwnershipDestinationBundle(dir string, requireProvingKey bool) Bundl
 	return inspectBundle(dir, requireProvingKey, ownershipDestinationKeyConfig())
 }
 
-// InspectRehearsalBundle is only for ceremony rehearsal release verification.
-// It is deliberately absent from the production keyprofile registry and does
-// not provide a production prover/verifier loader for the trivial circuit.
+// InspectRehearsalBundle is only for ceremony test-circuit key verification.
+// It is deliberately absent from the application keyprofile registry and does
+// not provide an ownership prover/verifier loader for the trivial circuit.
 func InspectRehearsalBundle(dir string, requireProvingKey bool) BundleStatus {
 	if dir == "" {
 		return BundleStatus{State: "invalid", Error: "explicit rehearsal keys directory is required"}
 	}
 	return inspectBundle(dir, requireProvingKey, keyConfig{KeyVersion: rehearsal.KeyVersion, CircuitID: rehearsal.CircuitID})
+}
+
+// InspectRehearsalK11Bundle verifies the ceremony-only K11 test key identity.
+// It is deliberately absent from the application prover profile registry.
+func InspectRehearsalK11Bundle(dir string, requireProvingKey bool) BundleStatus {
+	if dir == "" {
+		return BundleStatus{State: "invalid", Error: "explicit K11 test keys directory is required"}
+	}
+	return inspectBundle(dir, requireProvingKey, keyConfig{KeyVersion: rehearsal.K11KeyVersion, CircuitID: rehearsal.K11CircuitID})
 }
 
 func InspectOwnershipMultiBundle(dir string, requireProvingKey bool) BundleStatus {

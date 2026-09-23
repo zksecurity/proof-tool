@@ -19,8 +19,10 @@ type RecordedCheckpointV4Options struct {
 }
 
 type RecordedCheckpointV4 struct {
-	Checkpoint CheckpointV4
-	Canonical  []byte
+	// Diagnostic local metadata, not a signed public replay claim.
+	Phase1VerificationMethod string
+	Checkpoint               CheckpointV4
+	Canonical                []byte
 }
 
 func recordableCheckpointKindV4(kind CheckpointTransitionKind) bool {
@@ -41,6 +43,31 @@ func recordableCheckpointKindV4(kind CheckpointTransitionKind) bool {
 // Allocation and candidate acceptance have dedicated APIs; restart and
 // rejection remain explicit advanced proposal operations.
 func PrepareRecordedCheckpointV4(options RecordedCheckpointV4Options) (RecordedCheckpointV4, error) {
+	return prepareRecordedCheckpointV4(options, phase1IndependentReplay, "", false)
+}
+
+// PrepareCoordinatorRecordedCheckpointV4 relies on prior honest coordinator
+// acceptance checks only at the sealed-Phase1 and Phase2-genesis boundaries.
+// Public verification keeps PrepareRecordedCheckpointV4 and full replay.
+func PrepareCoordinatorRecordedCheckpointV4(options RecordedCheckpointV4Options, signingKeyPath string, fullReplay bool) (RecordedCheckpointV4, error) {
+	if signingKeyPath == "" {
+		return RecordedCheckpointV4{}, errors.New("coordinator signing key is required")
+	}
+	if fullReplay {
+		switch options.Kind {
+		case CheckpointPhase1Closed, CheckpointPhase1Sealed, CheckpointPhase2Initialized, CheckpointPhase2Closed:
+		default:
+			return RecordedCheckpointV4{}, errors.New("--full-replay is not supported for this checkpoint transition")
+		}
+	}
+	method := phase1CoordinatorAcceptance
+	if fullReplay {
+		method = phase1IndependentReplay
+	}
+	return prepareRecordedCheckpointV4(options, method, signingKeyPath, fullReplay)
+}
+
+func prepareRecordedCheckpointV4(options RecordedCheckpointV4Options, method phase1VerificationMethod, signingKeyPath string, fullReplay bool) (RecordedCheckpointV4, error) {
 	if !recordableCheckpointKindV4(options.Kind) {
 		return RecordedCheckpointV4{}, errors.New("transition is not supported by record-v4")
 	}
@@ -51,6 +78,14 @@ func PrepareRecordedCheckpointV4(options RecordedCheckpointV4Options) (RecordedC
 	defer func() { _ = stored.reader.root.Close() }()
 	previous := stored.ancestry.head
 	d := stored.trusted.Definition
+	if signingKeyPath != "" {
+		if _, _, err := loadMatchingPrivateKey(signingKeyPath, d.Coordinator); err != nil {
+			return RecordedCheckpointV4{}, err
+		}
+	}
+	if !d.UsesCoordinatorReplay() || (options.Kind != CheckpointPhase1Sealed && options.Kind != CheckpointPhase2Initialized && options.Kind != CheckpointPhase2Closed) {
+		method = phase1IndependentReplay
+	}
 
 	next, err := cloneCheckpointForTurnV4(previous)
 	if err != nil {
@@ -73,19 +108,30 @@ func PrepareRecordedCheckpointV4(options RecordedCheckpointV4Options) (RecordedC
 			return RecordedCheckpointV4{}, errors.New("phase2 initialization requires the authenticated phase1 seal and circuit")
 		}
 		path := func(ref ArtifactRef) string { return filepath.Join(options.ArtifactRoot, filepath.FromSlash(ref.Name)) }
-		verified, err := VerifyPhase2GenesisFiles(VerifyPhase2GenesisFilesOptions{
-			Trust: options.Trust, Circuit: options.Circuit, TranscriptRoot: options.ArtifactRoot,
-			Phase1SealPath: path(previous.Progress.Phase1Seal.Record), Phase1SealSignaturePath: path(previous.Progress.Phase1Seal.Signature),
-			Phase2ChainPath: path(options.Record.Record), Phase2ChainSignaturePath: path(options.Record.Signature),
+		// Derive only a provisional projection here. PrepareCheckpointV4 below
+		// performs the authoritative deterministic-genesis verification once.
+		chain, refs, err := LoadSignedChainExact(stored.trusted, PhaseTranscriptPaths{
+			RootDir: options.ArtifactRoot, ChainPath: path(options.Record.Record),
+			ChainSignaturePath: path(options.Record.Signature),
 		})
 		if err != nil {
 			return RecordedCheckpointV4{}, err
 		}
-		headID, err := verified.Chain.HeadRecordID()
+		if refs != options.Record {
+			return RecordedCheckpointV4{}, errors.New("phase2 initialization chain references differ from supplied record")
+		}
+		if chain.Phase != Phase2 || len(chain.Records) != 0 {
+			return RecordedCheckpointV4{}, errors.New("phase2 initialization requires a zero-contribution Phase 2 chain")
+		}
+		headID, err := chain.HeadRecordID()
 		if err != nil {
 			return RecordedCheckpointV4{}, err
 		}
-		next.Progress.Phase2 = &CheckpointPhaseState{Phase: Phase2, HeadRecordID: headID, HeadPayload: verified.Genesis, Chain: verified.ChainRefs}
+		genesis, err := chain.HeadPayload()
+		if err != nil {
+			return RecordedCheckpointV4{}, err
+		}
+		next.Progress.Phase2 = &CheckpointPhaseState{Phase: Phase2, HeadRecordID: headID, HeadPayload: genesis, Chain: refs}
 	case CheckpointPhase2Closed:
 		next.Progress.Phase2Closure = &options.Record
 	case CheckpointPhase2BeaconRecorded:
@@ -108,9 +154,16 @@ func PrepareRecordedCheckpointV4(options RecordedCheckpointV4Options) (RecordedC
 	canonical, err := PrepareCheckpointV4(CheckpointPreparationV4{
 		Trust: options.Trust, ArtifactRoot: options.ArtifactRoot, Proposal: next, Circuit: options.Circuit,
 		RequireCurrentReplayExecutable: true,
+		phase1Method:                   method,
+		coordinatorFullReplay:          fullReplay,
+		coordinatorDefinition:          stored.trusted.DefinitionRefs,
 	})
 	if err != nil {
 		return RecordedCheckpointV4{}, err
 	}
-	return RecordedCheckpointV4{Checkpoint: next, Canonical: canonical}, nil
+	label := ""
+	if options.Kind == CheckpointPhase1Sealed || options.Kind == CheckpointPhase2Initialized {
+		label = string(method)
+	}
+	return RecordedCheckpointV4{Checkpoint: next, Canonical: canonical, Phase1VerificationMethod: label}, nil
 }

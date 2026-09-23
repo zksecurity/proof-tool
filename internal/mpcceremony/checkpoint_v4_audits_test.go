@@ -8,7 +8,7 @@ import (
 
 func TestCheckpointV4AuditCollectionPreservesQuorumAndBinding(t *testing.T) {
 	d := adversarialDefinition(t)
-	d.Schema = DefinitionSchemaV4
+	d.Schema = DefinitionSchemaV5
 	d.ReleaseVerification = CoordinatorReplayReleaseV1
 	d.AssurancePolicy = &AssurancePolicy{PassingCeremonyAudits: 2}
 	var err error

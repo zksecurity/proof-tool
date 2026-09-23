@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -13,7 +14,7 @@ import (
 	m "proof-tool/internal/mpcceremony"
 )
 
-func runCheckpointV4Review(root string, trust m.TrustPaths, d m.CeremonyDefinition, head m.CheckpointV4, headRefs, bundle m.SignedArtifactRefs, coordinator ed25519.PrivateKey) error {
+func runCheckpointV4Review(root string, trust m.TrustPaths, d m.CeremonyDefinition, head m.CheckpointV4, headRefs, bundle m.SignedArtifactRefs, expectedAudits []m.SignedArtifactRefs, coordinator ed25519.PrivateKey) error {
 	at := mustUTC("2023-08-23T15:11:39Z")
 	review, err := m.VerifyReleaseReviewV4(trust, root, headRefs, bundle, at)
 	if err != nil {
@@ -31,8 +32,17 @@ func runCheckpointV4Review(root string, trust m.TrustPaths, d m.CeremonyDefiniti
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(rb, ab) || review.ReviewCheckpoint != headRefs || len(review.Audits) != int(d.AssurancePolicy.PassingCeremonyAudits) {
-		return fmt.Errorf("final review is not deterministic or exactly bound")
+	if !bytes.Equal(rb, ab) {
+		return fmt.Errorf("final review is not deterministic")
+	}
+	if review.ReviewCheckpoint != headRefs {
+		return fmt.Errorf("final review is bound to a different checkpoint")
+	}
+	if len(review.Audits) != len(expectedAudits) || !slices.Equal(review.Audits, expectedAudits) {
+		return fmt.Errorf("final review audit inventory differs from committed reports: got %d, want %d", len(review.Audits), len(expectedAudits))
+	}
+	if len(review.Audits) < int(d.AssurancePolicy.PassingCeremonyAudits) {
+		return fmt.Errorf("final review has %d audits, below required minimum %d", len(review.Audits), d.AssurancePolicy.PassingCeremonyAudits)
 	}
 	// Copy only the declared review dependencies, not the ceremony workspace.
 	// The real tiny fixture must still verify without its contribution payloads.

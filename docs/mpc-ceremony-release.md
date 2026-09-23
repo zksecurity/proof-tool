@@ -52,7 +52,9 @@ Tiny rehearsals can complete final release signing and verification through
 rehearsal-mode ceremony definition. Ordinary application key-bundle verification
 still rejects it; it is not registered as a production prover/verifier profile.
 Native file hashes, release signatures, audits and operational evidence remain
-mandatory. A tiny release cannot satisfy the production K=21 decision gate.
+mandatory. A rehearsal-mode run cannot receive production GO. A production-mode
+run using a test circuit can receive GO only for its exact signed circuit and
+release; its keys cannot prove ownership.
 
 ## Coordinated distribution
 

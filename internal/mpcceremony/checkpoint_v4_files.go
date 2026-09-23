@@ -284,10 +284,18 @@ func openStoredCheckpointV4(trust TrustPaths, artifactRoot string, head SignedAr
 // signed. Proposal contains only protocol references; Relay owns delivery
 // manifests and object keys. No files are written and no signature is created.
 type CheckpointPreparationV4 struct {
-	Trust        TrustPaths
-	ArtifactRoot string
-	Proposal     CheckpointV4
-	Circuit      *CompiledCircuit
+	// Only the key-authenticated coordinator authoring wrapper can set this.
+	phase1Method          phase1VerificationMethod
+	coordinatorFullReplay bool
+	// Bound only by the allocated acceptance wrapper after its own transition
+	// mathematics passed. Generic checkpoint verification cannot set this.
+	coordinatorAcceptedChain *Chain
+	coordinatorAcceptedRefs  SignedArtifactRefs
+	coordinatorDefinition    SignedArtifactRefs
+	Trust                    TrustPaths
+	ArtifactRoot             string
+	Proposal                 CheckpointV4
+	Circuit                  *CompiledCircuit
 	// RequireCurrentReplayExecutable is set by authoring/signing paths. A
 	// verifier may authenticate a checkpoint produced by any executable in the
 	// definition's signed allowlist; it must not require that historical replay
@@ -305,6 +313,9 @@ func PrepareCheckpointV4(options CheckpointPreparationV4) ([]byte, error) {
 	trusted, err := loadOperationalCeremony(options.Trust)
 	if err != nil {
 		return nil, err
+	}
+	if (options.phase1Method == phase1CoordinatorAcceptance || options.coordinatorAcceptedChain != nil) && options.coordinatorDefinition != trusted.DefinitionRefs {
+		return nil, errors.New("coordinator definition changed during checkpoint preparation")
 	}
 	d := trusted.Definition
 	db, err := MarshalCanonical(d)
@@ -557,6 +568,12 @@ func verifyAcceptedCandidateV4(options CheckpointPreparationV4, trusted *Trusted
 	var err error
 	if scope.Phase == Phase1 {
 		chain, refs, err = VerifyAcceptedPhase1Chain(options.Trust, options.Circuit, paths)
+	} else if options.coordinatorAcceptedChain != nil {
+		seal := previous.Progress.Phase1Seal
+		chain, refs, err = loadAcceptedPhase2FilesExact(trusted, options.Circuit, *seal, paths)
+		if err == nil && (refs != options.coordinatorAcceptedRefs || !reflect.DeepEqual(chain, *options.coordinatorAcceptedChain)) {
+			err = errors.New("allocated acceptance chain differs from the signed mathematical acceptance result")
+		}
 	} else {
 		seal := previous.Progress.Phase1Seal
 		chain, refs, err = VerifyAcceptedPhase2Chain(options.Trust, options.Circuit, reader.path, filepath.Join(reader.path, seal.Record.Name), filepath.Join(reader.path, seal.Signature.Name), paths)

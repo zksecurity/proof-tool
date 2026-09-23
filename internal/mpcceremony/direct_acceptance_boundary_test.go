@@ -227,17 +227,34 @@ func TestVerifyAcceptedPhase1ChainCheckpointBoundary(t *testing.T) {
 	fixture := newDirectAcceptanceFixture(t)
 	// TrustedCeremony deliberately does not retain source paths. Use the
 	// fixture's canonical layout for this public read-only entry point.
-	if _, _, err := verifyAcceptedPhase1ChainForTest(fixture.trusted, fixture.circuit, fixture.phase1Chain1); err != nil {
+	chain, refs, err := verifyAcceptedPhase1ChainForTest(fixture.trusted, fixture.circuit, fixture.phase1Chain1)
+	if err != nil {
 		t.Fatalf("verify authentic accepted phase1 chain: %v", err)
+	}
+	recordBytes, err := os.ReadFile(fixture.phase1Chain1.ChainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signatureBytes, err := os.ReadFile(fixture.phase1Chain1.ChainSignaturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodedChain, err := MarshalCanonical(chain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(encodedChain) != string(recordBytes) || refs.Record.Digest != NewDigest(recordBytes) || refs.Signature.Digest != NewDigest(signatureBytes) {
+		t.Fatal("accepted chain and references do not describe the same exact signed bytes")
 	}
 
 	tests := []struct {
 		name string
 		path string
 	}{
-		{name: "candidate mathematics", path: filepath.Join(fixture.ceremonyRoot, "phase1", "contributions", "0001", "contribution.bin")},
+		{name: "candidate payload", path: filepath.Join(fixture.ceremonyRoot, "phase1", "contributions", "0001", "contribution.bin")},
 		{name: "cleanup signature", path: filepath.Join(fixture.ceremonyRoot, "phase1", "contributions", "0001", "erasure.sig")},
 		{name: "accepted chain and head", path: fixture.phase1Chain1.ChainPath},
+		{name: "chain signature", path: fixture.phase1Chain1.ChainSignaturePath},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -251,7 +268,7 @@ func TestVerifyAcceptedPhase1ChainCheckpointBoundary(t *testing.T) {
 				t.Fatal(err)
 			}
 			if _, _, err := verifyAcceptedPhase1ChainForTest(fixture.trusted, fixture.circuit, fixture.phase1Chain1); err == nil {
-				t.Fatal("changed accepted evidence passed full checkpoint replay")
+				t.Fatal("changed accepted evidence passed checkpoint authentication")
 			}
 			if err := os.WriteFile(test.path, original, 0o600); err != nil {
 				t.Fatal(err)
@@ -260,22 +277,10 @@ func TestVerifyAcceptedPhase1ChainCheckpointBoundary(t *testing.T) {
 	}
 }
 
-// verifyAcceptedPhase1ChainForTest exercises the replay portion of the public
-// boundary without pretending that the temporary Go test executable is a
-// released ceremony binary. Production code has no equivalent bypass helper.
+// verifyAcceptedPhase1ChainForTest exercises the accepted-evidence boundary
+// without claiming the Go test executable is a released ceremony binary.
 func verifyAcceptedPhase1ChainForTest(trusted *TrustedCeremony, circuit *CompiledCircuit, paths PhaseTranscriptPaths) (Chain, SignedArtifactRefs, error) {
-	if err := validateWorkflowCircuit(trusted, circuit); err != nil {
-		return Chain{}, SignedArtifactRefs{}, err
-	}
-	chain, err := loadVerifiedPhase1Files(trusted, circuit, paths)
-	if err != nil {
-		return Chain{}, SignedArtifactRefs{}, err
-	}
-	_, refs, err := LoadSignedChainExact(trusted, paths)
-	if err != nil {
-		return Chain{}, SignedArtifactRefs{}, err
-	}
-	return chain, refs, nil
+	return loadVerifiedPhase1FilesExact(trusted, circuit, paths)
 }
 
 func forgeCommonsAndRebindEmptyPhase2Chain(

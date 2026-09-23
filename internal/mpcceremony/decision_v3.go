@@ -11,9 +11,12 @@ import (
 const (
 	ProductionDecisionSchemaV4                     = "proof-tool-mpc-production-decision-v4"
 	ProductionDecisionDraftSchemaV4                = "proof-tool-mpc-production-decision-draft-v4"
+	ProductionDecisionSchemaV5                     = "proof-tool-mpc-production-decision-v5"
+	ProductionDecisionDraftSchemaV5                = "proof-tool-mpc-production-decision-draft-v5"
 	ProductionDecisionSchemaV3                     = "proof-tool-mpc-production-decision-v3"
 	ProductionDecisionDraftSchemaV3                = "proof-tool-mpc-production-decision-draft-v3"
 	GateSourceRelease               ProductionGate = "source-release"
+	GateExactCircuitRehearsal       ProductionGate = "exact-circuit-rehearsal"
 	DecisionSourceReportV3                         = "decision/evidence/source-release.json"
 )
 
@@ -86,6 +89,13 @@ type K21RehearsalEvidenceV3 struct {
 	Evidence ArtifactRef    `json:"evidence"`
 }
 
+// CircuitRehearsalEvidenceV5 names the exact signed circuit. The report is
+// reviewed by decision signers; its content is not inferred from its filename.
+type CircuitRehearsalEvidenceV5 struct {
+	Circuit  CircuitBinding `json:"circuit"`
+	Evidence ArtifactRef    `json:"evidence"`
+}
+
 type ProductionGateResultV3 struct {
 	Gate      ProductionGate       `json:"gate"`
 	Status    ProductionGateStatus `json:"status"`
@@ -94,20 +104,21 @@ type ProductionGateResultV3 struct {
 }
 
 type ProductionDecisionV3 struct {
-	Schema                string                    `json:"schema"`
-	DecisionID            string                    `json:"decision_id"`
-	CeremonyID            string                    `json:"ceremony_id"`
-	AssurancePolicy       *AssurancePolicy          `json:"assurance_policy"`
-	Release               FinalReleaseEvidenceV4    `json:"release"`
-	SourceRelease         SourceReleaseEvidenceV4   `json:"source_release"`
-	Auditors              []DecisionAuditorV3       `json:"auditors"`
-	ExternalAudits        []ExternalAuditEvidenceV3 `json:"external_audits"`
-	K21Rehearsal          K21RehearsalEvidenceV3    `json:"k21_rehearsal"`
-	MainnetDeploymentPlan ArtifactRef               `json:"mainnet_deployment_plan"`
-	FormalChecklist       ArtifactRef               `json:"formal_checklist"`
-	Gates                 []ProductionGateResultV3  `json:"gates"`
-	Decision              ProductionDecisionOutcome `json:"decision"`
-	DecidedAt             string                    `json:"decided_at"`
+	Schema                string                      `json:"schema"`
+	DecisionID            string                      `json:"decision_id"`
+	CeremonyID            string                      `json:"ceremony_id"`
+	AssurancePolicy       *AssurancePolicy            `json:"assurance_policy"`
+	Release               FinalReleaseEvidenceV4      `json:"release"`
+	SourceRelease         SourceReleaseEvidenceV4     `json:"source_release"`
+	Auditors              []DecisionAuditorV3         `json:"auditors"`
+	ExternalAudits        []ExternalAuditEvidenceV3   `json:"external_audits"`
+	K21Rehearsal          *K21RehearsalEvidenceV3     `json:"k21_rehearsal,omitempty"`
+	CircuitRehearsal      *CircuitRehearsalEvidenceV5 `json:"circuit_rehearsal,omitempty"`
+	MainnetDeploymentPlan ArtifactRef                 `json:"mainnet_deployment_plan"`
+	FormalChecklist       ArtifactRef                 `json:"formal_checklist"`
+	Gates                 []ProductionGateResultV3    `json:"gates"`
+	Decision              ProductionDecisionOutcome   `json:"decision"`
+	DecidedAt             string                      `json:"decided_at"`
 }
 
 func decisionGatesV3() []ProductionGate {
@@ -213,15 +224,18 @@ func NewProductionDecisionV3(value ProductionDecisionV3) (ProductionDecisionV3, 
 func computeProductionDecisionIDV3(value ProductionDecisionV3) (string, error) {
 	value.DecisionID = ""
 	domain := "proof-tool/mpc-ceremony/production-decision/v3"
-	if value.Schema == ProductionDecisionSchemaV4 {
+	switch value.Schema {
+	case ProductionDecisionSchemaV4:
 		domain = "proof-tool/mpc-ceremony/production-decision/v4"
+	case ProductionDecisionSchemaV5:
+		domain = "proof-tool/mpc-ceremony/production-decision/v5"
 	}
 	return canonicalHash(domain, value)
 }
 
 func (d ProductionDecisionV3) Validate() error {
 
-	if (d.Schema != ProductionDecisionSchemaV3 && d.Schema != ProductionDecisionSchemaV4) || d.AssurancePolicy == nil || d.Auditors == nil || d.ExternalAudits == nil || d.Gates == nil {
+	if (d.Schema != ProductionDecisionSchemaV3 && d.Schema != ProductionDecisionSchemaV4 && d.Schema != ProductionDecisionSchemaV5) || d.AssurancePolicy == nil || d.Auditors == nil || d.ExternalAudits == nil || d.Gates == nil {
 		return errors.New("decision v3 requires its explicit schema, policy and arrays")
 	}
 	if err := validateHashID("decision_id", d.DecisionID); err != nil {
@@ -281,19 +295,34 @@ func (d ProductionDecisionV3) Validate() error {
 			return errors.New("external signoff exceeds signature size limit")
 		}
 	}
-	b := d.K21Rehearsal.Circuit
-	if err := b.Validate(); err != nil {
-		return err
-	}
-	if b.KeyVersion != KeyVersionDestinationV3 || b.DomainSize != 1<<21 {
-		return errors.New("production decision requires the exact K21 destination-v3 rehearsal")
+	if d.Schema == ProductionDecisionSchemaV5 {
+		if d.K21Rehearsal != nil || d.CircuitRehearsal == nil {
+			return errors.New("decision v5 requires only circuit_rehearsal")
+		}
+		if err := ValidateCanonicalCeremonyCircuit(d.CircuitRehearsal.Circuit); err != nil {
+			return fmt.Errorf("circuit rehearsal: %w", err)
+		}
+	} else {
+		if d.K21Rehearsal == nil || d.CircuitRehearsal != nil {
+			return errors.New("historical decision requires only k21_rehearsal")
+		}
+		b := d.K21Rehearsal.Circuit
+		if err := b.Validate(); err != nil {
+			return err
+		}
+		if b.KeyVersion != KeyVersionDestinationV3 || b.DomainSize != 1<<21 {
+			return errors.New("production decision requires the exact K21 destination-v3 rehearsal")
+		}
 	}
 	if path.Ext(d.FormalChecklist.Name) != ".md" {
 		return errors.New("formal checklist must be Markdown")
 	}
 	expected := decisionGatesV3()
-	if d.Schema == ProductionDecisionSchemaV4 {
+	switch d.Schema {
+	case ProductionDecisionSchemaV4:
 		expected = decisionGatesV4()
+	case ProductionDecisionSchemaV5:
+		expected = decisionGatesV5()
 	}
 	if len(d.Gates) != len(expected) {
 		return errors.New("decision requires every V3 production gate exactly once")
@@ -312,6 +341,8 @@ func (d ProductionDecisionV3) Validate() error {
 			bound = []ArtifactRef{d.SourceRelease.VerificationReport}
 		case GateK21Rehearsal:
 			bound = []ArtifactRef{d.K21Rehearsal.Evidence}
+		case GateExactCircuitRehearsal:
+			bound = []ArtifactRef{d.CircuitRehearsal.Evidence}
 		case GateMainnetDeploymentPlan:
 			bound = []ArtifactRef{d.MainnetDeploymentPlan}
 		case GateFormalChecklist:
@@ -339,7 +370,12 @@ func (d ProductionDecisionV3) Validate() error {
 }
 
 func decisionExternalArtifactsV3(d ProductionDecisionV3) ([]ArtifactRef, error) {
-	refs := []ArtifactRef{d.SourceRelease.VerificationReport, d.K21Rehearsal.Evidence, d.MainnetDeploymentPlan, d.FormalChecklist}
+	refs := []ArtifactRef{d.SourceRelease.VerificationReport, d.MainnetDeploymentPlan, d.FormalChecklist}
+	if d.Schema == ProductionDecisionSchemaV5 {
+		refs = append(refs, d.CircuitRehearsal.Evidence)
+	} else {
+		refs = append(refs, d.K21Rehearsal.Evidence)
+	}
 	for _, a := range d.ExternalAudits {
 		refs = append(refs, a.Report, a.Signoff)
 	}
@@ -370,4 +406,14 @@ func decisionExternalArtifactsV3(d ProductionDecisionV3) ([]ArtifactRef, error) 
 func decisionGatesV4() []ProductionGate {
 	gates := decisionGatesV3()
 	return slices.DeleteFunc(gates, func(g ProductionGate) bool { return g == GateParticipantIndependent || g == GateLiveTwentyParty })
+}
+
+func decisionGatesV5() []ProductionGate {
+	gates := decisionGatesV4()
+	for i, gate := range gates {
+		if gate == GateK21Rehearsal {
+			gates[i] = GateExactCircuitRehearsal
+		}
+	}
+	return gates
 }

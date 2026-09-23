@@ -87,7 +87,7 @@ func ValidateCircuitBinding(circuit *CompiledCircuit, expected CircuitBinding) e
 }
 
 // ReadR1CSFile authenticates an exact-size frozen native gnark constraint
-// system against a signed destination-v3 binding before decoding it. The
+// system against the signed circuit binding before decoding it. The
 // digest check intentionally precedes native decoding, whose vector lengths
 // are not safe to accept from an unauthenticated file.
 func ReadR1CSFile(path string, expected CircuitBinding) (*CompiledCircuit, error) {
@@ -172,8 +172,8 @@ func bindDestinationV3R1CS(compiled constraint.ConstraintSystem) (*CompiledCircu
 // bindR1CS derives the circuit binding for a compiled constraint system.
 //
 // Identity and expected commitment count are parameters rather than constants
-// because the ceremony supports a second, deliberately tiny circuit for
-// rehearsals. Every other rule here is unchanged and applies to both: the
+// because the ceremony supports test circuits at two smaller domains.
+// Every other rule here is unchanged and applies to all circuits: the
 // scalar field, the domain, the variable counts and the exact serialized
 // digest are checked identically, so a rehearsal transcript is as internally
 // consistent as a production one. What separates them is which key version a
@@ -488,20 +488,20 @@ const rehearsalCommitmentCount = destinationV3CommitmentCount
 // deliberately a closed set rather than a lookup that could be extended by a
 // definition. An unknown key version is an error, not a request.
 //
-// Selecting the rehearsal circuit here does not make a rehearsal ceremony
-// acceptable in production: CeremonyDefinition.validate rejects any key version
-// other than destination-v3 when mode is production, and the K21 rehearsal gate
-// in the production decision continues to require domain 2^21.
+// A production-mode decision can approve only the circuit pinned by its
+// authenticated definition. Test circuits do not produce ownership proofs.
 func CompileForKeyVersion(keyVersion string) (*CompiledCircuit, error) {
 	switch keyVersion {
 	case KeyVersionDestinationV3:
 		return CompileDestinationV3()
 	case KeyVersionRehearsal:
 		return compileRehearsal()
+	case KeyVersionRehearsalK11:
+		return compileRehearsalK11()
 	default:
 		return nil, fmt.Errorf(
-			"unknown key_version %q: want %q or %q",
-			keyVersion, KeyVersionDestinationV3, KeyVersionRehearsal,
+			"unknown key_version %q: want %q, %q or %q",
+			keyVersion, KeyVersionDestinationV3, KeyVersionRehearsal, KeyVersionRehearsalK11,
 		)
 	}
 }
@@ -518,9 +518,17 @@ func compileRehearsal() (*CompiledCircuit, error) {
 	return bindR1CS(compiled, KeyVersionRehearsal, CircuitIDRehearsal, rehearsalCommitmentCount)
 }
 
+func compileRehearsalK11() (*CompiledCircuit, error) {
+	compiled, err := frontend.Compile(ecc.BLS12_381.ScalarField(), r1csbuilder.NewBuilder, &rehearsal.K11Circuit{})
+	if err != nil {
+		return nil, fmt.Errorf("compile K11 test circuit: %w", err)
+	}
+	return bindR1CS(compiled, KeyVersionRehearsalK11, CircuitIDRehearsalK11, rehearsalCommitmentCount)
+}
+
 // bindForKeyVersion applies the binding rules for a named circuit.
 //
-// Both circuits carry exactly one Groth16 commitment, and every other rule -
+// All registered circuits carry exactly one Groth16 commitment, and every rule -
 // scalar field, domain, variable counts, exact serialized digest - is applied
 // identically. That is what makes a rehearsal transcript internally consistent
 // in the same way a production one is; the circuits differ in what they prove
@@ -531,10 +539,12 @@ func bindForKeyVersion(compiled constraint.ConstraintSystem, keyVersion string) 
 		return bindR1CS(compiled, KeyVersionDestinationV3, CircuitIDDestinationV3, destinationV3CommitmentCount)
 	case KeyVersionRehearsal:
 		return bindR1CS(compiled, KeyVersionRehearsal, CircuitIDRehearsal, rehearsalCommitmentCount)
+	case KeyVersionRehearsalK11:
+		return bindR1CS(compiled, KeyVersionRehearsalK11, CircuitIDRehearsalK11, rehearsalCommitmentCount)
 	default:
 		return nil, fmt.Errorf(
-			"unknown key_version %q: want %q or %q",
-			keyVersion, KeyVersionDestinationV3, KeyVersionRehearsal,
+			"unknown key_version %q: want %q, %q or %q",
+			keyVersion, KeyVersionDestinationV3, KeyVersionRehearsal, KeyVersionRehearsalK11,
 		)
 	}
 }

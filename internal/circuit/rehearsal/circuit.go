@@ -9,10 +9,9 @@
 // ceremony at that size is impractical.
 //
 // This circuit proves a trivial statement at a small domain so the same
-// orchestration can be exercised in seconds. It proves nothing useful and must
-// never appear in a production ceremony; CeremonyDefinition rejects it whenever
-// mode is production, and the K21 rehearsal gate in the production decision
-// continues to demand domain 2^21 so a run at this size can never satisfy it.
+// orchestration can be exercised in seconds. It proves nothing useful. A
+// production-mode test run may use it, but the K21 production GO gate requires
+// the ownership circuit, so the resulting keys cannot authorize ownership use.
 package rehearsal
 
 import (
@@ -24,8 +23,7 @@ import (
 
 const (
 	// CircuitID names this circuit in a ceremony definition. The "rehearsal"
-	// prefix is load bearing: it is what a reader sees in ceremony.json, and it
-	// must be obvious at a glance that a transcript is not production evidence.
+	// prefix makes the test statement visible in ceremony.json.
 	CircuitID = "rehearsal-tiny-v1/bls12-381/groth16"
 
 	// KeyVersion is the value passed to init --key-version to select this

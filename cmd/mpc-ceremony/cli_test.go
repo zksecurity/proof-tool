@@ -1148,7 +1148,25 @@ func TestPhase1CoordinatorFullReplayFlags(t *testing.T) {
 		}
 	}
 	phase2Args := append(append([]string{}, closeArgs...), "--phase1-seal", "seal.json", "--phase1-seal-signature", "seal.sig", "--full-replay")
-	if _, err := parseClose("phase2 close", phase2Args, true); err == nil {
-		t.Fatal("Phase 1-only replay flag accepted for Phase 2")
+	phase2Close, err := parseClose("phase2 close", phase2Args, true)
+	if err != nil || !phase2Close.FullReplay {
+		t.Fatalf("Phase 2 full replay diagnostic: %+v, %v", phase2Close, err)
+	}
+}
+
+func TestPhase2InitIndependentReplayOverride(t *testing.T) {
+	args := []string{"--ceremony", "ceremony.json", "--ceremony-signature", "ceremony.sig", "--coordinator-public-key-file", "coordinator.pub", "--phase1-transcript-dir", "transcript", "--phase1-seal", "seal.json", "--phase1-seal-signature", "seal.sig", "--coordinator-signing-key", "coordinator.key", "--out-dir", "phase2"}
+	normal, err := parsePhase2Init(args)
+	if err != nil || normal.FullReplay {
+		t.Fatalf("default coordinator init: %+v %v", normal, err)
+	}
+	independent, err := parsePhase2Init(append(args, "--full-replay"))
+	if err != nil || !independent.FullReplay {
+		t.Fatalf("independent override: %+v %v", independent, err)
+	}
+	for _, action := range []string{"verify-stored-v4", "inspect-signed-v4", "accept-candidate-v4"} {
+		if _, err := parseCheckpointV4(action, []string{"--full-replay"}); err == nil || !strings.Contains(err.Error(), "full-replay") {
+			t.Fatalf("unrelated action %s accepted coordinator flag: %v", action, err)
+		}
 	}
 }

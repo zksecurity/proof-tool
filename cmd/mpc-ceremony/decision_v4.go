@@ -62,7 +62,7 @@ func executeDecisionSignV4(o DecisionSignOptions, ceremonyID string, data []byte
 
 func executeDecisionVerifyV4(o DecisionVerifyOptions, ceremonyID string, data []byte, signatures [][]byte) (CommandResult, error) {
 	if o.EvidenceRoot == "" {
-		return CommandResult{}, errors.New("--evidence-root is required for definition v4 decisions")
+		return CommandResult{}, errors.New("--evidence-root is required for definition v4/v5 decisions")
 	}
 	verified, err := mpcceremony.VerifyProductionDecisionV4(mpcceremony.VerifyProductionDecisionV4Options{
 		VerifyProductionDecisionEvidenceV4Options: mpcceremony.VerifyProductionDecisionEvidenceV4Options{
@@ -95,7 +95,7 @@ func decisionCommandResultV4(d mpcceremony.ProductionDecisionV3, summary string,
 // still requires an existing parent and refuses to replace any existing leaf.
 func validateDecisionOutputV4(root, out string) error {
 	if root == "" {
-		return errors.New("--evidence-root is required for definition v4 decisions")
+		return errors.New("--evidence-root is required for definition v4/v5 decisions")
 	}
 	return validatePathOutsideTree(root, "final/release", out)
 }

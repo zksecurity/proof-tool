@@ -38,7 +38,7 @@ func validateProductionDecisionBindingV4(d CeremonyDefinition, decision Producti
 		return errors.New("decision v3 requires definition v4")
 	}
 	if d.Schema == DefinitionSchemaV5 {
-		if decision.Schema != ProductionDecisionSchemaV4 {
+		if decision.Schema != ProductionDecisionSchemaV5 {
 			return errors.New("decision production requirements differ from signed definition")
 		}
 	} else if decision.Schema != ProductionDecisionSchemaV3 {
@@ -56,7 +56,12 @@ func validateProductionDecisionBindingV4(d CeremonyDefinition, decision Producti
 	if d.Software.SourceCommit != decision.SourceRelease.SourceCommit {
 		return errors.New("decision source commit differs from ceremony")
 	}
-	if !equalCircuitBinding(d.Circuit, decision.K21Rehearsal.Circuit) {
+	rehearsal := decision.K21Rehearsal
+	if decision.Schema == ProductionDecisionSchemaV5 {
+		if !equalCircuitBinding(d.Circuit, decision.CircuitRehearsal.Circuit) {
+			return errors.New("circuit rehearsal does not bind the exact ceremony circuit")
+		}
+	} else if !equalCircuitBinding(d.Circuit, rehearsal.Circuit) {
 		return errors.New("K21 rehearsal does not bind the exact ceremony circuit")
 	}
 	for _, a := range decision.Auditors {

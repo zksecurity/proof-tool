@@ -1234,11 +1234,11 @@ func replayAll(circuit *CompiledCircuit, records loadedReplay, paths ReplayPaths
 		return replayedKeys{}, errors.New("archived phase1 commons differs from full replay")
 	}
 
-	initialPhase2, _, err := InitializePhase2(circuit, commons)
+	phase2Initialization, err := initializeOwnedPhase2(circuit, commons)
 	if err != nil {
 		return replayedKeys{}, err
 	}
-	initialDigest, err := writerDigest(initialPhase2)
+	initialDigest, err := writerDigest(phase2Initialization.genesis)
 	if err != nil {
 		return replayedKeys{}, err
 	}
@@ -1288,7 +1288,7 @@ func replayAll(circuit *CompiledCircuit, records loadedReplay, paths ReplayPaths
 	if err != nil {
 		return replayedKeys{}, err
 	}
-	pk, vk, err := SealPhase2Loaded(circuit, commons, phase2Challenge, len(records.phase2Chain.Records), phase2Loader)
+	pk, vk, err := sealOwnedPhase2(phase2Initialization, phase2Challenge, len(records.phase2Chain.Records), phase2Loader)
 	if err != nil {
 		return replayedKeys{}, fmt.Errorf("full phase2 replay: %w", err)
 	}

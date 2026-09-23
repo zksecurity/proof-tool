@@ -24,12 +24,48 @@ const (
 	CanonicalDestinationV3Blake2b256  = "blake2b256:d1215047c4e53cba141fa1b25debd2b060330baf893ba90a6ac75fac19ca302c"
 	CanonicalDestinationV3Size        = int64(101185815)
 	CanonicalDestinationV3Constraints = uint64(1444667)
+	CanonicalRehearsalSHA256          = "sha256:177ab88ee828ca78f753d7e63342d5c86f3ba4ef19910ad4182d2d648b539519"
+	CanonicalRehearsalBlake2b256      = "blake2b256:7b612a945dce98e9f6b4c091f3a1dcbe3fa28cc05514925fa0ccc9359bb1e427"
+	CanonicalRehearsalSize            = int64(1046)
+	CanonicalRehearsalConstraints     = uint64(5)
+	CanonicalRehearsalK11SHA256       = "sha256:fda198668c2fced5fc936ab6bb2ce45ced054eb4a13659272ea2cf0b52383ebd"
+	CanonicalRehearsalK11Blake2b256   = "blake2b256:f05f4e72676ac40d8f22b435c057c0d2e5dd06883708be3c5ac0f24d62297728"
+	CanonicalRehearsalK11Size         = int64(38601)
+	CanonicalRehearsalK11Constraints  = uint64(1030)
 )
 
+// ValidateCanonicalCeremonyCircuit pins every circuit permitted in a
+// production-mode ceremony or an exact-circuit V5 production decision.
+func ValidateCanonicalCeremonyCircuit(binding CircuitBinding) error {
+	if err := binding.Validate(); err != nil {
+		return err
+	}
+	switch binding.KeyVersion {
+	case KeyVersionDestinationV3:
+		return ValidateCanonicalDestinationV3(binding)
+	case KeyVersionRehearsal:
+		return validateCanonicalTestCircuit(binding, CanonicalRehearsalConstraints, 8,
+			CanonicalRehearsalSHA256, CanonicalRehearsalBlake2b256, CanonicalRehearsalSize)
+	case KeyVersionRehearsalK11:
+		return validateCanonicalTestCircuit(binding, CanonicalRehearsalK11Constraints, 1<<11,
+			CanonicalRehearsalK11SHA256, CanonicalRehearsalK11Blake2b256, CanonicalRehearsalK11Size)
+	default:
+		return fmt.Errorf("unsupported production-mode circuit %q", binding.KeyVersion)
+	}
+}
+
+func validateCanonicalTestCircuit(binding CircuitBinding, constraints, domain uint64, sha, blake string, size int64) error {
+	if binding.Constraints != constraints || binding.DomainSize != domain ||
+		binding.R1CS.Digest.SHA256 != sha || binding.R1CS.Digest.Blake2b256 != blake ||
+		binding.R1CS.Digest.Size != size {
+		return fmt.Errorf("test circuit %q differs from the reviewed canonical R1CS", binding.KeyVersion)
+	}
+	return nil
+}
+
 // ValidateCanonicalDestinationV3 rejects a compiled destination-v3 circuit
-// whose serialized identity differs from the reviewed canonical build. It says
-// nothing about other key versions: the rehearsal circuit is deliberately not
-// pinned here.
+// whose serialized identity differs from the reviewed canonical build. The
+// production-mode test circuit pins are checked by ValidateCanonicalCeremonyCircuit.
 func ValidateCanonicalDestinationV3(binding CircuitBinding) error {
 	if binding.KeyVersion != KeyVersionDestinationV3 {
 		return nil

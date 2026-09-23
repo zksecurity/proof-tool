@@ -10,6 +10,13 @@ import (
 // Lifecycle preparation consumes the exact refs in the authenticated previous
 // checkpoint. It never discovers an alternate chain/closure from loose files.
 func verifyCheckpointLifecycleV4(options CheckpointPreparationV4, trusted *TrustedCeremony, reader *checkpointReaderV4, previous CheckpointV4) error {
+	method := phase1IndependentReplay
+	if options.phase1Method != "" {
+		method = options.phase1Method
+	}
+	if method != phase1IndependentReplay && method != phase1CoordinatorAcceptance {
+		return errors.New("unknown coordinator verification method")
+	}
 	c := options.Proposal
 	path := func(ref ArtifactRef) string { return filepath.Join(reader.path, ref.Name) }
 	readSigned := func(refs SignedArtifactRefs, out any) error {
@@ -37,6 +44,45 @@ func verifyCheckpointLifecycleV4(options CheckpointPreparationV4, trusted *Trust
 		}
 		if err := verifyV4ChainProjection(chain, state.Chain, state); err != nil {
 			return err
+		}
+		if options.coordinatorFullReplay {
+			if options.Circuit == nil {
+				return errors.New("full closure replay requires the compiled circuit")
+			}
+			paths := PhaseTranscriptPaths{RootDir: reader.path, ChainPath: path(state.Chain.Record), ChainSignaturePath: path(state.Chain.Signature)}
+			if c.Transition.Kind == CheckpointPhase1Closed {
+				if _, err := LoadReplayPhase1Files(trusted, options.Circuit, paths); err != nil {
+					return fmt.Errorf("independently replay Phase 1 closure: %w", err)
+				}
+			} else {
+				seal := previous.Progress.Phase1Seal
+				if seal == nil {
+					return errors.New("Phase 2 closure requires authenticated Phase 1 seal")
+				}
+				commons, sealRecord, _, err := loadPhase1CommonsWithMethod(trusted, options.Circuit, reader.path, path(seal.Record), path(seal.Signature), phase1IndependentReplay)
+				if err != nil {
+					return fmt.Errorf("independently replay Phase 1 for Phase 2 closure: %w", err)
+				}
+				if _, err := LoadReplayPhase2Files(trusted, options.Circuit, commons, sealRecord, paths); err != nil {
+					return fmt.Errorf("independently replay Phase 2 closure: %w", err)
+				}
+			}
+			refs, err := signedArtifactRefsAtPaths(reader.path, paths.ChainPath, paths.ChainSignaturePath)
+			if err != nil || refs != state.Chain {
+				return errors.New("accepted chain changed during full closure replay")
+			}
+		} else if c.Transition.Kind == CheckpointPhase2Closed && method == phase1CoordinatorAcceptance {
+			if options.Circuit == nil || previous.Progress.Phase1Seal == nil {
+				return errors.New("accepted Phase 2 closure requires circuit and authenticated Phase 1 seal")
+			}
+			paths := PhaseTranscriptPaths{RootDir: reader.path, ChainPath: path(state.Chain.Record), ChainSignaturePath: path(state.Chain.Signature)}
+			accepted, refs, err := loadAcceptedPhase2FilesExact(trusted, options.Circuit, *previous.Progress.Phase1Seal, paths)
+			if err != nil {
+				return err
+			}
+			if refs != state.Chain || accepted.PhaseID != chain.PhaseID {
+				return errors.New("accepted Phase 2 chain differs from checkpoint")
+			}
 		}
 		var closure CloseRecord
 		if err := readSigned(*c.Transition.Record, &closure); err != nil {
@@ -98,13 +144,13 @@ func verifyCheckpointLifecycleV4(options CheckpointPreparationV4, trusted *Trust
 	case CheckpointPhase1Sealed:
 		p := previous.Progress
 		seal := c.Transition.Record
-		verified, err := VerifyPhase1SealFiles(VerifyPhase1SealFilesOptions{
+		verified, err := verifyPhase1SealFilesWithMethod(VerifyPhase1SealFilesOptions{
 			Trust: options.Trust, Circuit: options.Circuit, TranscriptRoot: reader.path,
 			Phase1ChainPath: path(p.Phase1.Chain.Record), Phase1ChainSignaturePath: path(p.Phase1.Chain.Signature),
 			Phase1ClosePath: path(p.Phase1Closure.Record), Phase1CloseSignaturePath: path(p.Phase1Closure.Signature),
 			Phase1BeaconPath: path(p.Phase1Beacon.Record), Phase1BeaconSignaturePath: path(p.Phase1Beacon.Signature),
 			Phase1SealPath: path(seal.Record), Phase1SealSignaturePath: path(seal.Signature),
-		})
+		}, method)
 		if err != nil {
 			return err
 		}
@@ -115,11 +161,11 @@ func verifyCheckpointLifecycleV4(options CheckpointPreparationV4, trusted *Trust
 	case CheckpointPhase2Initialized:
 		seal := previous.Progress.Phase1Seal
 		chain := c.Transition.Record
-		verified, err := VerifyPhase2GenesisFiles(VerifyPhase2GenesisFilesOptions{
+		verified, err := verifyPhase2GenesisFilesWithMethod(VerifyPhase2GenesisFilesOptions{
 			Trust: options.Trust, Circuit: options.Circuit, TranscriptRoot: reader.path,
 			Phase1SealPath: path(seal.Record), Phase1SealSignaturePath: path(seal.Signature),
 			Phase2ChainPath: path(chain.Record), Phase2ChainSignaturePath: path(chain.Signature),
-		})
+		}, method)
 		if err != nil {
 			return err
 		}

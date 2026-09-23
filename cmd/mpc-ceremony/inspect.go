@@ -410,6 +410,7 @@ func inspectDefinition(definition mpcceremony.CeremonyDefinition) DefinitionInsp
 		Schema:             definitionInspectionSchema,
 		CeremonyID:         definition.CeremonyID,
 		Mode:               definition.Mode,
+		KeyVersion:         definition.Circuit.KeyVersion,
 		Phase1Participants: append([]string(nil), definition.Phase1Policy.Participants...),
 		Phase2Participants: append([]string(nil), definition.Phase2Policy.Participants...),
 		R1CS:               definition.Circuit.R1CS,

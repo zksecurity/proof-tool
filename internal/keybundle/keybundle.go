@@ -48,10 +48,9 @@ func Verify(opts VerifyOptions) (*artifact.KeyManifest, error) {
 	return verify(opts, false)
 }
 
-// VerifyRehearsal verifies the exact tiny rehearsal profile, retaining all
-// signature and native-file pin checks. Only the ceremony verifier should call
-// it, after authenticating a rehearsal-mode definition. Production callers use
-// Verify, which continues to reject this key version even if its signature is valid.
+// VerifyRehearsal retains the historical tiny-profile ceremony verifier.
+// New ceremony release paths use VerifyCeremonyTest for either test circuit.
+// Application key verification continues to use Verify, which rejects test keys.
 func VerifyRehearsal(opts VerifyOptions) (*artifact.KeyManifest, error) {
 	if opts.KeyVersion != rehearsal.KeyVersion {
 		return nil, errors.New("explicit tiny rehearsal key version is required")
@@ -59,7 +58,18 @@ func VerifyRehearsal(opts VerifyOptions) (*artifact.KeyManifest, error) {
 	return verify(opts, true)
 }
 
-func verify(opts VerifyOptions, tinyRehearsal bool) (*artifact.KeyManifest, error) {
+// VerifyCeremonyTest is called only after a signed ceremony definition has
+// selected a test circuit. It does not add test keys to application profiles.
+func VerifyCeremonyTest(opts VerifyOptions) (*artifact.KeyManifest, error) {
+	switch opts.KeyVersion {
+	case rehearsal.KeyVersion, rehearsal.K11KeyVersion:
+		return verify(opts, true)
+	default:
+		return nil, errors.New("explicit ceremony test key version is required")
+	}
+}
+
+func verify(opts VerifyOptions, ceremonyTest bool) (*artifact.KeyManifest, error) {
 	if strings.TrimSpace(opts.PublicKeyHex) == "" {
 		return nil, errors.New("trusted manifest public key is required")
 	}
@@ -87,8 +97,15 @@ func verify(opts VerifyOptions, tinyRehearsal bool) (*artifact.KeyManifest, erro
 		keyVersion = signedManifest.KeyVersion
 	}
 	var status prover.BundleStatus
-	if tinyRehearsal {
-		status = prover.InspectRehearsalBundle(opts.KeysDir, opts.RequireProvingKey)
+	if ceremonyTest {
+		switch keyVersion {
+		case rehearsal.KeyVersion:
+			status = prover.InspectRehearsalBundle(opts.KeysDir, opts.RequireProvingKey)
+		case rehearsal.K11KeyVersion:
+			status = prover.InspectRehearsalK11Bundle(opts.KeysDir, opts.RequireProvingKey)
+		default:
+			return nil, errors.New("unknown ceremony test key version")
+		}
 	} else {
 		profile, err := keyprofile.ForKeyVersion(keyVersion)
 		if err != nil {
