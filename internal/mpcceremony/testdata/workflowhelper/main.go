@@ -67,6 +67,7 @@ func main() {
 
 func run(outputRoot, operationalEvidenceHelper string) error {
 	checkpointV4 := os.Getenv("MPC_WORKFLOW_CHECKPOINT_V4") == "1"
+	productionGO := os.Getenv("MPC_WORKFLOW_PRODUCTION_GO") == "1"
 	zeroAssurance := os.Getenv("PROOF_TOOL_TEST_ZERO_ASSURANCE") == "1"
 	checkpointPhase2One := os.Getenv("MPC_WORKFLOW_PHASE2_ONE") == "1"
 	var circuit *mpcceremony.CompiledCircuit
@@ -95,14 +96,21 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	if err != nil {
 		return fmt.Errorf("compile tiny circuit: %w", err)
 	}
+	mode := mpcceremony.ModeRehearsal
+	if productionGO {
+		if !checkpointV4 || !zeroAssurance {
+			return errors.New("production GO fixture requires V5 checkpoints and zero optional assurance")
+		}
+		mode = mpcceremony.ModeProduction
+	}
 	var software mpcceremony.SoftwareBinding
 	if binary := os.Getenv("MPC_CEREMONY_TEST_BINARY"); binary != "" {
-		software, err = mpcceremony.SoftwareBindingFromExecutableFileForMode(binary, prover.ProofToolVersion, mpcceremony.ModeRehearsal)
+		software, err = mpcceremony.SoftwareBindingFromExecutableFileForMode(binary, prover.ProofToolVersion, mode)
 		if err != nil {
 			return fmt.Errorf("bind test command executable: %w", err)
 		}
 	} else {
-		software, err = mpcceremony.RunningSoftwareBindingForMode(prover.ProofToolVersion, mpcceremony.ModeRehearsal)
+		software, err = mpcceremony.RunningSoftwareBindingForMode(prover.ProofToolVersion, mode)
 		if err != nil {
 			return fmt.Errorf("bind helper executable: %w", err)
 		}
@@ -112,7 +120,7 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	// tests exercise the real command executable without changing this helper's
 	// own approved identity. All normal allowlist checks still apply.
 	if binary := os.Getenv("MPC_WORKFLOW_ALLOWED_CLI"); binary != "" {
-		software, err = mpcceremony.SoftwareBindingWithAllowedBinaryFiles(software, prover.ProofToolVersion, mpcceremony.ModeRehearsal, []string{binary})
+		software, err = mpcceremony.SoftwareBindingWithAllowedBinaryFiles(software, prover.ProofToolVersion, mode, []string{binary})
 		if err != nil {
 			return fmt.Errorf("bind test companion CLI: %w", err)
 		}
@@ -236,6 +244,9 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 	if checkpointPhase2One || checkpointV4 {
 		phase2Minimum = 1
 	}
+	if productionGO {
+		phaseMinimum, phase2Minimum = 2, 2
+	}
 	auditors := []mpcceremony.Identity{}
 	assurance := &mpcceremony.AssurancePolicy{}
 	if !zeroAssurance {
@@ -261,7 +272,7 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		Circuit: circuit,
 		Definition: mpcceremony.DefinitionOptions{
 			ReleaseVerification: releaseVerification,
-			Mode:                mpcceremony.ModeRehearsal,
+			Mode:                mode,
 			CreatedAt:           "2023-08-23T15:00:00Z",
 			SessionNonceHex:     "abababababababababababababababababababababababababababababababab",
 			Software:            software,
