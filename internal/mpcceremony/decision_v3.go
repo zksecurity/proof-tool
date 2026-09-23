@@ -224,9 +224,10 @@ func NewProductionDecisionV3(value ProductionDecisionV3) (ProductionDecisionV3, 
 func computeProductionDecisionIDV3(value ProductionDecisionV3) (string, error) {
 	value.DecisionID = ""
 	domain := "proof-tool/mpc-ceremony/production-decision/v3"
-	if value.Schema == ProductionDecisionSchemaV4 {
+	switch value.Schema {
+	case ProductionDecisionSchemaV4:
 		domain = "proof-tool/mpc-ceremony/production-decision/v4"
-	} else if value.Schema == ProductionDecisionSchemaV5 {
+	case ProductionDecisionSchemaV5:
 		domain = "proof-tool/mpc-ceremony/production-decision/v5"
 	}
 	return canonicalHash(domain, value)
@@ -317,9 +318,10 @@ func (d ProductionDecisionV3) Validate() error {
 		return errors.New("formal checklist must be Markdown")
 	}
 	expected := decisionGatesV3()
-	if d.Schema == ProductionDecisionSchemaV4 {
+	switch d.Schema {
+	case ProductionDecisionSchemaV4:
 		expected = decisionGatesV4()
-	} else if d.Schema == ProductionDecisionSchemaV5 {
+	case ProductionDecisionSchemaV5:
 		expected = decisionGatesV5()
 	}
 	if len(d.Gates) != len(expected) {

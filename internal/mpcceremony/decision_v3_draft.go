@@ -45,9 +45,10 @@ func (d ProductionDecisionDraftV3) decision() (ProductionDecisionV3, error) {
 		return ProductionDecisionV3{}, err
 	}
 	schema := ProductionDecisionSchemaV3
-	if d.Schema == ProductionDecisionDraftSchemaV4 {
+	switch d.Schema {
+	case ProductionDecisionDraftSchemaV4:
 		schema = ProductionDecisionSchemaV4
-	} else if d.Schema == ProductionDecisionDraftSchemaV5 {
+	case ProductionDecisionDraftSchemaV5:
 		schema = ProductionDecisionSchemaV5
 	}
 	return NewProductionDecisionV3(ProductionDecisionV3{Schema: schema, CeremonyID: d.CeremonyID, AssurancePolicy: cloneAssurancePolicy(d.AssurancePolicy), Release: release, SourceRelease: d.SourceRelease, Auditors: d.Auditors, ExternalAudits: d.ExternalAudits, K21Rehearsal: d.K21Rehearsal, CircuitRehearsal: d.CircuitRehearsal, MainnetDeploymentPlan: d.MainnetDeploymentPlan, FormalChecklist: d.FormalChecklist, Gates: d.Gates, Decision: d.Decision, DecidedAt: d.DecidedAt})
