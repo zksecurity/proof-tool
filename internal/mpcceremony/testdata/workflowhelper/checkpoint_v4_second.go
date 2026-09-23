@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	m "proof-tool/internal/mpcceremony"
 )
@@ -64,7 +65,7 @@ func addSecondProductionContribution(
 	attempt := "abababababababababababababababab"
 	allocatedAt, contributedAt, destroyedAt, acceptedAt := "2023-08-23T15:05:02Z", "2023-08-23T15:05:03Z", "2023-08-23T15:05:04Z", "2023-08-23T15:05:05Z"
 	if phase == m.Phase2 {
-		attempt = "bcbcbcbcbcbcbcbcbcbcbcbcbcbcbc"
+		attempt = strings.Repeat("bc", 16)
 		allocatedAt, contributedAt, destroyedAt, acceptedAt = "2023-08-23T15:11:30.51Z", "2023-08-23T15:11:30.52Z", "2023-08-23T15:11:30.53Z", "2023-08-23T15:11:30.54Z"
 	}
 	allocated, err := m.PrepareCandidateAllocationCheckpointV4(m.CandidateAllocationCheckpointV4Options{Trust: trust, ArtifactRoot: root, Checkpoint: *committed, AttemptID: attempt, AllocatedAt: allocatedAt})
