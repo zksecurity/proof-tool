@@ -590,14 +590,19 @@ func executeFinalize(options FinalizeOptions) (CommandResult, error) {
 		OutDir:                options.OutDir,
 		CoordinatorSigningKey: options.CoordinatorSigningKey,
 		PublicEvidencePath:    options.PublicEvidencePath,
+		PreliminaryKeysDir:    options.PreliminaryKeysDir,
 		FinalizedAt:           finalizedAt,
 	})
 	if err != nil {
 		return CommandResult{}, err
 	}
+	summary := "independently replayed both phases and created an unsigned release candidate"
+	if options.PreliminaryKeysDir != "" {
+		summary = "reused exact-input signed preliminary keys and created an unsigned release candidate; final candidate checkpoint still requires independent replay"
+	}
 	return CommandResult{
 		CeremonyID: result.CeremonyID,
-		Summary:    "independently replayed both phases and created an unsigned release candidate",
+		Summary:    summary,
 		Outputs: map[string]string{
 			"candidate_dir":       result.OutDir,
 			"candidate":           result.CandidatePath,

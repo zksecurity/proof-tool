@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/ed25519"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -248,11 +249,26 @@ func runCheckpointV4Final(output, root string, trust m.TrustPaths, circuit *m.Co
 	if err = writeTinyPublicEvidence(publicEvidence, d.CeremonyID, circuit, preliminary); err != nil {
 		return err
 	}
+	// A cache hit must authenticate the exact bytes of every preliminary key.
+	vkPath := filepath.Join(preliminary, m.NativeVerifyingKeyFile)
+	vkBytes, err := os.ReadFile(vkPath)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(vkPath, append(append([]byte(nil), vkBytes...), 0), 0600); err != nil {
+		return err
+	}
+	if _, err := m.Finalize(m.FinalizeOptions{Replay: replay, Circuit: circuit, PreliminaryKeysDir: preliminary, OutDir: filepath.Join(output, "rejected-candidate"), CoordinatorSigningKey: coordinatorPath, PublicEvidencePath: publicEvidence, FinalizedAt: mustUTC("2023-08-23T15:11:35Z")}); err == nil {
+		return errors.New("tampered preliminary key was accepted for finalization")
+	}
+	if err := os.WriteFile(vkPath, vkBytes, 0600); err != nil {
+		return err
+	}
 	final := filepath.Join(root, "final/candidate")
 	if err = os.MkdirAll(filepath.Dir(final), 0700); err != nil {
 		return err
 	}
-	if _, err = m.Finalize(m.FinalizeOptions{Replay: replay, Circuit: circuit, OutDir: final, CoordinatorSigningKey: coordinatorPath, PublicEvidencePath: publicEvidence, FinalizedAt: mustUTC("2023-08-23T15:11:35Z")}); err != nil {
+	if _, err = m.Finalize(m.FinalizeOptions{Replay: replay, Circuit: circuit, PreliminaryKeysDir: preliminary, OutDir: final, CoordinatorSigningKey: coordinatorPath, PublicEvidencePath: publicEvidence, FinalizedAt: mustUTC("2023-08-23T15:11:35Z")}); err != nil {
 		return err
 	}
 	_, refs, err := m.VerifyFinalCandidateCheckpoint(replay, circuit, final)

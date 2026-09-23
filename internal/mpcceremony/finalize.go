@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -29,32 +30,33 @@ import (
 )
 
 const (
-	CandidateMetadataSchema    = "proof-tool-mpc-release-candidate-v2"
-	VerificationReportSchema   = "proof-tool-mpc-verification-report-v2"
-	PublicEvidenceSchema       = "proof-tool-mpc-public-finalization-evidence-v1"
-	CandidateMetadataFile      = "candidate.json"
-	CandidateSignatureFile     = "candidate.sig.json"
-	VerificationReportFile     = "verification-report.json"
-	PublicEvidenceFile         = "public-finalization-evidence.json"
-	PreliminaryMetadataSchema  = "proof-tool-mpc-preliminary-final-keys-v1"
-	PreliminaryMetadataFile    = "preliminary-final-keys.json"
-	PreliminarySignatureFile   = "preliminary-final-keys.sig.json"
-	PreliminaryChecksumsFile   = "preliminary-checksums.sha256"
-	CardanoVKBytesFile         = "cardano-vk.bin"
-	CardanoVKHexFile           = "cardano-vk.hex"
-	CardanoVKFormatFile        = "cardano-vk-format.txt"
-	CandidateChecksumsFile     = "candidate-checksums.sha256"
-	Phase2SealFile             = "phase2-seal.json"
-	Phase2SealSignatureFile    = "phase2-seal.sig.json"
-	FinalTranscriptFile        = "setup-transcript.json"
-	ReleaseChecksumsFile       = "checksums.sha256"
-	NativeProvingKeyFile       = "ownership.pk"
-	NativeVerifyingKeyFile     = "ownership.vk"
-	PublicCredentialBytes      = 28
-	PublicDestinationBytes     = 58
-	DestinationPublicDomain    = "ROOT-OWNERSHIP-DESTINATION-v1"
-	GoldenPublicCredentialHex  = "19e07fbcc7577359d6c51f1e49cf1b0bf4c943b48ba4e4905a8702e4"
-	GoldenPublicDestinationHex = "010038ff22c6562b1277ef0d3eb3b8b4892523eeba04d0ef0c9d7da111" +
+	CandidateMetadataSchema     = "proof-tool-mpc-release-candidate-v2"
+	VerificationReportSchema    = "proof-tool-mpc-verification-report-v2"
+	PublicEvidenceSchema        = "proof-tool-mpc-public-finalization-evidence-v1"
+	CandidateMetadataFile       = "candidate.json"
+	CandidateSignatureFile      = "candidate.sig.json"
+	VerificationReportFile      = "verification-report.json"
+	PublicEvidenceFile          = "public-finalization-evidence.json"
+	PreliminaryMetadataSchema   = "proof-tool-mpc-preliminary-final-keys-v2"
+	PreliminaryMetadataSchemaV1 = "proof-tool-mpc-preliminary-final-keys-v1"
+	PreliminaryMetadataFile     = "preliminary-final-keys.json"
+	PreliminarySignatureFile    = "preliminary-final-keys.sig.json"
+	PreliminaryChecksumsFile    = "preliminary-checksums.sha256"
+	CardanoVKBytesFile          = "cardano-vk.bin"
+	CardanoVKHexFile            = "cardano-vk.hex"
+	CardanoVKFormatFile         = "cardano-vk-format.txt"
+	CandidateChecksumsFile      = "candidate-checksums.sha256"
+	Phase2SealFile              = "phase2-seal.json"
+	Phase2SealSignatureFile     = "phase2-seal.sig.json"
+	FinalTranscriptFile         = "setup-transcript.json"
+	ReleaseChecksumsFile        = "checksums.sha256"
+	NativeProvingKeyFile        = "ownership.pk"
+	NativeVerifyingKeyFile      = "ownership.vk"
+	PublicCredentialBytes       = 28
+	PublicDestinationBytes      = 58
+	DestinationPublicDomain     = "ROOT-OWNERSHIP-DESTINATION-v1"
+	GoldenPublicCredentialHex   = "19e07fbcc7577359d6c51f1e49cf1b0bf4c943b48ba4e4905a8702e4"
+	GoldenPublicDestinationHex  = "010038ff22c6562b1277ef0d3eb3b8b4892523eeba04d0ef0c9d7da111" +
 		"0000000000000000000000000000000000000000000000000000000000"
 	expectedCardanoBSB22  = "groth16-bls12-381-bsb22"
 	PublicEvidenceFixture = "repository-golden-destination-v3"
@@ -84,9 +86,46 @@ type ReplayPaths struct {
 	Phase2BeaconSignaturePath string
 }
 
+// The fixed labels keep host paths out of signed metadata while binding every
+// directly named replay input to the bytes used by preliminary preparation.
+func replayInputPaths(p ReplayPaths) []struct{ name, file string } {
+	return []struct{ name, file string }{
+		{"replay/definition", p.DefinitionPath},
+		{"replay/definition-signature", p.DefinitionSignaturePath},
+		{"replay/phase1-chain", p.Phase1ChainPath},
+		{"replay/phase1-chain-signature", p.Phase1ChainSignaturePath},
+		{"replay/phase1-close", p.Phase1ClosePath},
+		{"replay/phase1-close-signature", p.Phase1CloseSignaturePath},
+		{"replay/phase1-beacon", p.Phase1BeaconPath},
+		{"replay/phase1-beacon-signature", p.Phase1BeaconSignaturePath},
+		{"replay/phase1-seal", p.Phase1SealPath},
+		{"replay/phase1-seal-signature", p.Phase1SealSignaturePath},
+		{"replay/phase2-chain", p.Phase2ChainPath},
+		{"replay/phase2-chain-signature", p.Phase2ChainSignaturePath},
+		{"replay/phase2-close", p.Phase2ClosePath},
+		{"replay/phase2-close-signature", p.Phase2CloseSignaturePath},
+		{"replay/phase2-beacon", p.Phase2BeaconPath},
+		{"replay/phase2-beacon-signature", p.Phase2BeaconSignaturePath},
+	}
+}
+
+func replayInputRefs(p ReplayPaths) ([]ArtifactRef, error) {
+	paths := replayInputPaths(p)
+	refs := make([]ArtifactRef, 0, len(paths))
+	for _, entry := range paths {
+		ref, err := artifactRefForFile(entry.name, entry.file)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", entry.name, err)
+		}
+		refs = append(refs, ref)
+	}
+	return refs, nil
+}
+
 type FinalizeOptions struct {
 	Replay                ReplayPaths
 	Circuit               *CompiledCircuit
+	PreliminaryKeysDir    string
 	OutDir                string
 	CoordinatorSigningKey string
 	PublicEvidencePath    string
@@ -108,6 +147,7 @@ type PreliminaryFinalKeys struct {
 	Circuit             CircuitBinding `json:"circuit"`
 	Phase1Chain         ArtifactRef    `json:"phase1_chain"`
 	Phase2Chain         ArtifactRef    `json:"phase2_chain"`
+	ReplayInputs        []ArtifactRef  `json:"replay_inputs,omitempty"`
 	ConstraintSystem    ArtifactRef    `json:"constraint_system"`
 	ProvingKey          ArtifactRef    `json:"proving_key"`
 	VerifyingKey        ArtifactRef    `json:"verifying_key"`
@@ -120,8 +160,8 @@ type PreliminaryFinalKeys struct {
 }
 
 func (p PreliminaryFinalKeys) Validate() error {
-	if p.Schema != PreliminaryMetadataSchema {
-		return fmt.Errorf("preliminary metadata schema %q, want %q", p.Schema, PreliminaryMetadataSchema)
+	if p.Schema != PreliminaryMetadataSchema && p.Schema != PreliminaryMetadataSchemaV1 {
+		return fmt.Errorf("unsupported preliminary metadata schema %q", p.Schema)
 	}
 	if err := validateHashID("ceremony_id", p.CeremonyID); err != nil {
 		return err
@@ -143,6 +183,23 @@ func (p PreliminaryFinalKeys) Validate() error {
 	}
 	if err := p.Circuit.Validate(); err != nil {
 		return err
+	}
+	if p.Schema == PreliminaryMetadataSchemaV1 {
+		if len(p.ReplayInputs) != 0 {
+			return errors.New("legacy preliminary keys cannot claim replay input digests")
+		}
+	} else {
+		if len(p.ReplayInputs) != len(replayInputPaths(ReplayPaths{})) {
+			return errors.New("preliminary keys require every replay input digest")
+		}
+		for i, input := range p.ReplayInputs {
+			if input.Name != replayInputPaths(ReplayPaths{})[i].name {
+				return errors.New("preliminary replay inputs must use the fixed order and names")
+			}
+			if err := input.Validate(); err != nil {
+				return fmt.Errorf("preliminary replay input %s: %w", input.Name, err)
+			}
+		}
 	}
 	if err := validateID("coordinator_id", p.CoordinatorID); err != nil {
 		return err
@@ -482,6 +539,10 @@ func PrepareFinalization(options PrepareFinalizationOptions) (*PrepareFinalizati
 	if options.PreparedAt.IsZero() || options.PreparedAt.Location() != time.UTC {
 		return nil, errors.New("prepared_at must be a non-zero UTC time")
 	}
+	inputsBefore, err := replayInputRefs(options.Replay)
+	if err != nil {
+		return nil, err
+	}
 	loaded, err := loadReplay(options.Replay)
 	if err != nil {
 		return nil, err
@@ -502,6 +563,13 @@ func PrepareFinalization(options PrepareFinalizationOptions) (*PrepareFinalizati
 	replayed, err := replayAll(options.Circuit, loaded, options.Replay)
 	if err != nil {
 		return nil, err
+	}
+	inputsAfter, err := replayInputRefs(options.Replay)
+	if err != nil {
+		return nil, err
+	}
+	if !slices.Equal(inputsBefore, inputsAfter) {
+		return nil, errors.New("replay inputs changed during preliminary key reconstruction")
 	}
 	stagingDir, err := createRecoveryStagingDir(options.OutDir)
 	if err != nil {
@@ -574,6 +642,7 @@ func PrepareFinalization(options PrepareFinalizationOptions) (*PrepareFinalizati
 		Circuit:             loaded.definition.Circuit,
 		Phase1Chain:         loaded.phase1ChainRef,
 		Phase2Chain:         loaded.phase2ChainRef,
+		ReplayInputs:        inputsAfter,
 		ConstraintSystem:    ccsRef,
 		ProvingKey:          pkRef,
 		VerifyingKey:        vkRef,
@@ -720,9 +789,44 @@ func VerifyPreliminaryFinalKeys(
 	return metadata, nil
 }
 
-// Finalize replays every accepted contribution, applies both committed
-// beacons, writes native gnark artifacts into a fresh directory, reloads them,
-// runs real repository-backed proof evidence, and coordinator-signs an
+func loadMatchingPreliminaryKeys(dir string, paths ReplayPaths, loaded loadedReplay) (replayedKeys, error) {
+	var empty replayedKeys
+	metadata, err := VerifyPreliminaryFinalKeys(dir, paths.CoordinatorPublicKeyHex)
+	if err != nil {
+		return empty, err
+	}
+	if metadata.Schema != PreliminaryMetadataSchema {
+		return empty, errors.New("legacy preliminary keys lack the replay binding required for key reuse")
+	}
+	inputs, err := replayInputRefs(paths)
+	if err != nil {
+		return empty, err
+	}
+	if metadata.CeremonyID != loaded.definition.CeremonyID ||
+		metadata.Definition != loaded.definitionRef ||
+		!equalCircuitBinding(metadata.Circuit, loaded.definition.Circuit) ||
+		metadata.Phase1Chain != loaded.phase1ChainRef ||
+		metadata.Phase2Chain != loaded.phase2ChainRef ||
+		metadata.CoordinatorID != loaded.definition.Coordinator.ID ||
+		metadata.CoordinatorKeyID != loaded.definition.Coordinator.KeyID ||
+		!slices.Equal(metadata.ReplayInputs, inputs) {
+		return empty, errors.New("preliminary keys do not match the exact authenticated replay inputs")
+	}
+	pk, err := prover.LoadPK(filepath.Join(dir, NativeProvingKeyFile))
+	if err != nil {
+		return empty, fmt.Errorf("load preliminary proving key: %w", err)
+	}
+	vk, err := prover.LoadVK(filepath.Join(dir, NativeVerifyingKeyFile))
+	if err != nil {
+		return empty, fmt.Errorf("load preliminary verifying key: %w", err)
+	}
+	return replayedKeys{pk: pk, vk: vk}, nil
+}
+
+// Finalize either replays the accepted transcript or consumes a signed
+// preliminary key tree bound to the exact replay inputs. It writes native
+// artifacts into a fresh directory, reloads them, checks public proof evidence,
+// and coordinator-signs an
 // unsigned release candidate. It never creates a release signing key or a
 // release manifest.
 func Finalize(options FinalizeOptions) (*FinalizeResult, error) {
@@ -741,6 +845,10 @@ func Finalize(options FinalizeOptions) (*FinalizeResult, error) {
 	if _, err := readRegularFile(options.PublicEvidencePath); err != nil {
 		return nil, fmt.Errorf("public finalization evidence preflight: %w", err)
 	}
+	inputsBefore, err := replayInputRefs(options.Replay)
+	if err != nil {
+		return nil, err
+	}
 	loaded, err := loadReplay(options.Replay)
 	if err != nil {
 		return nil, err
@@ -758,7 +866,12 @@ func Finalize(options FinalizeOptions) (*FinalizeResult, error) {
 	if err := requireIdentityKey(loaded.definition.Coordinator, publicKey); err != nil {
 		return nil, fmt.Errorf("coordinator signing key: %w", err)
 	}
-	replayed, err := replayAll(options.Circuit, loaded, options.Replay)
+	var replayed replayedKeys
+	if options.PreliminaryKeysDir == "" {
+		replayed, err = replayAll(options.Circuit, loaded, options.Replay)
+	} else {
+		replayed, err = loadMatchingPreliminaryKeys(options.PreliminaryKeysDir, options.Replay, loaded)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -976,6 +1089,13 @@ func Finalize(options FinalizeOptions) (*FinalizeResult, error) {
 	}
 	if err := syncDirectory(stagingDir); err != nil {
 		return nil, err
+	}
+	inputsAfter, err := replayInputRefs(options.Replay)
+	if err != nil {
+		return nil, err
+	}
+	if !slices.Equal(inputsBefore, inputsAfter) {
+		return nil, errors.New("replay inputs changed during candidate finalization")
 	}
 	if err := publishReleaseDirectory(stagingDir, options.OutDir); err != nil {
 		return nil, fmt.Errorf("atomically publish finalized candidate directory: %w", err)

@@ -710,6 +710,7 @@ PK/VK tree. It is not a candidate and cannot be audited or released.
   mpc-ceremony finalize complete --ceremony FILE --ceremony-signature FILE \
     --coordinator-public-key-file KEY [REPLAY EVIDENCE FLAGS] \
     --coordinator-signing-key KEY --public-evidence FILE \
+    [--preliminary-keys-dir DIR] \
     --finalized-at RFC3339_UTC --out-dir FRESH_DIR
 ` + replayFlagsHelp + `
 

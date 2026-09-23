@@ -1047,6 +1047,7 @@ func run(outputRoot, operationalEvidenceHelper string) error {
 		OutDir:                candidateDir,
 		CoordinatorSigningKey: coordinatorKeyPath,
 		PublicEvidencePath:    publicEvidencePath,
+		PreliminaryKeysDir:    preliminaryDir,
 		FinalizedAt:           mustUTC("2023-08-23T15:11:35Z"),
 	}); err != nil {
 		return fmt.Errorf("complete finalization: %w", err)
