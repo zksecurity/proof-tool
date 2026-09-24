@@ -113,6 +113,30 @@ func runCheckpointV4Final(output, root string, trust m.TrustPaths, circuit *m.Co
 	if err = commit(); err != nil {
 		return err
 	}
+	if d.Mode == m.ModeProduction {
+		headr, err := ref(fmt.Sprintf("checkpoints/%04d.json", c.Sequence))
+		if err != nil {
+			return err
+		}
+		heads, err := ref(fmt.Sprintf("checkpoints/%04d.sig", c.Sequence))
+		if err != nil {
+			return err
+		}
+		committed := m.SignedArtifactRefs{Record: headr, Signature: heads}
+		chain, chainRefs, err = addSecondProductionContribution(output, root, trust, circuit, d, m.Phase2, c, &committed, coordinatorPath, next, commit, writePair, ref)
+		if err != nil {
+			return fmt.Errorf("second Phase 2 contribution: %w", err)
+		}
+		last = chain.Records[1]
+		head, err = chain.HeadRecordID()
+		if err != nil {
+			return err
+		}
+		payload, err = chain.HeadPayload()
+		if err != nil {
+			return err
+		}
+	}
 	if d.AssurancePolicy.MirrorsPerAcceptedHead > 0 {
 		key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0xb1}, 32))
 		identity, err := m.NewIdentity("mirror-01", "Fixture mirror", "mirror-key", key.Public().(ed25519.PublicKey))
@@ -144,7 +168,7 @@ func runCheckpointV4Final(output, root string, trust m.TrustPaths, circuit *m.Co
 	if err != nil {
 		return err
 	}
-	closure, err := m.NewCloseRecord(m.CloseRecord{CeremonyID: d.CeremonyID, Phase: m.Phase2, PhaseID: chain.PhaseID, FinalIndex: 1, FinalPayload: payload, ChainHeadID: head, AcceptedParticipants: participants, BeaconProvider: d.BeaconPolicy.Provider, BeaconNetwork: d.BeaconPolicy.Network, BeaconRound: 43, BeaconNotBefore: roundTime.Format(time.RFC3339Nano), ClosedAt: "2023-08-23T15:11:30.7Z", CoordinatorID: d.Coordinator.ID, CoordinatorKeyID: d.Coordinator.KeyID})
+	closure, err := m.NewCloseRecord(m.CloseRecord{CeremonyID: d.CeremonyID, Phase: m.Phase2, PhaseID: chain.PhaseID, FinalIndex: uint8(len(chain.Records)), FinalPayload: payload, ChainHeadID: head, AcceptedParticipants: participants, BeaconProvider: d.BeaconPolicy.Provider, BeaconNetwork: d.BeaconPolicy.Network, BeaconRound: 43, BeaconNotBefore: roundTime.Format(time.RFC3339Nano), ClosedAt: "2023-08-23T15:11:30.7Z", CoordinatorID: d.Coordinator.ID, CoordinatorKeyID: d.Coordinator.KeyID})
 	if err != nil {
 		return err
 	}
@@ -406,7 +430,7 @@ func runCheckpointV4Final(output, root string, trust m.TrustPaths, circuit *m.Co
 	if err != nil {
 		return err
 	}
-	for _, owner := range []struct {
+	owners := []struct {
 		identity m.Identity
 		role     m.EnrollmentRole
 		index    uint16
@@ -414,8 +438,16 @@ func runCheckpointV4Final(output, root string, trust m.TrustPaths, circuit *m.Co
 	}{
 		{d.Coordinator, m.EnrollmentCoordinator, 1, 0x81},
 		{d.ReleaseSigner, m.EnrollmentReleaseSigner, 1, 0x82},
-		{d.Roster[1].Identity, m.EnrollmentParticipant, 2, 0x92},
-	} {
+	}
+	if d.Mode != m.ModeProduction {
+		owners = append(owners, struct {
+			identity m.Identity
+			role     m.EnrollmentRole
+			index    uint16
+			seed     byte
+		}{d.Roster[1].Identity, m.EnrollmentParticipant, 2, 0x92})
+	}
+	for _, owner := range owners {
 		head, err := headRefs()
 		if err != nil {
 			return err

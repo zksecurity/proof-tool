@@ -276,6 +276,21 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 	if rejectErr == nil {
 		return fmt.Errorf("corrupted accepted contribution passed checkpoint preparation")
 	}
+	if d.Mode == m.ModeProduction {
+		chain, chainRefs, err = addSecondProductionContribution(output, root, trust, circuit, d, m.Phase1, &c, &committed, coordinatorPath, next, commit, writePair, ref)
+		if err != nil {
+			return fmt.Errorf("second Phase 1 contribution: %w", err)
+		}
+		last = chain.Records[1]
+		head, err = chain.HeadRecordID()
+		if err != nil {
+			return err
+		}
+		payload, err = chain.HeadPayload()
+		if err != nil {
+			return err
+		}
+	}
 	beforeMirrors, beforeMirrorsRefs := c, committed
 	if d.AssurancePolicy.MirrorsPerAcceptedHead > 0 {
 		mirrorKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0xb1}, 32))
@@ -337,7 +352,7 @@ func runCheckpointV4Turn(output, root string, trust m.TrustPaths, circuit *m.Com
 	if err != nil {
 		return err
 	}
-	closure, err := m.NewCloseRecord(m.CloseRecord{CeremonyID: d.CeremonyID, Phase: m.Phase1, PhaseID: chain.PhaseID, FinalIndex: 1, FinalPayload: payload, ChainHeadID: head, AcceptedParticipants: participants, BeaconProvider: d.BeaconPolicy.Provider, BeaconNetwork: d.BeaconPolicy.Network, BeaconRound: 42, BeaconNotBefore: roundTime.Format(time.RFC3339Nano), ClosedAt: "2023-08-23T15:06:00Z", CoordinatorID: d.Coordinator.ID, CoordinatorKeyID: d.Coordinator.KeyID})
+	closure, err := m.NewCloseRecord(m.CloseRecord{CeremonyID: d.CeremonyID, Phase: m.Phase1, PhaseID: chain.PhaseID, FinalIndex: uint8(len(chain.Records)), FinalPayload: payload, ChainHeadID: head, AcceptedParticipants: participants, BeaconProvider: d.BeaconPolicy.Provider, BeaconNetwork: d.BeaconPolicy.Network, BeaconRound: 42, BeaconNotBefore: roundTime.Format(time.RFC3339Nano), ClosedAt: "2023-08-23T15:06:00Z", CoordinatorID: d.Coordinator.ID, CoordinatorKeyID: d.Coordinator.KeyID})
 	if err != nil {
 		return err
 	}

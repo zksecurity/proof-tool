@@ -81,9 +81,14 @@ func runFinalReleaseCheckpointV4(root, packageDir string, trust m.TrustPaths, d 
 		return err
 	}
 	head := m.SignedArtifactRefs{Record: m.ArtifactRef{Name: name + ".json", Digest: m.NewDigest(raw)}, Signature: m.ArtifactRef{Name: name + ".sig", Digest: m.NewDigest(sig)}}
-	_, inventory, err := m.VerifyFinalReleaseCheckpointV4(trust, root, head)
+	verifiedRelease, inventory, err := m.VerifyFinalReleaseCheckpointV4(trust, root, head)
 	if err != nil {
 		return fmt.Errorf("verify final release checkpoint: %w", err)
+	}
+	if d.Mode == m.ModeProduction {
+		if err := runProductionGOFixture(root, trust, d, head, verifiedRelease); err != nil {
+			return fmt.Errorf("verify complete production GO: %w", err)
+		}
 	}
 	if len(inventory.Artifacts()) <= 5 {
 		return fmt.Errorf("release inventory confused bootstrap with whole package")
